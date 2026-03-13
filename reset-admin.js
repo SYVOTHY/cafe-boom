@@ -2,7 +2,7 @@ import pg from 'pg';
 import crypto from 'crypto';
 
 const { Client } = pg;
-
+await client.query("UPDATE users SET active = true WHERE username = 'admin'");
 const client = new Client({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
