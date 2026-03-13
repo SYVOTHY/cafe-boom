@@ -628,26 +628,3 @@ initDB()
     console.error("❌ DB Init failed:", err.message);
     process.exit(1);
   });
-
-// កែសម្រួលផ្នែក Login ក្នុង server.js ឱ្យទៅជា៖
-app.post('/api/login', async (req, res) => {
-    const { username, password } = req.body;
-    try {
-        // បង្ខំឱ្យអានតែពី PostgreSQL ប៉ុណ្ណោះ
-        const { rows } = await pool.query("SELECT * FROM users WHERE username = $1", [username]);
-        
-        if (rows.length === 0) {
-            return res.status(401).json({ error: "Invalid username or password" });
-        }
-
-        const user = rows[0];
-        // ប្រើមុខងារ verifyPassword របស់អ្នកសម្រាប់ Hash/PBKDF2
-        if (!verifyPassword(password, user.password)) {
-            return res.status(401).json({ error: "Invalid username or password" });
-        }
-
-        res.json({ success: true, user });
-    } catch (err) {
-        res.status(500).json({ error: "Database error" });
-    }
-});
