@@ -5,7 +5,7 @@ const { Client } = pg;
 
 const client = new Client({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false } // បន្ថែម SSL សម្រាប់ Railway
+  ssl: { rejectUnauthorized: false }
 });
 
 function hashPassword(password) {
@@ -14,12 +14,12 @@ function hashPassword(password) {
   return "pbkdf2:" + salt + ":" + hash;
 }
 
-async function resetCredentials() {
+async function resetAdmin() {
   try {
     await client.connect();
     console.log("✅ Connected to Database");
 
-    // បង្កើត Table ប្រសិនបើវាមិនទាន់មាន
+    // ១. បង្កើត Table users ជាមួយនឹង column 'permissions'
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         user_id SERIAL PRIMARY KEY,
@@ -28,37 +28,40 @@ async function resetCredentials() {
         role VARCHAR(20),
         name VARCHAR(100),
         active BOOLEAN DEFAULT true,
-        branch_id VARCHAR(50)
+        branch_id VARCHAR(50),
+        permissions JSONB DEFAULT '{}'
       )
     `);
     console.log("✅ Table 'users' verified/created.");
 
-    // លុប User ចាស់ចេញសិន (ការពារការជាន់គ្នា)
-    await client.query("DELETE FROM users WHERE username IN ('admin', 'staff1')");
+    // ២. រៀបចំ Permissions ពេញលេញ (Full Access)
+    const fullPermissions = {
+      can_edit_menu: true,
+      can_view_report: true,
+      can_manage_users: true,
+      can_delete_orders: true,
+      can_change_settings: true
+    };
 
-    // បញ្ចូល User ថ្មី
-    const adminPass = hashPassword("admin123");
-    const staffPass = hashPassword("staff123");
+    // ៣. លុប Admin ចាស់ចេញ
+    await client.query("DELETE FROM users WHERE username = 'admin'");
 
+    // ៤. បញ្ចូល Admin ថ្មីជាមួយ Full Permission
+    const hashedAdmin = hashPassword("admin123");
     await client.query(
-      "INSERT INTO users (username, password, role, name, active, branch_id) VALUES ($1, $2, $3, $4, $5, $6)",
-      ["admin", adminPass, "admin", "Administrator", true, "all"]
+      `INSERT INTO users (username, password, role, name, active, branch_id, permissions) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      ["admin", hashedAdmin, "admin", "Administrator", true, "all", JSON.stringify(fullPermissions)]
     );
 
-    await client.query(
-      "INSERT INTO users (username, password, role, name, active, branch_id) VALUES ($1, $2, $3, $4, $5, $6)",
-      ["staff1", staffPass, "staff", "បុគ្គលិក ១", true, "branch_1"]
-    );
-
-    console.log("✅ Reset ជោគជ័យ!");
-    console.log("   Admin: admin / admin123");
-    console.log("   Staff: staff1 / staff123");
+    console.log("✅ Admin user created with FULL permissions!");
+    console.log("   Username: admin | Password: admin123");
 
   } catch (err) {
-    console.error("❌ កំហុស:", err.message);
+    console.error("❌ Error resetting admin:", err.message);
   } finally {
     await client.end();
   }
 }
 
-resetCredentials();
+resetAdmin();
