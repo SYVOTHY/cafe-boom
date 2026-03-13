@@ -1,0 +1,104 @@
+{
+  "branch_id": "branch_3",
+  "orders": [],
+  "logs": [],
+  "tables": [
+    {
+      "table_id": 1,
+      "status": "free"
+    },
+    {
+      "table_id": 2,
+      "status": "free"
+    },
+    {
+      "table_id": 3,
+      "status": "free"
+    },
+    {
+      "table_id": 4,
+      "status": "free"
+    },
+    {
+      "table_id": 5,
+      "status": "free"
+    },
+    {
+      "table_id": 6,
+      "status": "free"
+    },
+    {
+      "table_id": 7,
+      "status": "free"
+    },
+    {
+      "table_id": 8,
+      "status": "free"
+    }
+  ],
+  "ingredients": [
+    {
+      "ingredient_id": 1,
+      "ingredient_name": "គ្រាប់កាហ្វេ",
+      "current_stock": 2000,
+      "unit": "g",
+      "threshold": 300
+    },
+    {
+      "ingredient_id": 2,
+      "ingredient_name": "ទឹកដោះគោខាប់",
+      "current_stock": 1500,
+      "unit": "ml",
+      "threshold": 400
+    },
+    {
+      "ingredient_id": 3,
+      "ingredient_name": "ទឹកដោះគោស្រស់",
+      "current_stock": 4000,
+      "unit": "ml",
+      "threshold": 800
+    },
+    {
+      "ingredient_id": 4,
+      "ingredient_name": "ម្សៅកូកូអា",
+      "current_stock": 500,
+      "unit": "g",
+      "threshold": 100
+    },
+    {
+      "ingredient_id": 5,
+      "ingredient_name": "ក្រែម Whip",
+      "current_stock": 300,
+      "unit": "ml",
+      "threshold": 80
+    },
+    {
+      "ingredient_id": 6,
+      "ingredient_name": "ស្ករ",
+      "current_stock": 2000,
+      "unit": "g",
+      "threshold": 300
+    },
+    {
+      "ingredient_id": 7,
+      "ingredient_name": "តែបៃតង",
+      "current_stock": 400,
+      "unit": "g",
+      "threshold": 80
+    },
+    {
+      "ingredient_id": 8,
+      "ingredient_name": "ទឹក",
+      "current_stock": 20000,
+      "unit": "ml",
+      "threshold": 2000
+    },
+    {
+      "ingredient_id": 9,
+      "ingredient_name": "ក្រូចឃ្មុំ",
+      "current_stock": 20,
+      "unit": "pcs",
+      "threshold": 5
+    }
+  ]
+}
