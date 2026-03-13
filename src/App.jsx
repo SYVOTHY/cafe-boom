@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRealtimeDB } from "./useRealtimeDB.js";
 
 // ── Config from public/config.js ─────────────────────────────────
-const CLOUD_URL   = window.CAFE_SERVER      || "http://localhost:3001";
+const CLOUD_URL   = window.CAFE_SERVER      || "https://cafe-bloom-backend.up.railway.app";
 const BRANCH_ID   = window.CAFE_BRANCH      || "branch_1";
 const BRANCH_NAME = window.CAFE_BRANCH_NAME || "Cafe Bloom";
 
