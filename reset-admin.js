@@ -3,7 +3,6 @@ import crypto from 'crypto';
 
 const { Client } = pg;
 
-// តភ្ជាប់ទៅ Database តាមរយៈ DATABASE_URL ដែលយើងបានកំណត់
 const client = new Client({
   connectionString: process.env.DATABASE_URL,
 });
@@ -19,7 +18,10 @@ async function resetAdmin() {
     await client.connect();
     console.log("✅ Connected to Database");
 
-    // ១. បង្កើត Table users ប្រសិនបើវាមិនទាន់មាន
+    // កំណត់ Schema ឱ្យច្បាស់លាស់
+    await client.query("SET search_path TO public");
+
+    // ១. បង្កើត Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         user_id SERIAL PRIMARY KEY,
@@ -33,10 +35,10 @@ async function resetAdmin() {
     `);
     console.log("✅ Table 'users' verified/created.");
 
-    // ២. លុប User ចាស់ចេញសិន ដើម្បីកុំឱ្យជាន់គ្នា (Clean start)
-    await client.query("DELETE FROM users WHERE username IN ('admin', 'staff1')");
+    // ២. លុប User ចាស់ (ប្រើ IF EXISTS ដើម្បីការពារកំហុស)
+    await client.query("DELETE FROM users WHERE username = 'admin' OR username = 'staff1'");
     
-    // ៣. បញ្ចូល Admin និង Staff ថ្មី
+    // ៣. បញ្ចូលទិន្នន័យថ្មី
     const hashedAdmin = hashPassword("admin123");
     const hashedStaff = hashPassword("staff123");
 
@@ -50,9 +52,9 @@ async function resetAdmin() {
       ["staff1", hashedStaff, "staff", "បុគ្គលិក ១", true, "branch_1"]
     );
 
-    console.log("✅ Admin & Staff passwords reset successfully in PostgreSQL!");
+    console.log("✅ Admin & Staff passwords reset successfully!");
   } catch (err) {
-    console.error("❌ Error resetting passwords:", err);
+    console.error("❌ Error:", err);
   } finally {
     await client.end();
   }
