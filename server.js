@@ -609,29 +609,6 @@ async function handler(req, res) {
 
   send(res, 404, { error:"Not found" });
 }
-// បន្ថែមនៅកន្លែងដែលអ្នកធ្វើការ Check username/password
-app.post('/api/login', async (req, res) => {
-    const { username, password } = req.body;
-    console.log(`[LOGIN ATTEMPT] Username: "${username}"`);
-    
-    // ស្វែងរក User ក្នុង DB
-    const user = await findUserInDb(username); 
-    
-    if (!user) {
-        console.log(`[LOGIN FAILED] User "${username}" not found.`);
-        return res.status(401).json({ message: "Invalid username or password" });
-    }
-    
-    // ពិនិត្យ Password
-    const isMatch = await verifyPassword(password, user.password);
-    if (!isMatch) {
-        console.log(`[LOGIN FAILED] Password mismatch for "${username}"`);
-        return res.status(401).json({ message: "Invalid username or password" });
-    }
-
-    console.log(`[LOGIN SUCCESS] User "${username}" logged in.`);
-    res.json({ success: true, user });
-});
 
 // ═══════════════════════════════════════════════════════════════════
 //  START
