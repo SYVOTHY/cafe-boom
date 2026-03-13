@@ -1,12 +1,12 @@
-// reset-admin.js — Run once to reset passwords
-import fs from "fs";
-import path from "path";
-import crypto from "crypto";
-import { fileURLToPath } from "url";
+import pg from 'pg';
+import crypto from 'crypto';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR   = path.join(__dirname, "data");
-const SHARED_FILE = path.join(DATA_DIR, "shared.json");
+const { Client } = pg;
+
+// តភ្ជាប់ទៅ Database តាមរយៈ DATABASE_URL របស់ Railway
+const client = new Client({
+  connectionString: process.env.DATABASE_URL,
+});
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -14,38 +14,33 @@ function hashPassword(password) {
   return "pbkdf2:" + salt + ":" + hash;
 }
 
-// Ensure data dir exists
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+async function resetAdmin() {
+  try {
+    await client.connect();
+    console.log("✅ Connected to Database");
 
-// Load or create shared.json
-let shared = {};
-if (fs.existsSync(SHARED_FILE)) {
-  shared = JSON.parse(fs.readFileSync(SHARED_FILE, "utf8"));
+    const hashedAdmin = hashPassword("admin123");
+    const hashedStaff = hashPassword("staff123");
+
+    // លុប User ចាស់ និងបញ្ចូល User ថ្មី
+    await client.query("DELETE FROM users WHERE username IN ('admin', 'staff1')");
+    
+    await client.query(
+      "INSERT INTO users (username, password, role, name, active) VALUES ($1, $2, $3, $4, $5)",
+      ["admin", hashedAdmin, "admin", "Administrator", true]
+    );
+
+    await client.query(
+      "INSERT INTO users (username, password, role, name, active) VALUES ($1, $2, $3, $4, $5)",
+      ["staff1", hashedStaff, "staff", "បុគ្គលិក ១", true]
+    );
+
+    console.log("✅ Admin & Staff passwords reset successfully in PostgreSQL!");
+  } catch (err) {
+    console.error("❌ Error resetting passwords:", err);
+  } finally {
+    await client.end();
+  }
 }
 
-// Reset/create default users with fresh hashed passwords
-shared.users = [
-  {
-    user_id: 1,
-    username: "admin",
-    password: hashPassword("admin123"),
-    role: "admin",
-    name: "Administrator",
-    active: true,
-    branch_id: "all"
-  },
-  {
-    user_id: 2,
-    username: "staff1",
-    password: hashPassword("staff123"),
-    role: "staff",
-    name: "បុគ្គលិក ១",
-    active: true,
-    branch_id: "branch_1"
-  }
-];
-
-fs.writeFileSync(SHARED_FILE, JSON.stringify(shared, null, 2), "utf8");
-console.log("✅ Passwords reset successfully!");
-console.log("   admin  → admin123");
-console.log("   staff1 → staff123");
+resetAdmin();
