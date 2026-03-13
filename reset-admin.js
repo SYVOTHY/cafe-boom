@@ -19,7 +19,7 @@ async function resetAdmin() {
     await client.connect();
     console.log("✅ Connected to Database");
 
-    // ១. បង្កើត Table users ជាមួយនឹង column 'permissions'
+    // ១. បង្កើត Table users ឱ្យប្រាកដថាមាន
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         user_id SERIAL PRIMARY KEY,
@@ -34,7 +34,7 @@ async function resetAdmin() {
     `);
     console.log("✅ Table 'users' verified/created.");
 
-    // ២. រៀបចំ Permissions ពេញលេញ (Full Access)
+    // ២. បញ្ចូល Admin ជាមួយ Full Permissions
     const fullPermissions = {
       can_edit_menu: true,
       can_view_report: true,
@@ -43,22 +43,22 @@ async function resetAdmin() {
       can_change_settings: true
     };
 
-    // ៣. លុប Admin ចាស់ចេញ
+    const hashedAdmin = hashPassword("admin123");
+
+    // លុប Admin ចាស់ចេញសិន (ប្រសិនបើមាន)
     await client.query("DELETE FROM users WHERE username = 'admin'");
 
-    // ៤. បញ្ចូល Admin ថ្មីជាមួយ Full Permission
-    const hashedAdmin = hashPassword("admin123");
     await client.query(
       `INSERT INTO users (username, password, role, name, active, branch_id, permissions) 
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       ["admin", hashedAdmin, "admin", "Administrator", true, "all", JSON.stringify(fullPermissions)]
     );
 
-    console.log("✅ Admin user created with FULL permissions!");
+    console.log("✅ Admin user reset successfully!");
     console.log("   Username: admin | Password: admin123");
 
   } catch (err) {
-    console.error("❌ Error resetting admin:", err.message);
+    console.error("❌ Error:", err.message);
   } finally {
     await client.end();
   }
