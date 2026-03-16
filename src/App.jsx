@@ -15,14 +15,52 @@ const BRANCH_NAME = window.CAFE_BRANCH_NAME || "Cafe Bloom";
 const TG_TOKEN   = "8503740689:AAEN1Hk9HEbMNWjsArqjzZb_WgTHo55-ZkU";
 const TG_CHAT_ID = "-5197630379";
 
-async function sendTelegram(msg) {
+function getBranchName() {
+  if (typeof window !== "undefined") {
+    if (window.CAFE_BRANCH_NAME) return window.CAFE_BRANCH_NAME;
+    if (window.CAFE_BRANCH)      return window.CAFE_BRANCH;
+  }
+  return "Cafe Bloom";
+}
+
+async function tgSend(text) {
   try {
-    await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+    const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TG_CHAT_ID, text: msg, parse_mode: "HTML" }),
+      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: "HTML" }),
     });
-  } catch {}
+    const result = await r.json().catch(() => ({}));
+    if (!r.ok) console.error("❌ Telegram:", result.description);
+    else       console.log("✅ Telegram OK");
+  } catch (e) { console.error("❌ Telegram:", e.message); }
+}
+
+async function sendTelegram(rec) {
+  const branch = getBranchName();
+  const method = rec.method === "cash" ? "💵 សាច់ប្រាក់"
+    : rec.method === "qr"   ? "📱 QR Code"
+    : "🏦 ធនាគារ";
+  const itemLines = (rec.items || [])
+    .map(i => `  • ${i.emoji || "☕"} ${i.product_name} ×${i.qty}  =  $${(i.price * i.qty).toFixed(2)}`)
+    .join("\n");
+  const text = [
+    `☕ <b>Cafe Bloom — ការទូទាត់ថ្មី!</b>`,
+    `🏪 <b>សាខា:</b> ${branch}`,
+    ``,
+    `🕐 <b>ម៉ោង:</b> ${rec.ts}`,
+    rec.table ? `🪑 <b>តុ:</b> ${rec.table}` : `🥡 Take Away`,
+    ``,
+    `📋 <b>មុខម្ហូប:</b>`,
+    itemLines,
+    ``,
+    `─────────────────`,
+    `💰 <b>សរុប:</b>  $${Number(rec.total).toFixed(2)}`,
+    `🏛 <b>VAT 10%:</b>  $${Number(rec.tax).toFixed(2)}`,
+    `✅ <b>សរុបរួម:</b>  <b>$${(Number(rec.total) + Number(rec.tax)).toFixed(2)}</b>`,
+    `💳 <b>វិធីទូទាត់:</b> ${method}`,
+  ].join("\n");
+  await tgSend(text);
 }
 
 // ── Default theme ─────────────────────────────────────────────────
