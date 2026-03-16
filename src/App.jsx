@@ -47,7 +47,62 @@ async function apiCall(path, opts = {}) {
   return r;
 }
 
+async function printReceipt(rec) {
+  try {
+    const res = await fetch(`${CLOUD_URL}/api/print`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ receipt: rec }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Print failed");
+    return { ok: true, via: data.via };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // ── Utilities ─────────────────────────────────────────────────────
+function runTransaction(ingredients, recipes, productId, qty) {
+  // Use Number() to ensure all values are numbers, not strings
+  const prodRecipes = recipes.filter(r => Number(r.product_id) === Number(productId));
+  const checks = [];
+  let failedOn = null;
+
+  for (const r of prodRecipes) {
+    const ing = ingredients.find(i => Number(i.ingredient_id) === Number(r.ingredient_id));
+    if (!ing) continue;
+    const need = Number(r.quantity_required) * Number(qty);
+    const ok = Number(ing.current_stock) >= need;
+    checks.push({ ing: { ...ing }, need, ok });
+    if (!ok && !failedOn) failedOn = ing.ingredient_name;
+  }
+
+  if (failedOn) return { success: false, reason: failedOn, checks };
+
+  // Deduct stock
+  const newIngredients = ingredients.map(ing => {
+    const r = prodRecipes.find(r => Number(r.ingredient_id) === Number(ing.ingredient_id));
+    if (!r) return ing;
+    return { ...ing, current_stock: Number(ing.current_stock) - Number(r.quantity_required) * Number(qty) };
+  });
+
+  return { success: true, checks, newIngredients };
+}
+
+const fmtN = n => Number(n).toFixed(1);
+// Format number with thousands separator: 1716.0 → "1,716.0"  or  "1,716"
+const fmtStock = (n, decimals = 1) => {
+  const num = Number(n);
+  if (isNaN(num)) return "0";
+  const parts = num.toFixed(decimals).split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  // Remove .0 for clean display
+  return decimals === 1 && parts[1] === "0" ? parts[0] : parts.join(".");
+};
+const nextId = a => Math.max(0, ...a.map(x => Object.values(x)[0])) + 1;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 const fmt  = (n) => "$" + Number(n || 0).toFixed(2);
 const now  = ()  => new Date().toISOString();
 const uid  = ()  => Date.now() + "_" + Math.random().toString(36).slice(2, 6);
@@ -260,9 +315,9 @@ export default function CafeBloom() {
 
   // ── Toast notification (used by POSPage) ─────────────────────────
   const [toast, setToast] = useState("");
-  const notify = useCallback((msg) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 2500);
+  const notify = useCallback((msg, type = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 2800);
   }, []);
 
   // ── Permission check ────────────────────────────────────────────
@@ -319,8 +374,8 @@ export default function CafeBloom() {
 
       {/* ── Toast ── */}
       {toast && (
-        <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)", background:"#1a3a1a", color:"#80ff80", borderRadius:10, padding:"10px 20px", fontSize:13, fontWeight:700, zIndex:999, boxShadow:"0 4px 20px rgba(0,0,0,.4)", whiteSpace:"nowrap" }}>
-          {toast}
+        <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)", background: toast.type==="error" ? "#3a1a1a" : "#1a3a1a", color: toast.type==="error" ? "#ff8080" : "#80ff80", borderRadius:10, padding:"10px 20px", fontSize:13, fontWeight:700, zIndex:999, boxShadow:"0 4px 20px rgba(0,0,0,.4)", whiteSpace:"nowrap" }}>
+          {toast.msg}
         </div>
       )}
       {/* ── TopBar ── */}
@@ -1645,6 +1700,310 @@ function Modal({ title, children, onClose }) {
     </div>
   );
 }
+
+function CustomerDisplay({ cart, cartTotal, cartTax, payMethod, selTable, onClose, onConfirmPay }) {
+  const [confirming, setConfirming] = useState(false);
+
+  const handlePay = async () => {
+    setConfirming(true);
+    await onConfirmPay();
+    setConfirming(false);
+  };
+
+  const METHOD_INFO = {
+    cash: { icon: "💵", label: "សាច់ប្រាក់", color: "#27AE60" },
+    qr: { icon: "📱", label: "QR Code", color: "#5BA3E0" },
+    bank: { icon: "🏦", label: "ធនាគារ", color: "#9B59B6" },
+  };
+  const m = METHOD_INFO[payMethod] || METHOD_INFO.cash;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 2000,
+      background: "#09080A",
+      display: "flex", flexDirection: "column",
+      fontFamily: "'Kantumruy Pro','Noto Sans Khmer',sans-serif",
+      color: "var(--text-main)"
+    }}>
+      {/* Header */}
+      <div style={{
+        background: "var(--bg-header)", borderBottom: "1px solid var(--border)",
+        padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10,
+            background: "linear-gradient(135deg,#B8732A,#E8A84B)",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20
+          }}>☕</div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 16, color: "#E8A84B" }}>Café Boom</div>
+            <div style={{ fontSize: 11, color: "#555" }}>វិក្កយបត្រ {selTable ? `· តុ ${selTable}` : ""}</div>
+          </div>
+        </div>
+        <button onClick={onClose} style={{
+          background: "var(--bg-card)", border: "1px solid var(--border)",
+          borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 12, color: "#888",
+          fontFamily: "inherit"
+        }}>✕ បិទ</button>
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "24px 20px" }}>
+
+        {/* Items */}
+        <div style={{ maxWidth: 560, margin: "0 auto" }}>
+          <div style={{ fontSize: 14, color: "#555", marginBottom: 16, fontWeight: 600 }}>
+            📋 តារាងបញ្ជាទិញ ({cart.reduce((s, i) => s + i.qty, 0)} មុខ)
+          </div>
+
+          <div style={{
+            background: "#120F13", borderRadius: 16, overflow: "hidden", marginBottom: 20,
+            border: "1px solid #1E1B1F"
+          }}>
+            {cart.map((item, idx) => (
+              <div key={item.key} style={{
+                display: "flex", alignItems: "center", gap: 14, padding: "14px 18px",
+                borderBottom: idx < cart.length - 1 ? "1px solid #1A181C" : "none"
+              }}>
+                {item.image_url
+                  ? <img src={item.image_url} alt="" style={{ width: 48, height: 48, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
+                  : <div style={{
+                    width: 48, height: 48, borderRadius: 10, background: "#1E1B20",
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0
+                  }}>{item.emoji}</div>
+                }
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 15 }}>{item.product_name}</div>
+                  <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>
+                    {item.opts.size} · ស្ករ {item.opts.sugar} · {item.opts.milk}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontSize: 13, color: "#888" }}>×{item.qty}</div>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: "#E8A84B" }}>{fmt(item.price * item.qty)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Totals */}
+          <div style={{
+            background: "#120F13", borderRadius: 16, padding: "18px 20px",
+            border: "1px solid #1E1B1F", marginBottom: 24
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#666", marginBottom: 8 }}>
+              <span>សរុប</span><span>{fmt(cartTotal)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#666", marginBottom: 14 }}>
+              <span>VAT 10%</span><span>{fmt(cartTax)}</span>
+            </div>
+            <div style={{ height: 1, background: "#1E1B1F", marginBottom: 14 }} />
+            <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 24 }}>
+              <span>សរុបរួម</span>
+              <span style={{ color: "#E8A84B" }}>{fmt(cartTotal + cartTax)}</span>
+            </div>
+          </div>
+
+          {/* Payment method badge */}
+          <div style={{
+            background: "#120F13", borderRadius: 16, padding: "16px 20px",
+            border: `1px solid ${m.color}44`, marginBottom: 24,
+            display: "flex", alignItems: "center", gap: 12
+          }}>
+            <div style={{ fontSize: 32 }}>{m.icon}</div>
+            <div>
+              <div style={{ fontSize: 12, color: "#555" }}>វិធីទូទាត់</div>
+              <div style={{ fontWeight: 700, fontSize: 18, color: m.color }}>{m.label}</div>
+            </div>
+          </div>
+
+          {/* Thank you */}
+          <div style={{ textAlign: "center", color: "#333", fontSize: 13, marginBottom: 24 }}>
+            សូមអរគុណដែលប្រើប្រាស់សេវាកម្ម Café Boom 🙏
+          </div>
+        </div>
+      </div>
+
+      {/* Footer - confirm button */}
+      <div style={{ background: "#120F10", borderTop: "1px solid #1F1C1E", padding: "16px 24px" }}>
+        <div style={{ maxWidth: 560, margin: "0 auto" }}>
+          <button onClick={handlePay} disabled={confirming} style={{
+            width: "100%", padding: "18px", borderRadius: 14, border: "none", cursor: confirming ? "not-allowed" : "pointer",
+            background: confirming ? "#2A2A2A" : "linear-gradient(135deg,#B8732A,#E8A84B)",
+            color: "#fff", fontFamily: "inherit", fontSize: 18, fontWeight: 700,
+            boxShadow: confirming ? "none" : "0 8px 28px rgba(184,115,42,.45)",
+            transition: "all .2s"
+          }}>
+            {confirming
+              ? "⏳ កំពុងដំណើរការ..."
+              : `${m.icon} បញ្ជាក់ការទូទាត់ — ${fmt(cartTotal + cartTax)}`
+            }
+          </button>
+          <div style={{ textAlign: "center", marginTop: 10, fontSize: 12, color: "#333" }}>
+            ចុចបញ្ជាក់ → ផ្ញើ Telegram ភ្លាមៗ 📲
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function ReceiptModal({ receipt, onClose }) {
+  const [printing, setPrinting] = useState(false);
+  const [printMsg, setPrintMsg] = useState("");   // success/error feedback
+  const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem("cb_autoprint") === "1");
+
+  // Auto-print on mount if enabled
+  useEffect(() => {
+    if (autoPrint) handlePrint();
+  }, []);
+
+  const handlePrint = async () => {
+    setPrinting(true);
+    setPrintMsg("");
+    const result = await printReceipt(receipt);
+    setPrinting(false);
+    if (result.ok) {
+      setPrintMsg(`✅ បោះពុម្ព​ជោគជ័យ (${result.via || "printer"})`);
+    } else {
+      // Fallback: browser print
+      setPrintMsg(`⚠️ ${result.error} — ប្រើ Browser Print`);
+      doBrowserPrint(receipt);
+    }
+  };
+
+  const toggleAutoPrint = () => {
+    const next = !autoPrint;
+    setAutoPrint(next);
+    localStorage.setItem("cb_autoprint", next ? "1" : "0");
+  };
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.75)", zIndex: 1000,
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 20
+    }}>
+      <div style={{
+        background: "#fff", color: "#111", borderRadius: 16, padding: 28, maxWidth: 340, width: "100%",
+        fontFamily: "'Courier New',monospace", boxShadow: "0 24px 64px rgba(0,0,0,.5)", animation: "slideUp .25s ease"
+      }}>
+
+        {/* Header */}
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <div style={{ fontSize: 22, fontWeight: 700 }}>☕ Café Bloom</div>
+          <div style={{ fontSize: 11, color: "#777" }}>ភ្នំពេញ · {receipt.ts}</div>
+          {receipt.table && <div style={{ fontSize: 11, color: "#777" }}>តុ {receipt.table}</div>}
+          <div style={{ borderTop: "1px dashed #ccc", marginTop: 10 }} />
+        </div>
+
+        {/* Items */}
+        {receipt.items.map(i => (
+          <div key={i.key} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
+            <div>
+              <div>{i.product_name} ×{i.qty}</div>
+              <div style={{ fontSize: 10, color: "#999" }}>{i.opts.size} · {i.opts.sugar} · {i.opts.milk}</div>
+            </div>
+            <div style={{ fontWeight: 600 }}>{fmt(i.price * i.qty)}</div>
+          </div>
+        ))}
+
+        {/* Totals */}
+        <div style={{ borderTop: "1px dashed #ccc", marginTop: 10, paddingTop: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#888" }}><span>សរុប</span><span>{fmt(receipt.total)}</span></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#888" }}><span>VAT 10%</span><span>{fmt(receipt.tax)}</span></div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, marginTop: 6 }}><span>សរុបរួម</span><span>{fmt(receipt.total + receipt.tax)}</span></div>
+          <div style={{ textAlign: "center", marginTop: 8, fontSize: 11, color: "#aaa" }}>
+            {receipt.method === "cash" ? "💵 សាច់ប្រាក់" : receipt.method === "qr" ? "📱 QR Code" : "🏦 ធនាគារ"}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ textAlign: "center", borderTop: "1px dashed #ccc", marginTop: 12, paddingTop: 12, fontSize: 12, color: "#aaa" }}>
+          អរគុណចំពោះការគាំទ្រ 🙏
+        </div>
+
+        {/* Print feedback */}
+        {printMsg && (
+          <div style={{
+            marginTop: 10, padding: "8px 12px", borderRadius: 8, fontSize: 11, textAlign: "center",
+            background: printMsg.startsWith("✅") ? "#f0fff4" : "#fff8f0",
+            color: printMsg.startsWith("✅") ? "#27AE60" : "#E67E22", fontFamily: "inherit"
+          }}>
+            {printMsg}
+          </div>
+        )}
+
+        {/* Auto-print toggle */}
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+          marginTop: 10, fontSize: 11, color: "#888", fontFamily: "inherit", cursor: "pointer"
+        }}
+          onClick={toggleAutoPrint}>
+          <div style={{
+            width: 32, height: 18, borderRadius: 9, background: autoPrint ? "#27AE60" : "#ddd",
+            position: "relative", transition: "background .2s", flexShrink: 0
+          }}>
+            <div style={{
+              position: "absolute", top: 2, left: autoPrint ? 14 : 2, width: 14, height: 14,
+              borderRadius: "50%", background: "#fff", transition: "left .2s", boxShadow: "0 1px 3px rgba(0,0,0,.3)"
+            }} />
+          </div>
+          <span>Print ដោយស្វ័យប្រវត្តិ</span>
+        </div>
+
+        {/* Action buttons */}
+        <button onClick={handlePrint} disabled={printing} style={{
+          width: "100%", marginTop: 12, padding: "11px", borderRadius: 10,
+          background: printing ? "#ccc" : "#B8732A", border: "none",
+          color: "#fff", fontWeight: 700, cursor: printing ? "not-allowed" : "pointer",
+          fontFamily: "inherit", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+        }}>
+          {printing ? "⏳ កំពុងបោះពុម្ព..." : "🖨️ Print វិក័យប័ត្រ"}
+        </button>
+
+        <button onClick={onClose} style={{
+          width: "100%", marginTop: 8, padding: "11px", borderRadius: 10,
+          background: "#111", border: "none", color: "#fff", fontWeight: 600, cursor: "pointer",
+          fontFamily: "inherit", fontSize: 13
+        }}>
+          បិទ
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+function doBrowserPrint(receipt) {
+  const win = window.open("", "_blank", "width=400,height=600");
+  const items = receipt.items.map(i => `
+    <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:12px">
+      <div>${i.product_name} ×${i.qty}<br/><small style="color:#999">${i.opts?.size || ""} · ${i.opts?.sugar || ""}</small></div>
+      <div>$${(i.price * i.qty).toFixed(2)}</div>
+    </div>`).join("");
+  const method = receipt.method === "cash" ? "💵 Cash" : receipt.method === "qr" ? "📱 QR" : "🏦 Bank";
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Receipt</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Courier New',monospace;padding:16px;width:80mm;font-size:12px}
+  .center{text-align:center}.bold{font-weight:700}.big{font-size:18px}.dash{border-top:1px dashed #999;margin:8px 0}
+  @media print{body{width:80mm}}</style></head><body>
+  <div class="center bold big">Cafe Bloom</div>
+  <div class="center" style="font-size:10px;color:#777;margin-top:2px">${receipt.ts}</div>
+  ${receipt.table ? `<div class="center" style="font-size:10px">Table: ${receipt.table}</div>` : ""}
+  <div class="dash"></div>${items}<div class="dash"></div>
+  <div style="display:flex;justify-content:space-between"><span>Subtotal</span><span>$${receipt.total.toFixed(2)}</span></div>
+  <div style="display:flex;justify-content:space-between;color:#888"><span>VAT 10%</span><span>$${receipt.tax.toFixed(2)}</span></div>
+  <div class="dash"></div>
+  <div style="display:flex;justify-content:space-between" class="bold"><span>TOTAL</span><span style="font-size:16px">$${(receipt.total + receipt.tax).toFixed(2)}</span></div>
+  <div class="center" style="margin-top:8px;font-size:11px">${method}</div>
+  <div class="dash"></div>
+  <div class="center" style="font-size:11px;color:#aaa">Thank you! / Arkun! 🙏</div>
+  <script>window.onload=()=>{window.print();}<\/script>
+  </body></html>`);
+  win.document.close();
+}
+
 
 function OptRow({ label, items, value, onChange, color, slider }) {
   if (slider) {
