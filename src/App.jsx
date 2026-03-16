@@ -2208,41 +2208,6 @@ function ActionBtns({ onEdit, onDel }) {
   );
 }
 
-function ConfirmDel({ name, onConfirm, onCancel }) {
-  return (
-    <Modal onClose={onCancel} maxW={320}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 36 }}>🗑️</div>
-        <div style={{ fontWeight: 700, fontSize: 15, margin: "12px 0 6px" }}>លុប "{name}"?</div>
-        <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-          <button onClick={onCancel} style={{ ...btnGhost, flex: 1 }}>បោះបង់</button>
-          <button onClick={onConfirm} style={{ ...btnRed, flex: 1 }}>លុប</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function Tag({ children, color = "#E8A84B" }) {
-  return (
-    <span style={{
-      padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-      background: `${color}22`, color
-    }}>
-      {children}
-    </span>
-  );
-}
-
-function ActionBtns({ onEdit, onDel }) {
-  return (
-    <div style={{ display: "flex", gap: 6 }}>
-      <button onClick={onEdit} style={btnSmall}>✏️</button>
-      <button onClick={onDel} style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33" }}>🗑️</button>
-    </div>
-  );
-}
-
 function F({ label, children }) {
   return (
     <div style={{ marginBottom: 13 }}>
