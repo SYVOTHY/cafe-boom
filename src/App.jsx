@@ -239,34 +239,17 @@ export default function CafeBloom() {
       <style>{CSS}</style>
 
       {/* ── TopBar ── */}
-      <div style={{ background:"var(--bg-header)", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", padding:"8px 16px", gap:12, position:"sticky", top:0, zIndex:100 }}>
-        <span style={{ fontWeight:700, fontSize:16, color:"var(--accent)" }}>☕ {BRANCH_NAME}</span>
-        <div style={{ flex:1 }} />
-
-        {/* Socket / Offline indicator */}
-        <div style={{ display:"flex", alignItems:"center", gap:5 }}>
-          <div style={{
-            width:7, height:7, borderRadius:"50%",
-            background: socketOnline ? "#27AE60" : offline ? "#E74C3C" : "#F39C12",
-            boxShadow:`0 0 6px ${socketOnline ? "#27AE60" : offline ? "#E74C3C" : "#F39C12"}`
-          }} />
-          <span style={{ fontSize:10, fontWeight:700, color: socketOnline ? "#27AE60" : offline ? "#E74C3C" : "#F39C12" }}>
-            {socketOnline ? "Live" : offline ? "Offline" : "Connecting"}
-          </span>
-        </div>
-
-        <span style={{ fontSize:12, color:"var(--text-dim)" }}>{currentUser.name} ({currentUser.role})</span>
-        <button className="btn-sm" onClick={doLogout}>ចេញ</button>
-      </div>
+      <TopBar socketOnline={socketOnline} offline={offline} currentUser={currentUser} doLogout={doLogout} />
 
       {/* ── Nav tabs ── */}
-      <div className="nav-tab-bar" style={{ display:"flex", gap:2, overflowX:"auto", background:"var(--bg-card)", borderBottom:"1px solid var(--border-col)", padding:"4px 8px" }}>
+      <div className="nav-tab-bar" style={{ display:"flex", gap:0, overflowX:"auto", background:"var(--bg-header)", borderBottom:"2px solid var(--border-col)", padding:"0 8px" }}>
         {NAV.map(n => (
           <button key={n.id}
-            className={"nav-btn" + (page === n.id ? " active" : "")}
+            className={"nav-tab" + (page === n.id ? " active" : "")}
             onClick={() => setPage(n.id)}
           >
-            {n.emoji} {n.label}
+            <span style={{ fontSize:15 }}>{n.emoji}</span>
+            <span className="nav-label">{n.label}</span>
           </button>
         ))}
       </div>
@@ -325,6 +308,49 @@ function LoginPage({ theme, loading, error, onLogin }) {
 // ═══════════════════════════════════════════════════════════════════
 //  POS PAGE
 // ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
+//  TOPBAR COMPONENT
+// ═══════════════════════════════════════════════════════════════════
+function TopBar({ socketOnline, offline, currentUser, doLogout }) {
+  const [time, setTime] = useState(() => new Date());
+  useEffect(() => {
+    const t = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const hhmm = time.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit" });
+  const statusColor = socketOnline ? "#2ECC71" : offline ? "#E74C3C" : "#F39C12";
+  const statusLabel = socketOnline ? "Online" : offline ? "Offline" : "Sync…";
+  return (
+    <div style={{ background:"var(--bg-header)", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", padding:"6px 16px", gap:12, position:"sticky", top:0, zIndex:100 }}>
+      {/* Logo */}
+      <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+        <div style={{ width:34, height:34, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>☕</div>
+        <div>
+          <div style={{ fontWeight:700, fontSize:14, color:"var(--accent)", lineHeight:1.1 }}>Café Boom</div>
+          <div style={{ fontSize:10, color:"var(--text-dim)", lineHeight:1 }}>POS</div>
+        </div>
+      </div>
+      <div style={{ flex:1 }} />
+      {/* Status dot */}
+      <div style={{ display:"flex", alignItems:"center", gap:5, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"4px 10px" }}>
+        <div style={{ width:7, height:7, borderRadius:"50%", background:statusColor, boxShadow:`0 0 6px ${statusColor}` }} />
+        <span style={{ fontSize:11, fontWeight:700, color:statusColor }}>{statusLabel}</span>
+      </div>
+      {/* Clock */}
+      <div style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", fontVariantNumeric:"tabular-nums", minWidth:68, textAlign:"center" }}>{hhmm}</div>
+      {/* User */}
+      <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"5px 12px" }}>
+        <div style={{ width:26, height:26, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:"#1a0f00" }}>
+          {currentUser.name?.[0]?.toUpperCase() || "U"}
+        </div>
+        <span style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
+        <span style={{ fontSize:10, color:"var(--text-dim)" }}>({currentUser.role})</span>
+      </div>
+      <button className="btn-sm" onClick={doLogout} style={{ borderRadius:20 }}>ចេញ</button>
+    </div>
+  );
+}
+
 function POSPage({ prods, cats, ings, recipes, options, orders, setOrders, logs, setLogs, setIngs, tables, theme, currentUser, branchId, branchName }) {
   const [cart,       setCart]       = useState([]);
   const [selCat,     setSelCat]     = useState(0);
@@ -447,23 +473,29 @@ function POSPage({ prods, cats, ings, recipes, options, orders, setOrders, logs,
         </div>
 
         {/* Product Grid */}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))", gap:10 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:12 }}>
           {filtered.map(p => (
             <div key={p.product_id} className="prod-card" onClick={()=>openCustomize(p)}>
-              {p.image_url
-                ? <img src={p.image_url} alt={p.product_name} style={{ width:70, height:70, objectFit:"cover", borderRadius:8 }} />
-                : <div style={{ fontSize:36 }}>{p.emoji || "☕"}</div>
-              }
-              <div style={{ fontSize:13, fontWeight:600, textAlign:"center", lineHeight:1.3 }}>{p.product_name}</div>
-              <div style={{ color:"var(--accent)", fontWeight:700 }}>{fmt(p.base_price)}</div>
+              <div className="prod-img-wrap">
+                {p.image_url
+                  ? <img src={p.image_url} alt={p.product_name} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:10 }} />
+                  : <span style={{ fontSize:44 }}>{p.emoji || "☕"}</span>
+                }
+              </div>
+              <div style={{ fontSize:13, fontWeight:600, textAlign:"center", lineHeight:1.3, marginTop:4 }}>{p.product_name}</div>
+              <div style={{ fontSize:12, color:"var(--text-dim)" }}>{cats.find(c=>c.category_id===p.category_id)?.category_name}</div>
+              <div style={{ color:"var(--accent)", fontWeight:700, fontSize:14 }}>{fmt(p.base_price)}</div>
             </div>
           ))}
         </div>
       </div>
 
       {/* ── Cart ── */}
-      <div className="pos-cart" style={{ background:"var(--bg-card)", borderRadius:12, border:"1px solid var(--border-col)", padding:16, display:"flex", flexDirection:"column", gap:10, height:"fit-content" }}>
-        <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)" }}>🛒  កញ្ចប់​ទិញ</div>
+      <div className="pos-cart" style={{ background:"var(--bg-card)", borderRadius:16, border:"1px solid var(--border-col)", padding:18, display:"flex", flexDirection:"column", gap:10, position:"sticky", top:70, maxHeight:"calc(100vh - 80px)", overflowY:"auto" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:2 }}>
+          <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)" }}>🛒 កញ្ចប់​ទិញ</div>
+          {cart.length > 0 && <span style={{ fontSize:11, background:"var(--accent)", color:"#000", borderRadius:10, padding:"2px 8px", fontWeight:700 }}>{cart.reduce((s,i)=>s+i.qty,0)} item</span>}
+        </div>
         <input className="inp" placeholder="លេខ​តុ..." value={tableNum} onChange={e=>setTableNum(e.target.value)} />
 
         {!cart.length && <div style={{ color:"var(--text-dim)", textAlign:"center", padding:24, fontSize:13 }}>មិន​ទាន់​មាន​ទំនិញ</div>}
@@ -1502,41 +1534,51 @@ const CSS = `
 
   select.inp { cursor: pointer; }
 
+  /* ── Nav tabs (new style) ── */
+  .nav-tab {
+    display: flex; align-items: center; gap: 6px;
+    background: transparent; color: var(--text-dim);
+    border: none; border-bottom: 3px solid transparent;
+    padding: 10px 16px; cursor: pointer; font-size: 13px;
+    white-space: nowrap; transition: all .18s;
+    font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
+  }
+  .nav-tab:hover { color: var(--text-main); border-bottom-color: rgba(232,168,75,.4); }
+  .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
+
+  /* ── Product image wrapper ── */
+  .prod-img-wrap {
+    width: 100%; aspect-ratio: 1 / 1;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,.04); border-radius: 10px;
+    overflow: hidden; margin-bottom: 2px;
+  }
+
   /* ── Responsive ── */
   .pos-layout {
     display: grid;
-    grid-template-columns: 1fr 320px;
+    grid-template-columns: 1fr 300px;
     gap: 16px;
     max-width: 1400px;
+    align-items: start;
   }
   @media (max-width: 900px) {
-    .pos-layout {
-      grid-template-columns: 1fr;
-    }
+    .pos-layout { grid-template-columns: 1fr; }
     .pos-cart {
       position: fixed !important;
-      bottom: 0; left: 0; right: 0;
-      z-index: 200;
+      bottom: 0; left: 0; right: 0; z-index: 200;
       border-radius: 20px 20px 0 0 !important;
-      max-height: 50vh;
-      overflow-y: auto;
+      max-height: 55vh; overflow-y: auto;
+      top: auto !important;
     }
-    .pos-cart-collapsed {
-      max-height: 60px;
-      overflow: hidden;
-    }
-    .page-pad { padding: 8px !important; }
+    .page-pad { padding: 8px 8px 200px !important; }
   }
-  @media (max-width: 600px) {
-    .nav-tab-bar { gap: 0 !important; }
-    .nav-btn { padding: 5px 8px !important; font-size: 11px !important; }
-    .nav-btn .nav-label { display: none; }
-    .nav-btn .nav-emoji { display: inline !important; }
-    .topbar-name { display: none; }
-    .topbar-role { display: none; }
+  @media (max-width: 640px) {
+    .nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
+    .nav-label { display: none; }
   }
   @media (max-width: 480px) {
-    .prod-card { padding: 10px 6px !important; }
+    .prod-card { padding: 8px !important; }
   }
   @media print {
     .no-print { display: none !important; }
