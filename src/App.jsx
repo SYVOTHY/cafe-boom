@@ -163,15 +163,9 @@ const PERM_LABELS = {
 };
 
 const DEFAULT_PERMS_TPL = {
-  pos: false,
-  tables: false,
-  menu: false,
-  inventory: false,
-  orders: false,
-  report: false,
-  finance: false,
-  users: false,
-  theme: false,
+  pos: false, tables: false, menu: false,
+  inventory: false, orders: false, report: false,
+  finance: false, users: false, theme: false,
 };
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
@@ -500,8 +494,8 @@ function LoginPage({ theme, loading, error, onLogin }) {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const t = theme;
-  const shopName = window.__SHOP_NAME__ || localStorage.getItem("cb_shop_name") || "Café Boom";
-  const shopLogo = window.__SHOP_LOGO__ || localStorage.getItem("cb_shop_logo") || "";
+  const shopName = localStorage.getItem("cb_shop_name") || "Café Boom";
+  const shopLogo = localStorage.getItem("cb_shop_logo") || "";
   return (
     <div style={{ minHeight:"100vh", background:t.bgMain, display:"flex", alignItems:"center", justifyContent:"center" }}>
       <style>{CSS}</style>
@@ -531,6 +525,25 @@ function LoginPage({ theme, loading, error, onLogin }) {
 //  TOPBAR COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 function TopBar({ socketOnline, offline, currentUser, doLogout }) {
+  const [shopName, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
+  const [shopLogo, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
+
+  // Listen for storage changes when ThemePage saves
+  useEffect(() => {
+    function onStorage(e) {
+      if (e.key === "cb_shop_name") setShopNameState(e.newValue || "Café Boom");
+      if (e.key === "cb_shop_logo") setShopLogoState(e.newValue || "");
+    }
+    window.addEventListener("storage", onStorage);
+    // Also poll window variables set by ThemePage (same-tab updates)
+    const poll = setInterval(() => {
+      if (window.__SHOP_NAME__) { setShopNameState(window.__SHOP_NAME__); window.__SHOP_NAME__ = null; }
+      if (window.__SHOP_LOGO__ !== undefined && window.__SHOP_LOGO__ !== null) {
+        setShopLogoState(window.__SHOP_LOGO__); window.__SHOP_LOGO__ = undefined;
+      }
+    }, 500);
+    return () => { window.removeEventListener("storage", onStorage); clearInterval(poll); };
+  }, []);
   const [time, setTime] = useState(() => new Date());
   useEffect(() => {
     const t = setInterval(() => setTime(new Date()), 1000);
@@ -543,9 +556,12 @@ function TopBar({ socketOnline, offline, currentUser, doLogout }) {
     <div style={{ background:"var(--bg-header)", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", padding:"6px 16px", gap:12, position:"sticky", top:0, zIndex:100 }}>
       {/* Logo */}
       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-        <div style={{ width:34, height:34, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>☕</div>
+        {shopLogo
+          ? <img src={shopLogo} alt="logo" style={{ width:34, height:34, borderRadius:"50%", objectFit:"cover" }} />
+          : <div style={{ width:34, height:34, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>☕</div>
+        }
         <div>
-          <div style={{ fontWeight:700, fontSize:14, color:"var(--accent)", lineHeight:1.1 }}>Café Boom</div>
+          <div style={{ fontWeight:700, fontSize:14, color:"var(--accent)", lineHeight:1.1 }}>{shopName}</div>
           <div style={{ fontSize:10, color:"var(--text-dim)", lineHeight:1 }}>POS</div>
         </div>
       </div>
@@ -3274,7 +3290,6 @@ function ThemePage({ theme, setTheme, notify }) {
     // Update global so header reacts immediately
     window.__SHOP_NAME__ = shopName;
     window.__SHOP_LOGO__ = logoPreview;
-    window.__SHOP_LOGO__ = logoPreview;
     notify("✅ រក្សាទុក ឈ្មោះហាង + Logo រួចហើយ!");
     // Force re-render header by dispatching event
     window.dispatchEvent(new Event("shopBrandUpdate"));
@@ -3909,7 +3924,9 @@ function ActionBtns({ onEdit, onDel }) {
   );
 }
 
-function FieldWrapper({ label, children }) {
+function FieldWrapper({ label, children }
+const F = FieldWrapper; // alias for RecForm compatibility
+) {
   return (
     <div style={{ marginBottom: 13 }}>
       <label style={{ fontSize: 11, color: "#666", fontWeight: 600, letterSpacing: .4, display: "block", marginBottom: 5 }}>{label}</label>
