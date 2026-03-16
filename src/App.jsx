@@ -1677,8 +1677,8 @@ COMMIT;`} />
 // ═══════════════════════════════════════════════════════════════════
 //  ORDERS PAGE
 // ═══════════════════════════════════════════════════════════════════
-function IngForm({ ing, onSave }) {
-  const [v, setV] = useState(ing);
+function IngForm({ ing, data, onSave, onCancel }) {
+  const [v, setV] = useState(data || ing || {});
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ឈ្មោះ​គ្រឿង" value={v.ingredient_name} onChange={e=>setV({...v,ingredient_name:e.target.value})} />
@@ -1704,7 +1704,10 @@ function RecipeForm({ rec, prods, ings, onSave }) {
       </select>
       <input className="inp" type="number" placeholder="បរិមាណ" value={v.quantity} onChange={e=>setV({...v,quantity:+e.target.value})} />
       <input className="inp" placeholder="ឯកតា" value={v.unit||""} onChange={e=>setV({...v,unit:e.target.value})} />
-      <button className="btn-primary" onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
+      <div style={{ display:"flex", gap:8, marginTop:4 }}>
+        {onCancel && <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>}
+        <button style={{ ...btnGold, flex:1 }} onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
+      </div>
     </div>
   );
 }
