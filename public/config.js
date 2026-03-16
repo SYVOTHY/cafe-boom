@@ -1,18 +1,14 @@
-// ═══════════════════════════════════════════════════════
-//  Café Boom — Branch Config
-// ═══════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  public/config.js — Branch Configuration
+//  ⚠️  ដាក់ file នេះក្នុង /public/config.js (Vite static folder)
+//  ⚠️  កែ CAFE_SERVER ឱ្យត្រូវជាមួយ Railway URL របស់អ្នក
+// ═══════════════════════════════════════════════════════════════
 
-window.CAFE_SERVER      = "https://cafe-boom-production.up.railway.app";
-window.CAFE_BRANCH      = "branch_1";
-window.CAFE_BRANCH_NAME = "សាខាមាត់ជ្រោះ";
+// URL របស់ Railway backend (ពី Railway dashboard → Settings → Domain)
+window.CAFE_SERVER = "https:cafe-boom-production.up.railway.app";
 
-// ✅ Patch fetch: redirect /api/* calls to Railway backend
-(function patchFetch() {
-  const _fetch = window.fetch.bind(window);
-  window.fetch = function(url, opts) {
-    if (typeof url === "string" && url.startsWith("/api/")) {
-      url = window.CAFE_SERVER + url;
-    }
-    return _fetch(url, opts);
-  };
-})();
+// Branch ID — branch_1, branch_2, branch_3...
+window.CAFE_BRANCH = "branch_1";
+
+// ឈ្មោះ branch (បង្ហាញក្នុង UI)
+window.CAFE_BRANCH_NAME = "Cafe Bloom — សាខា ១";
