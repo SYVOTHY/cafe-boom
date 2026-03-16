@@ -12,6 +12,16 @@ import { initSocket, onBranchUpdate, onSharedUpdate, isConnected } from "./socke
 // Tables that belong to a branch vs shared
 const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses"]);
 
+// Helper: get auth header from localStorage
+function authHeaders() {
+  const token = localStorage.getItem("pos_token");
+  return {
+    "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
+    ...(token ? { Authorization: "Bearer " + token } : {}),
+  };
+}
+
 export function useRealtimeDB(serverUrl, branchId) {
   const [db,            setDb]           = useState(null);
   const [loading,       setLoading]      = useState(true);
@@ -22,10 +32,10 @@ export function useRealtimeDB(serverUrl, branchId) {
   const loadFull = useCallback(async () => {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5000);
+      const timer = setTimeout(() => controller.abort(), 8000);
       const r = await fetch(`${serverUrl}/api/db?branch=${branchId}`, {
         signal: controller.signal,
-        headers: { "ngrok-skip-browser-warning":"true" }
+        headers: authHeaders(),
       });
       clearTimeout(timer);
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -58,18 +68,23 @@ export function useRealtimeDB(serverUrl, branchId) {
       try {
         const r = await fetch(url, {
           method: "POST",
-          headers: { "Content-Type":"application/json", "ngrok-skip-browser-warning":"true" },
+          headers: authHeaders(),   // ✅ includes Authorization token
           body: JSON.stringify(data),
         });
         if (r.ok) {
           console.log(`[RealtimeDB] Saved: ${table}`);
           return true;
         }
+        if (r.status === 401) {
+          console.error(`[RealtimeDB] Auth error saving ${table} — token expired?`);
+          return false;   // don't retry auth failures
+        }
       } catch (e) {
-        if (i < retries - 1) await new Promise(r => setTimeout(r, 500));
+        console.warn(`[RealtimeDB] Save attempt ${i+1} failed for ${table}:`, e.message);
+        if (i < retries - 1) await new Promise(r => setTimeout(r, 800 * (i + 1)));
       }
     }
-    console.error(`[RealtimeDB] Failed to save: ${table}`);
+    console.error(`[RealtimeDB] Failed to save after ${retries} retries: ${table}`);
     return false;
   }, [serverUrl, branchId]);
 
