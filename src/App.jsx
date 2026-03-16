@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 //  Cafe Bloom POS — Multi-Branch React Frontend
-//  PostgreSQL + Socket.io Edition (Full Integrated)
+//  PostgreSQL + Socket.io Edition (Full Integrated) v2.1 — fix date crash
 //  config: public/config.js → window.CAFE_SERVER, window.CAFE_BRANCH
 // ═══════════════════════════════════════════════════════════════════
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
