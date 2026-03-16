@@ -3937,6 +3937,19 @@ function OptRow({ label, items, value, onChange, color, slider }) {
 // ═══════════════════════════════════════════════════════════════════
 //  CSS
 // ═══════════════════════════════════════════════════════════════════
+function Td({ children, mono, dim, bold, gold, style = {} }) {
+  return (
+    <td style={{
+      padding: "10px 14px", borderBottom: "1px solid #1A181C",
+      fontFamily: mono ? "'DM Mono',monospace" : "inherit",
+      color: dim ? "#555" : gold ? "#E8A84B" : "inherit",
+      fontWeight: bold ? 600 : "normal", ...style
+    }}>
+      {children}
+    </td>
+  );
+}
+
 const CSS = `
   :root {
     --bg-main: #09080A; --bg-card: #120F13; --bg-header: #0E0C0F;
@@ -4135,16 +4148,4 @@ const CSS = `
           /* All pages padding for bottom nav */
           main > div{padding-bottom:80px!important}
         }
-`;
-function Td({ children, mono, dim, bold, gold, style = {} }) {
-  return (
-    <td style={{
-      padding: "10px 14px", borderBottom: "1px solid #1A181C",
-      fontFamily: mono ? "'DM Mono',monospace" : "inherit",
-      color: dim ? "#555" : gold ? "#E8A84B" : "inherit",
-      fontWeight: bold ? 600 : "normal", ...style
-    }}>
-      {children}
-    </td>
-  );
-}
+`
