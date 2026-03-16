@@ -63,6 +63,9 @@ async function sendTelegram(rec) {
   await tgSend(text);
 }
 
+// API alias for compatibility with old page components
+const API = CLOUD_URL;
+
 // ── Default theme ─────────────────────────────────────────────────
 const DEFAULT_THEME = {
   bgMain: "#09080A", bgCard: "#120F13", bgHeader: "#0E0C0F",
@@ -127,6 +130,8 @@ function runTransaction(ingredients, recipes, productId, qty) {
 
   return { success: true, checks, newIngredients };
 }
+
+const nextId = a => Math.max(0, ...a.map(x => Object.values(x)[0])) + 1;
 
 const fmtN = n => Number(n).toFixed(1);
 // Format number with thousands separator: 1716.0 → "1,716.0"  or  "1,716"
@@ -392,6 +397,8 @@ export default function CafeBloom() {
     branchId: BRANCH_ID, branchName: BRANCH_NAME,
     doLogout, canAccess,
     notify,
+    isAdmin: currentUser?.role === "admin",
+    lowStock: (ingsRaw||[]).filter(i => (i.current_stock||0) <= (i.threshold||0)),
   };
 
   const NAV = [
@@ -466,12 +473,19 @@ function LoginPage({ theme, loading, error, onLogin }) {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const t = theme;
+  const shopName = localStorage.getItem("cb_shop_name") || "Café Boom";
+  const shopLogo = localStorage.getItem("cb_shop_logo") || "";
   return (
     <div style={{ minHeight:"100vh", background:t.bgMain, display:"flex", alignItems:"center", justifyContent:"center" }}>
       <style>{CSS}</style>
       <div style={{ background:t.bgCard, border:`1px solid ${t.borderCol}`, borderRadius:16, padding:32, width:320, display:"flex", flexDirection:"column", gap:16 }}>
-        <div style={{ textAlign:"center", fontSize:40 }}>☕</div>
-        <div style={{ textAlign:"center", fontWeight:700, fontSize:20, color:t.accent }}>Cafe Bloom POS</div>
+        <div style={{ textAlign:"center" }}>
+          {shopLogo
+            ? <img src={shopLogo} alt="logo" style={{ width:64, height:64, borderRadius:"50%", objectFit:"cover", margin:"0 auto", display:"block" }} />
+            : <div style={{ fontSize:48 }}>☕</div>
+          }
+        </div>
+        <div style={{ textAlign:"center", fontWeight:700, fontSize:20, color:t.accent }}>{shopName} POS</div>
         {error && <div style={{ background:"#5c1a1a", color:"#ff8080", borderRadius:8, padding:"8px 12px", fontSize:13 }}>{error}</div>}
         <input className="inp" placeholder="Username" value={u} onChange={e=>setU(e.target.value)} onKeyDown={e=>e.key==="Enter"&&onLogin(u,p)} />
         <input className="inp" type="password" placeholder="Password" value={p} onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&onLogin(u,p)} />
@@ -1346,93 +1360,197 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify 
 // ═══════════════════════════════════════════════════════════════════
 //  INVENTORY PAGE
 // ═══════════════════════════════════════════════════════════════════
-function InventoryPage({ ings, setIngs, prods, recipes, setRecipes }) {
-  const [editIng,  setEditIng]  = useState(null);
-  const [editRec,  setEditRec]  = useState(null);
-  const [tab, setTab] = useState("stock");
 
-  const saveIng = (ing) => {
-    setIngs(prev => ing.ingredient_id
-      ? prev.map(i => i.ingredient_id === ing.ingredient_id ? ing : i)
-      : [...prev, { ...ing, ingredient_id: Date.now() }]
-    );
-    setEditIng(null);
-  };
-  const delIng = (id) => { if (confirm("លុប?")) setIngs(prev => prev.filter(i => i.ingredient_id !== id)); };
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs }) {
+  const [subTab, setSubTab] = useState("stock");
+  const [modal, setModal] = useState(null);
+  const [delConf, setDelConf] = useState(null);
+  const [restock, setRestock] = useState(null);
 
-  const saveRec = (r) => {
-    setRecipes(prev => r.recipe_id
-      ? prev.map(x => x.recipe_id === r.recipe_id ? r : x)
-      : [...prev, { ...r, recipe_id: Date.now() }]
-    );
-    setEditRec(null);
+  const saveIng = (data) => {
+    if (modal.mode === "add") setIngs(p => [...p, { ...data, ingredient_id: nextId(p) }]);
+    else setIngs(p => p.map(i => i.ingredient_id === data.ingredient_id ? data : i));
+    notify(modal.mode === "add" ? "✓ បន្ថែមគ្រឿងផ្សំ" : "✓ កែប្រែ"); setModal(null);
   };
-  const delRec = (id) => { if (confirm("លុប?")) setRecipes(prev => prev.filter(r => r.recipe_id !== id)); };
+  const saveRec = (data) => {
+    if (modal.mode === "add") setRecipes(p => [...p, { ...data, recipe_id: nextId(p) }]);
+    else setRecipes(p => p.map(r => r.recipe_id === data.recipe_id ? data : r));
+    notify(modal.mode === "add" ? "✓ បន្ថែមរូបមន្ត" : "✓ កែប្រែ"); setModal(null);
+  };
+  const doRestock = (id, amt) => {
+    setIngs(p => p.map(i => i.ingredient_id === id ? { ...i, current_stock: i.current_stock + Number(amt) } : i));
+    const ing = ings.find(i => i.ingredient_id === id);
+    notify(`✓ បំពេញ ${ing?.ingredient_name} +${amt}${ing?.unit}`);
+    setRestock(null);
+  };
 
   return (
-    <div>
-      <h2 style={{ marginBottom:12 }}>📦 ការ​គ្រប់​គ្រង​ស្តុក</h2>
-      <div style={{ display:"flex", gap:6, marginBottom:16 }}>
-        <button className={"nav-btn"+(tab==="stock"?" active":"")} onClick={()=>setTab("stock")}>🧪 ស្តុក</button>
-        <button className={"nav-btn"+(tab==="recipe"?" active":"")} onClick={()=>setTab("recipe")}>📋 រូបមន្ត</button>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {delConf && <ConfirmDel name={delConf.name} onConfirm={delConf.fn} onCancel={() => setDelConf(null)} />}
+      {restock && (
+        <Modal onClose={() => setRestock(null)} maxW={320}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>📦 បំពេញស្តុក</div>
+          <div style={{ color: "#E8A84B", marginBottom: 16 }}>{restock.ingredient_name}</div>
+          <label style={{ fontSize: 12, color: "#777", display: "block", marginBottom: 6 }}>ចំនួន ({restock.unit})</label>
+          <input type="number" id="ramt" defaultValue={500} style={{ ...inputSt, width: "100%", marginBottom: 16 }} />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setRestock(null)} style={{ ...btnGhost, flex: 1 }}>បោះបង់</button>
+            <button onClick={() => doRestock(restock.ingredient_id, document.getElementById("ramt").value)}
+              style={{ ...btnGreen, flex: 1 }}>📦 បំពេញ</button>
+          </div>
+        </Modal>
+      )}
+      {modal && (
+        <Modal onClose={() => setModal(null)} maxW={420}>
+          {modal.entity === "ing" && <IngForm data={modal.data} onSave={saveIng} onCancel={() => setModal(null)} />}
+          {modal.entity === "rec" && <RecForm data={modal.data} prods={prods} ings={ings} onSave={saveRec} onCancel={() => setModal(null)} />}
+        </Modal>
+      )}
+
+      {/* ── STICKY HEADER ── */}
+      <div style={{ flexShrink: 0, padding: "16px 14px 0", borderBottom: "1px solid #1A181C", background: "var(--bg-main)" }}>
+        <SectionHeader title="🧂 គ្រប់គ្រងស្តុក" sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} គ្រឿងផ្សំជិតអស់`} />
+        <SubTabs tabs={[["stock", "🧂 Ingredients"], ["recipes", "📋 Recipe Mapping"], ["sql", "💾 SQL"], ["auditlog", "🗒️ Audit Log"]]} val={subTab} set={setSubTab} />
+        {subTab === "stock" && (
+          <div style={{ padding: "10px 0 10px", display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={() => setModal({ mode: "add", entity: "ing", data: { ingredient_id: null, ingredient_name: "", current_stock: 0, unit: "g", threshold: 100 } })} style={btnGold}>➕ បន្ថែម</button>
+          </div>
+        )}
+        {subTab === "recipes" && (
+          <div style={{ padding: "10px 0 10px", display: "flex", justifyContent: "flex-end" }}>
+            <button onClick={() => setModal({ mode: "add", entity: "rec", data: { recipe_id: null, product_id: "", ingredient_id: "", quantity_required: "" } })} style={btnGold}>➕ បន្ថែម</button>
+          </div>
+        )}
+        {(subTab === "sql" || subTab === "auditlog") && <div style={{ paddingBottom: 10 }} />}
       </div>
 
-      {tab === "stock" && (
-        <div>
-          <button className="btn-primary" style={{ marginBottom:12 }} onClick={()=>setEditIng({ ingredient_name:"", current_stock:0, unit:"g", threshold:0 })}>+ បន្ថែម​គ្រឿង</button>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+      {/* ── SCROLLABLE CONTENT ── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 32px" }}>
+        {subTab === "stock" && (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", gap: 10 }}>
             {ings.map(i => {
-              const low = i.current_stock <= i.threshold;
+              const stock = Number(i.current_stock);
+              const thresh = Number(i.threshold);
+              const isLow = stock <= thresh;
+              const isWarn = stock <= thresh * 1.5 && !isLow;
+              const col = isLow ? "#E74C3C" : isWarn ? "#F39C12" : "#27AE60";
+              const pct = Math.min(100, (stock / (thresh * 4 || 1)) * 100);
               return (
-                <div key={i.ingredient_id} style={{ display:"flex", alignItems:"center", gap:10, background:"var(--bg-card)", borderRadius:10, padding:"10px 14px", border:`1px solid ${low?"#E74C3C":"var(--border-col)"}` }}>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:600 }}>{i.ingredient_name} {low && "⚠️"}</div>
-                    <div style={{ fontSize:12, color: low?"#E74C3C":"var(--text-dim)" }}>
-                      {i.current_stock} {i.unit} / min: {i.threshold} {i.unit}
+                <div key={i.ingredient_id} style={{
+                  background: "#120F13", border: `1px solid ${col}33`,
+                  borderRadius: 12, padding: "12px 14px"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13 }}>{i.ingredient_name}</div>
+                      <div style={{ fontSize: 11, color: "#555", marginTop: 2 }}>
+                        <span style={{ color: col, fontWeight: 700, fontSize: 14 }}>{fmtStock(stock)}</span>
+                        <span style={{ color: "#555" }}> / {fmtStock(thresh)} {i.unit}</span>
+                      </div>
                     </div>
+                    <Tag color={col}>{isLow ? "⚠️ ជិតអស់" : isWarn ? "🔶 ប្រុង" : "✓ ល្អ"}</Tag>
                   </div>
-                  <button className="btn-sm" onClick={()=>setEditIng(i)}>✏️</button>
-                  <button className="btn-sm" style={{ color:"#ff6b6b" }} onClick={()=>delIng(i.ingredient_id)}>🗑</button>
+                  <div style={{ height: 5, background: "#1A181C", borderRadius: 3, marginBottom: 10 }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: col, borderRadius: 3 }} />
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => setRestock(i)} style={{ ...btnSmall, flex: 1, color: "#27AE60", borderColor: "#27AE6033", fontSize: 12 }}>📦 បំពេញ</button>
+                    <button onClick={() => setModal({ mode: "edit", entity: "ing", data: { ...i } })} style={{ ...btnSmall, flex: 1, fontSize: 12 }}>✏️ កែ</button>
+                    <button onClick={() => setDelConf({ name: i.ingredient_name, fn: () => { setIngs(p => p.filter(x => x.ingredient_id !== i.ingredient_id)); setRecipes(p => p.filter(r => r.ingredient_id !== i.ingredient_id)); notify("✓ លុប"); setDelConf(null); } })}
+                      style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33", padding: "5px 10px", fontSize: 12 }}>🗑️</button>
+                  </div>
                 </div>
               );
             })}
           </div>
-          {editIng && (
-            <Modal title={editIng.ingredient_id?"កែ​គ្រឿង":"គ្រឿង​ថ្មី"} onClose={()=>setEditIng(null)}>
-              <IngForm ing={editIng} onSave={saveIng} />
-            </Modal>
-          )}
-        </div>
-      )}
+        )}
 
-      {tab === "recipe" && (
-        <div>
-          <button className="btn-primary" style={{ marginBottom:12 }} onClick={()=>setEditRec({ product_id:"", ingredient_id:"", quantity:0, unit:"g" })}>+ បន្ថែម​រូបមន្ត</button>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {recipes.map(r => (
-              <div key={r.recipe_id} style={{ display:"flex", alignItems:"center", gap:10, background:"var(--bg-card)", borderRadius:10, padding:"10px 14px", border:"1px solid var(--border-col)" }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontWeight:600 }}>{prods.find(p=>p.product_id===r.product_id)?.product_name || r.product_id}</div>
-                  <div style={{ fontSize:12, color:"var(--text-dim)" }}>
-                    {ings.find(i=>i.ingredient_id===r.ingredient_id)?.ingredient_name || r.ingredient_id} — {r.quantity} {r.unit}
+        {subTab === "recipes" && (
+          <>
+            {prods.filter(p => recipes.some(r => r.product_id === p.product_id)).map(prod => {
+              const pr = recipes.filter(r => r.product_id === prod.product_id);
+              return (
+                <div key={prod.product_id} style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
+                  <div style={{ background: "#1A171C", padding: "10px 16px", display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontWeight: 700 }}>{prod.emoji} {prod.product_name}</span>
+                    <span style={{ fontSize: 12, color: "#5BA3E0" }}>{pr.length} គ្រឿង</span>
                   </div>
+                  <TableWrap headers={["recipe_id", "ingredient", "quantity_required", "ស្តុក", ""]}>
+                    {pr.map(r => {
+                      const ing = ings.find(i => i.ingredient_id === r.ingredient_id);
+                      return (
+                        <tr key={r.recipe_id} style={{ borderBottom: "1px solid #0E0C0F" }}>
+                          <Td mono dim>{r.recipe_id}</Td>
+                          <Td>{ing?.ingredient_name || "—"}</Td>
+                          <Td gold>{r.quantity_required} {ing?.unit}</Td>
+                          <Td style={{ color: ing && ing.current_stock >= r.quantity_required ? "#27AE60" : "#E74C3C" }}>{ing ? `${fmtN(ing.current_stock)}${ing.unit}` : "—"}</Td>
+                          <Td>
+                            <div style={{ display: "flex", gap: 5 }}>
+                              <button onClick={() => setModal({ mode: "edit", entity: "rec", data: { ...r } })} style={btnSmall}>✏️</button>
+                              <button onClick={() => { setRecipes(p => p.filter(x => x.recipe_id !== r.recipe_id)); notify("✓ លុប"); }} style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33" }}>🗑️</button>
+                            </div>
+                          </Td>
+                        </tr>
+                      );
+                    })}
+                  </TableWrap>
                 </div>
-                <button className="btn-sm" onClick={()=>setEditRec(r)}>✏️</button>
-                <button className="btn-sm" style={{ color:"#ff6b6b" }} onClick={()=>delRec(r.recipe_id)}>🗑</button>
-              </div>
-            ))}
+              );
+            })}
+          </>
+        )}
+
+        {subTab === "sql" && (
+          <div style={{ background: "#0E0C0F", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
+            <SqlBlock code={`-- Auto-deduction Transaction
+START TRANSACTION;
+
+UPDATE Ingredients i
+JOIN Recipe_Mapping rm ON i.ingredient_id = rm.ingredient_id
+SET i.current_stock = i.current_stock - (rm.quantity_required * p_qty)
+WHERE rm.product_id = ?
+  AND i.current_stock >= rm.quantity_required * p_qty;
+
+IF ROW_COUNT() < expected_count THEN
+  ROLLBACK;
+  SIGNAL SQLSTATE '45000'
+    SET MESSAGE_TEXT = 'Insufficient Stock';
+END IF;
+
+INSERT INTO Inventory_Logs (...) SELECT ...;
+
+COMMIT;`} />
           </div>
-          {editRec && (
-            <Modal title={editRec.recipe_id?"កែ​រូបមន្ត":"រូបមន្ត​ថ្មី"} onClose={()=>setEditRec(null)}>
-              <RecipeForm rec={editRec} prods={prods} ings={ings} onSave={saveRec} />
-            </Modal>
-          )}
-        </div>
-      )}
+        )}
+
+        {subTab === "auditlog" && (
+          <>
+            <div style={{ fontWeight: 700, fontSize: 13, color: "#E8A84B", marginBottom: 12 }}>🗒️ Inventory Logs ({logs.length})</div>
+            {logs.length === 0
+              ? <div style={{ textAlign: "center", color: "#333", paddingTop: 40 }}><div style={{ fontSize: 40 }}>📭</div><div style={{ marginTop: 12, color: "#555" }}>ធ្វើការលក់ ដើម្បីបង្ហាញ logs</div></div>
+              : <TableWrap headers={["timestamp", "product", "ingredient", "before", "deducted", "after"]}>
+                {logs.slice(0, 50).map((l, i) => (
+                  <tr key={l.log_id} style={{ background: i % 2 === 0 ? "#0E0C0F" : "#120F13" }}>
+                    <Td dim style={{ whiteSpace: "nowrap", fontSize: 11 }}>{l.ts}</Td>
+                    <Td gold>{l.product}</Td>
+                    <Td>{l.ingredient}</Td>
+                    <Td mono dim>{l.before}{l.unit}</Td>
+                    <Td style={{ color: "#E74C3C", fontFamily: "'DM Mono',monospace", fontWeight: 700 }}>−{l.deducted}{l.unit}</Td>
+                    <Td style={{ color: "#27AE60", fontFamily: "'DM Mono',monospace", fontWeight: 700 }}>{l.after}{l.unit}</Td>
+                  </tr>
+                ))}
+              </TableWrap>
+            }
+          </>
+        )}
+      </div>{/* end scroll */}
     </div>
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  ORDERS PAGE
+// ═══════════════════════════════════════════════════════════════════
 function IngForm({ ing, onSave }) {
   const [v, setV] = useState(ing);
   return (
@@ -1468,310 +1586,1453 @@ function RecipeForm({ rec, prods, ings, onSave }) {
 // ═══════════════════════════════════════════════════════════════════
 //  ORDERS PAGE
 // ═══════════════════════════════════════════════════════════════════
-function OrdersPage({ orders, currentUser }) {
-  const [search, setSearch] = useState("");
-  const [dateFilter, setDateFilter] = useState("today");
 
-  const today = new Date().toISOString().slice(0,10);
+function OrdersPage({ orders, ings }) {
+  const [filterType, setFilterType] = useState("all");   // all | day | month
+  const [selDate, setSelDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0, 7));
 
   const filtered = orders.filter(o => {
-    const d = safeDate(o.created_at || o.order_id);
-    if (dateFilter === "today"  && d !== today) return false;
-    if (dateFilter === "month"  && safeMonth(o.created_at || o.order_id) !== today.slice(0,7)) return false;
-    if (search && !JSON.stringify(o).toLowerCase().includes(search.toLowerCase())) return false;
+    if (filterType === "all") return true;
+    const d = new Date(o.order_id);
+    const ymd = d.toISOString().slice(0, 10);
+    const ym = d.toISOString().slice(0, 7);
+    if (filterType === "day") return ymd === selDate;
+    if (filterType === "month") return ym === selMonth;
     return true;
   });
 
-  const total = filtered.reduce((s,o) => s + (o.total||0), 0);
+  const totalRev = filtered.reduce((s, o) => s + o.total + o.tax, 0);
+  const totalItems = filtered.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty, 0), 0);
 
-  return (
-    <div>
-      <h2 style={{ marginBottom:12 }}>📜 ប្រវត្តិ​ការ​លក់</h2>
-      <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
-        <input className="inp" placeholder="🔍 ស្វែងរក..." value={search} onChange={e=>setSearch(e.target.value)} />
-        {["today","month","all"].map(f => (
-          <button key={f} className={"nav-btn"+(dateFilter===f?" active":"")} onClick={()=>setDateFilter(f)}>
-            {f==="today"?"ថ្ងៃ​នេះ":f==="month"?"ខែ​នេះ":"ទាំង​អស់"}
-          </button>
-        ))}
-      </div>
-      <div style={{ marginBottom:12, fontWeight:700, color:"var(--accent)" }}>
-        {filtered.length} ការ​លក់ — សរុប: {fmt(total)}
-      </div>
-      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-        {filtered.map(o => (
-          <div key={o.order_id} style={{ background:"var(--bg-card)", borderRadius:10, padding:"12px 16px", border:"1px solid var(--border-col)" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-              <span style={{ fontWeight:700, color:"var(--accent)" }}>{fmt(o.total)}</span>
-              <span style={{ fontSize:12, color:"var(--text-dim)" }}>{fmtDateTime(o.created_at)}</span>
-            </div>
-            <div style={{ fontSize:12, color:"var(--text-dim)" }}>
-              Cashier: {o.cashier_name || o.cashier} · តុ: {o.table||"—"} · {o.method==="cash"?"💵":o.method==="qr"?"📱":"🏦"} {o.method}
-            </div>
-            <div style={{ fontSize:12, marginTop:4 }}>
-              {(o.items||[]).map((i,idx)=>(
-                <span key={idx} style={{ marginRight:8 }}>{i.qty}× {i.product_name}</span>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+  const dateLabel = filterType === "day" ? selDate : filterType === "month" ? selMonth : "ទាំងអស់";
 
-// ═══════════════════════════════════════════════════════════════════
-//  REPORT PAGE
-// ═══════════════════════════════════════════════════════════════════
-function ReportPage({ orders, prods, currentUser, branchId }) {
-  const [period, setPeriod] = useState("today");
-  const today = new Date().toISOString().slice(0,10);
+  const doExportCSV = () => {
+    const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const lines = [];
 
-  const filtered = orders.filter(o => {
-    const d = safeDate(o.created_at || o.order_id);
-    if (period === "today") return d === today;
-    if (period === "month") return safeMonth(o.created_at || o.order_id) === today.slice(0,7);
-    return true;
-  });
+    // ── Section 1: Summary ──
+    const totalVAT = filtered.reduce((s, o) => s + o.tax, 0);
+    const payBreak = { cash: 0, qr: 0, bank: 0 };
+    filtered.forEach(o => { payBreak[o.method] = (payBreak[o.method] || 0) + o.total + o.tax; });
+    lines.push(`"=== 📊 សង្ខេប ${dateLabel} ==="`);
+    lines.push(`"ចំណូលសរុប","${fmt(totalRev)}"`);
+    lines.push(`"VAT សរុប","${fmt(totalVAT)}"`);
+    lines.push(`"ការបញ្ជាទិញ","${filtered.length} លើក"`);
+    lines.push(`"មុខម្ហូបលក់","${totalItems} ចាន"`);
+    lines.push(`"មធ្យម/Order","${fmt(filtered.length ? totalRev / filtered.length : 0)}"`);
+    lines.push(`"💵 សាច់ប្រាក់","${fmt(payBreak.cash)}"`);
+    lines.push(`"📱 QR Code","${fmt(payBreak.qr)}"`);
+    lines.push(`"🏦 ធនាគារ","${fmt(payBreak.bank)}"`);
+    lines.push("");
 
-  const revenue = filtered.reduce((s,o) => s + (o.subtotal||0), 0);
-  const tax     = filtered.reduce((s,o) => s + (o.tax||0), 0);
-  const total   = filtered.reduce((s,o) => s + (o.total||0), 0);
-  const count   = filtered.length;
+    // ── Section 2: Orders ──
+    lines.push(`"=== 📋 តារាង Orders ==="`);
+    lines.push(`"ថ្ងៃទី","តុ","មុខម្ហូប","សរុប ($)","VAT ($)","វិធីទូទាត់"`);
+    filtered.forEach(o => {
+      lines.push([
+        escape(o.ts), escape(o.table || ""),
+        escape(o.items.map(i => `${i.product_name}×${i.qty}`).join(", ")),
+        `"${(o.total + o.tax).toFixed(2)}"`, `"${o.tax.toFixed(2)}"`, escape(o.method)
+      ].join(","));
+    });
+    lines.push(`"សរុប","","","${fmt(totalRev)}","${fmt(totalVAT)}",""`);
+    lines.push("");
 
-  // Sales by product
-  const byProd = {};
-  filtered.forEach(o => (o.items||[]).forEach(i => {
-    if (!byProd[i.product_name]) byProd[i.product_name] = { qty:0, revenue:0 };
-    byProd[i.product_name].qty     += i.qty;
-    byProd[i.product_name].revenue += i.price * i.qty;
-  }));
-  const prodRanking = Object.entries(byProd).sort((a,b)=>b[1].revenue-a[1].revenue);
+    // ── Section 3: Stock status ──
+    lines.push(`"=== ⚠️ ស្ថានភាពស្តុក ==="`);
+    lines.push(`"គ្រឿងផ្សំ","ស្តុកបច្ចុប្បន្ន","ដែនកំណត់","ស្ថានភាព","ឯកតា"`);
+    (ings || []).forEach(i => {
+      const s = Number(i.current_stock), t = Number(i.threshold);
+      const status = s <= t ? "⚠️ ជិតអស់" : s <= t * 1.5 ? "🔶 ប្រុង" : "✅ ល្អ";
+      lines.push([escape(i.ingredient_name), `"${fmtStock(s)}"`, `"${fmtStock(t)}"`, escape(status), escape(i.unit)].join(","));
+    });
 
-  // Sales by method
-  const byMethod = {};
-  filtered.forEach(o => {
-    byMethod[o.method||"cash"] = (byMethod[o.method||"cash"]||0) + (o.total||0);
-  });
-
-  // ── Export CSV ─────────────────────────────────────
-  function exportCSV() {
-    const periodLabel = period==="today"?today:period==="month"?today.slice(0,7):"all";
-    const rows = [
-      ["Order ID","Date","Time","Cashier","Table","Method","Items","Subtotal","VAT","Total"],
-      ...filtered.map(o => [
-        String(o.order_id).slice(-8),
-        safeDate(o.created_at||o.order_id),
-        fmtTime(o.created_at||o.order_id),
-        o.cashier_name||o.cashier||"",
-        o.table||"",
-        o.method||"cash",
-        (o.items||[]).map(i=>`${i.qty}x${i.product_name}`).join(" | "),
-        Number(o.subtotal||0).toFixed(2),
-        Number(o.tax||0).toFixed(2),
-        Number(o.total||0).toFixed(2),
-      ])
-    ];
-    // Summary rows
-    rows.push([]);
-    rows.push(["SUMMARY"]);
-    rows.push(["Period", periodLabel]);
-    rows.push(["Total Orders", count]);
-    rows.push(["Revenue (excl.VAT)", revenue.toFixed(2)]);
-    rows.push(["VAT 10%", tax.toFixed(2)]);
-    rows.push(["Grand Total", total.toFixed(2)]);
-    rows.push([]);
-    rows.push(["TOP PRODUCTS"]);
-    prodRanking.forEach(([name,d],i) => rows.push([i+1, name, d.qty+" ដង", d.revenue.toFixed(2)]));
-
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const bom = "﻿"; // UTF-8 BOM for Khmer text in Excel
-    const blob = new Blob([bom+csv], { type:"text/csv;charset=utf-8;" });
+    const csv = lines.join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `report_${BRANCH_NAME}_${periodLabel}.csv`;
-    a.click(); URL.revokeObjectURL(url);
-  }
-
-  // ── Print / PDF ─────────────────────────────────────
-  function printReport() {
-    const periodLabel = period==="today"?"ថ្ងៃ​នេះ":period==="month"?"ខែ​នេះ":"ទាំង​អស់";
-    const topProds = prodRanking.slice(0,10).map(([name,d],i)=>
-      `<tr><td>${i+1}</td><td>${name}</td><td style="text-align:right">${d.qty}ដង</td><td style="text-align:right">$${d.revenue.toFixed(2)}</td></tr>`
-    ).join("");
-    const methodRows = Object.entries(byMethod).map(([m,v])=>
-      `<tr><td>${m==="cash"?"💵 សាច់ប្រាក់":m==="qr"?"📱 QR":"🏦 ប្រាក់​គណនី"}</td><td style="text-align:right">$${v.toFixed(2)}</td></tr>`
-    ).join("");
-    const orderRows = filtered.slice(0,50).map(o=>
-      `<tr><td>${safeDate(o.created_at||o.order_id)}</td><td>${fmtTime(o.created_at||o.order_id)}</td><td>${o.cashier_name||o.cashier||""}</td><td>${o.table||"—"}</td><td>${o.method||"cash"}</td><td style="text-align:right">$${Number(o.total||0).toFixed(2)}</td></tr>`
-    ).join("");
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <style>
-      @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@400;700&display=swap');
-      body{font-family:'Noto Sans Khmer',sans-serif;color:#111;padding:24px;max-width:800px;margin:0 auto}
-      h1{font-size:20px;margin-bottom:4px}
-      .meta{color:#666;font-size:12px;margin-bottom:20px}
-      .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
-      .kpi div{border:1px solid #ddd;border-radius:8px;padding:10px 14px}
-      .kpi .val{font-size:20px;font-weight:700;color:#B8732A}
-      .kpi .lbl{font-size:11px;color:#888}
-      table{width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px}
-      th{background:#f5f5f5;padding:7px 10px;text-align:left;border-bottom:2px solid #ddd}
-      td{padding:6px 10px;border-bottom:1px solid #eee}
-      tr:nth-child(even){background:#fafafa}
-      .section-title{font-size:14px;font-weight:700;margin:18px 0 8px;border-left:3px solid #E8A84B;padding-left:8px}
-      @media print{body{padding:12px}.no-print{display:none}}
-    </style></head><body>
-    <h1>📊 របាយការណ៍ — ${BRANCH_NAME}</h1>
-    <div class="meta">រយៈ​ពេល: ${periodLabel} · បោះ​ពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
-    <div class="kpi">
-      <div><div class="lbl">ការ​លក់</div><div class="val">${count} ដង</div></div>
-      <div><div class="lbl">រាយ (excl.VAT)</div><div class="val">$${revenue.toFixed(2)}</div></div>
-      <div><div class="lbl">VAT 10%</div><div class="val">$${tax.toFixed(2)}</div></div>
-      <div><div class="lbl">សរុប​រួម</div><div class="val">$${total.toFixed(2)}</div></div>
-    </div>
-    <div class="section-title">🏆 ផលិតផល​លក់​ដាច់</div>
-    <table><thead><tr><th>#</th><th>ឈ្មោះ</th><th>ចំនួន</th><th>ចំណូល</th></tr></thead><tbody>${topProds}</tbody></table>
-    <div class="section-title">💳 វិធី​បង់​ប្រាក់</div>
-    <table><thead><tr><th>វិធី</th><th>សរុប</th></tr></thead><tbody>${methodRows}</tbody></table>
-    <div class="section-title">📋 បញ្ជី​ការ​លក់ (${Math.min(filtered.length,50)} / ${filtered.length})</div>
-    <table><thead><tr><th>ថ្ងៃ</th><th>ម៉ោង</th><th>Cashier</th><th>តុ</th><th>វិធី</th><th>សរុប</th></tr></thead><tbody>${orderRows}</tbody></table>
-    <script>window.onload=()=>window.print()</script></body></html>`;
-    const w = window.open("","_blank","width=900,height=700");
-    w.document.write(html); w.document.close();
-  }
-
-  return (
-    <div>
-      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, flexWrap:"wrap" }}>
-        <h2 style={{ margin:0 }}>📊 របាយការណ៍</h2>
-        <div style={{ flex:1 }} />
-        <button className="btn-sm" onClick={exportCSV} style={{ background:"#1a3a1a", color:"#80ff80", borderColor:"#27AE60" }}>
-          📥 CSV
-        </button>
-        <button className="btn-sm" onClick={printReport} style={{ background:"#1a2a3a", color:"#80b0ff", borderColor:"#3498DB" }}>
-          🖨️ PDF / Print
-        </button>
-      </div>
-      <div style={{ display:"flex", gap:6, marginBottom:16 }}>
-        {["today","month","all"].map(p=>(
-          <button key={p} className={"nav-btn"+(period===p?" active":"")} onClick={()=>setPeriod(p)}>
-            {p==="today"?"ថ្ងៃ​នេះ":p==="month"?"ខែ​នេះ":"ទាំង​អស់"}
-          </button>
-        ))}
-      </div>
-
-      {/* KPI cards */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:12, marginBottom:20 }}>
-        {[
-          { label:"ការ​លក់", val:count+" ដង", color:"#3498DB" },
-          { label:"រាយ​(excl.VAT)", val:fmt(revenue), color:"#27AE60" },
-          { label:"VAT 10%", val:fmt(tax), color:"#F39C12" },
-          { label:"សរុប​រួម", val:fmt(total), color:"var(--accent)" },
-        ].map(k=>(
-          <div key={k.label} style={{ background:"var(--bg-card)", borderRadius:12, padding:"14px 16px", border:`1px solid ${k.color}` }}>
-            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>{k.label}</div>
-            <div style={{ fontWeight:700, fontSize:18, color:k.color }}>{k.val}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Top products */}
-      <div style={{ background:"var(--bg-card)", borderRadius:12, padding:16, border:"1px solid var(--border-col)", marginBottom:16 }}>
-        <div style={{ fontWeight:700, marginBottom:10 }}>🏆 ផលិតផល​លក់​ដាច់</div>
-        {prodRanking.slice(0,10).map(([name,d],i) => (
-          <div key={name} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-            <span style={{ width:20, color:"var(--text-dim)", fontSize:12 }}>{i+1}.</span>
-            <span style={{ flex:1, fontSize:13 }}>{name}</span>
-            <span style={{ fontSize:12, color:"var(--text-dim)" }}>{d.qty}ដង</span>
-            <span style={{ fontWeight:700, color:"var(--accent)" }}>{fmt(d.revenue)}</span>
-          </div>
-        ))}
-        {!prodRanking.length && <div style={{ color:"var(--text-dim)", fontSize:13 }}>មិន​ទាន់​មាន​ទិន្នន័យ</div>}
-      </div>
-
-      {/* By payment method */}
-      <div style={{ background:"var(--bg-card)", borderRadius:12, padding:16, border:"1px solid var(--border-col)" }}>
-        <div style={{ fontWeight:700, marginBottom:10 }}>💳 ការ​បង់​ប្រាក់</div>
-        {Object.entries(byMethod).map(([m,v])=>(
-          <div key={m} style={{ display:"flex", justifyContent:"space-between", marginBottom:6, fontSize:13 }}>
-            <span>{m==="cash"?"💵 សាច់ប្រាក់":m==="qr"?"📱 QR":"🏦 ប្រាក់​គណនី"}</span>
-            <span style={{ fontWeight:700, color:"var(--accent)" }}>{fmt(v)}</span>
-          </div>
-        ))}
-        {!Object.keys(byMethod).length && <div style={{ color:"var(--text-dim)", fontSize:13 }}>មិន​ទាន់​មាន​ទិន្នន័យ</div>}
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  FINANCE PAGE
-// ═══════════════════════════════════════════════════════════════════
-function FinancePage({ orders, expenses, setExpenses }) {
-  const [editExp, setEditExp] = useState(null);
-  const today = new Date().toISOString().slice(0,10);
-
-  const monthOrders   = orders.filter(o => safeMonth(o.created_at || o.order_id) === today.slice(0,7));
-  const monthExpenses = expenses.filter(e => safeMonth(e.created_at) === today.slice(0,7));
-
-  const revenue  = monthOrders.reduce((s,o) => s + (o.subtotal||0), 0);
-  const expTotal = monthExpenses.reduce((s,e) => s + (e.amount||0), 0);
-  const profit   = revenue - expTotal;
-
-  const saveExp = (e) => {
-    setExpenses(prev => e.expense_id
-      ? prev.map(x => x.expense_id === e.expense_id ? e : x)
-      : [...prev, { ...e, expense_id: uid(), created_at: now() }]
-    );
-    setEditExp(null);
+    const a = document.createElement("a"); a.href = url; a.download = `orders-${dateLabel}.csv`; a.click();
+    URL.revokeObjectURL(url);
   };
-  const delExp = (id) => { if (confirm("លុប?")) setExpenses(prev => prev.filter(e => e.expense_id !== id)); };
+
+  const doExportPDF = () => {
+    const orderRows = filtered.map(o => `<tr>
+      <td style="white-space:nowrap;font-size:11px">${o.ts}</td>
+      <td>${o.table || "—"}</td>
+      <td style="font-size:11px">${o.items.map(i => `${i.product_name}×${i.qty}`).join(", ")}</td>
+      <td style="text-align:right;font-weight:600;color:#B8732A">${fmt(o.total + o.tax)}</td>
+      <td>${o.method === "cash" ? "💵 សាច់ប្រាក់" : o.method === "qr" ? "📱 QR" : "🏦 ធនាគារ"}</td>
+    </tr>`).join("");
+
+    const stockRows = ings.map(i => {
+      const s = Number(i.current_stock), t = Number(i.threshold);
+      const isLow = s <= t, isWarn = s <= t * 1.5 && !isLow;
+      const col = isLow ? "#E74C3C" : isWarn ? "#E67E22" : "#27AE60";
+      const pct = Math.min(100, (s / (t * 4 || 1)) * 100);
+      return `<tr>
+        <td>${i.ingredient_name}</td>
+        <td style="font-weight:700;color:${col}">${fmtStock(s)} ${i.unit}</td>
+        <td style="color:#888">${fmtStock(t)} ${i.unit}</td>
+        <td><div style="background:#eee;border-radius:4px;height:8px;width:100px"><div style="background:${col};height:8px;border-radius:4px;width:${pct}%"></div></div></td>
+        <td style="color:${col};font-weight:600">${isLow ? "⚠️ ជិតអស់" : isWarn ? "🔶 ប្រុង" : "✅ ល្អ"}</td>
+      </tr>`;
+    }).join("");
+
+    const win = window.open("", "_blank", "width=1000,height=750");
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Café Boom — ប្រវត្តិ ${dateLabel}</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #B8732A}
+      .logo{font-size:20px;font-weight:700;color:#B8732A}
+      .logo span{font-size:11px;color:#888;display:block;font-weight:400}
+      .meta{text-align:right;font-size:12px;color:#888}
+      h2{font-size:14px;font-weight:700;color:#B8732A;margin:18px 0 8px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A}
+      table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:12px}
+      th{background:#B8732A;color:#fff;padding:7px 10px;text-align:left;font-size:11px}
+      td{padding:6px 10px;border-bottom:1px solid #f0ece8}
+      tr:nth-child(even) td{background:#fdf9f6}
+      .total-row td{background:#fff3e8!important;font-weight:700;color:#B8732A}
+      .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:10px 0 16px}
+      .kpi{background:#fff7f0;border:1px solid #e8d8c8;border-radius:8px;padding:10px 12px}
+      .kpi .val{font-size:18px;font-weight:700;color:#B8732A;margin-top:2px}
+      .kpi .lbl{font-size:11px;color:#888}
+      .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
+    </style></head><body>
+    <div class="header">
+      <div class="logo">☕ Café Boom<span>ប្រវត្តិការបញ្ជាទិញ</span></div>
+      <div class="meta"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
+    </div>
+
+    <h2>📊 សង្ខេប</h2>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="lbl">💰 ចំណូលសរុប</div><div class="val">${fmt(totalRev)}</div></div>
+      <div class="kpi"><div class="lbl">🛒 ការបញ្ជាទិញ</div><div class="val">${filtered.length} លើក</div></div>
+      <div class="kpi"><div class="lbl">☕ មុខម្ហូប</div><div class="val">${totalItems} ចាន</div></div>
+      <div class="kpi"><div class="lbl">📊 មធ្យម/Order</div><div class="val">${fmt(filtered.length ? totalRev / filtered.length : 0)}</div></div>
+    </div>
+
+    <h2>📋 តារាង Orders</h2>
+    <table><thead><tr><th>ថ្ងៃទី</th><th>តុ</th><th>មុខម្ហូប</th><th>ចំណូល</th><th>ទូទាត់</th></tr></thead>
+    <tbody>${orderRows}
+    <tr class="total-row"><td colspan="3" style="text-align:right">សរុបរួម</td><td>${fmt(totalRev)}</td><td></td></tr>
+    </tbody></table>
+
+    <h2>⚠️ ស្ថានភាពស្តុក</h2>
+    <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Progress</th><th>ស្ថានភាព</th></tr></thead>
+    <tbody>${stockRows}</tbody></table>
+
+    <div class="footer">Café Boom POS © ${new Date().getFullYear()}</div>
+    <script>window.onload=()=>{window.print();}<\/script>
+    </body></html>`);
+    win.document.close();
+  };
 
   return (
-    <div>
-      <h2 style={{ marginBottom:12 }}>💰 ហិរញ្ញវត្ថុ — ខែ​នេះ</h2>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:12, marginBottom:20 }}>
-        {[
-          { label:"ចំណូល​(excl.VAT)", val:fmt(revenue), color:"#27AE60" },
-          { label:"ចំណាយ", val:fmt(expTotal), color:"#E74C3C" },
-          { label:"ចំណេញ", val:fmt(profit), color: profit>=0?"var(--accent)":"#E74C3C" },
-        ].map(k=>(
-          <div key={k.label} style={{ background:"var(--bg-card)", borderRadius:12, padding:"14px 16px", border:`1px solid ${k.color}` }}>
-            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>{k.label}</div>
-            <div style={{ fontWeight:700, fontSize:18, color:k.color }}>{k.val}</div>
+      {/* ── STICKY HEADER ── */}
+      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid #1A181C", background: "var(--bg-main)" }}>
+        <SectionHeader title="📋 ប្រវត្តិការបញ្ជាទិញ" sub={`${filtered.length} / ${orders.length} ការបញ្ជាទិញ`} />
+
+        {/* Filter tabs + date picker row */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", paddingTop: 10 }}>
+          {[["all", "📋 ទាំងអស់"], ["day", "📅 តាមថ្ងៃ"], ["month", "📆 តាមខែ"]].map(([k, lb]) => (
+            <button key={k} onClick={() => setFilterType(k)} style={{
+              padding: "6px 16px", borderRadius: 20, border: "none", cursor: "pointer",
+              fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+              background: filterType === k ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "#1A181C",
+              color: filterType === k ? "#fff" : "#666",
+              boxShadow: filterType === k ? "0 4px 14px #B8732A44" : "none"
+            }}>{lb}</button>
+          ))}
+          {filterType === "day" && (
+            <input type="date" value={selDate} onChange={e => setSelDate(e.target.value)}
+              style={{ ...inputSt, fontSize: 12, padding: "6px 12px", marginLeft: "auto" }} />
+          )}
+          {filterType === "month" && (
+            <input type="month" value={selMonth} onChange={e => setSelMonth(e.target.value)}
+              style={{ ...inputSt, fontSize: 12, padding: "6px 12px", marginLeft: "auto" }} />
+          )}
+        </div>
+
+        {/* Export buttons */}
+        {filtered.length > 0 && (
+          <div style={{ display: "flex", gap: 8, paddingTop: 10 }}>
+            <button onClick={doExportCSV} style={{ ...btnSmall, color: "#27AE60", borderColor: "#27AE6044", fontSize: 12, padding: "6px 14px" }}>
+              📊 Save CSV
+            </button>
+            <button onClick={doExportPDF} style={{ ...btnSmall, color: "#E8A84B", borderColor: "#E8A84B44", fontSize: 12, padding: "6px 14px" }}>
+              🖨️ Print / PDF
+            </button>
           </div>
-        ))}
-      </div>
+        )}
 
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-        <div style={{ fontWeight:700 }}>📝 ចំណាយ</div>
-        <button className="btn-primary" onClick={()=>setEditExp({ category:"", note:"", amount:0 })}>+ បន្ថែម</button>
-      </div>
-
-      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-        {monthExpenses.map(e=>(
-          <div key={e.expense_id} style={{ display:"flex", alignItems:"center", gap:10, background:"var(--bg-card)", borderRadius:10, padding:"10px 14px", border:"1px solid var(--border-col)" }}>
-            <div style={{ flex:1 }}>
-              <div style={{ fontWeight:600 }}>{e.category} — {fmt(e.amount)}</div>
-              <div style={{ fontSize:12, color:"var(--text-dim)" }}>{e.note} · {fmtDate(e.created_at)}</div>
-            </div>
-            <button className="btn-sm" onClick={()=>setEditExp(e)}>✏️</button>
-            <button className="btn-sm" style={{ color:"#ff6b6b" }} onClick={()=>delExp(e.expense_id)}>🗑</button>
+        {/* Summary KPI row */}
+        {filtered.length > 0 && (
+          <div style={{ display: "flex", gap: 10, paddingTop: 10 }}>
+            {[
+              ["💰", "ចំណូលសរុប", fmt(totalRev), "#E8A84B"],
+              ["🛒", "ការបញ្ជាទិញ", `${filtered.length} លើក`, "#5BA3E0"],
+              ["☕", "មុខម្ហូប", `${totalItems} ចាន`, "#5C9E5C"],
+              ["📊", "មធ្យម/Order", fmt(filtered.length ? totalRev / filtered.length : 0), "#9B59B6"],
+            ].map(([ic, lb, val, col]) => (
+              <div key={lb} style={{
+                flex: 1, background: "#120F13", border: `1px solid ${col}22`,
+                borderRadius: 10, padding: "8px 12px", minWidth: 0
+              }}>
+                <div style={{ fontSize: 11, color: "#555", marginBottom: 2 }}>{ic} {lb}</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: col }}>{val}</div>
+              </div>
+            ))}
           </div>
-        ))}
-        {!monthExpenses.length && <div style={{ color:"var(--text-dim)", fontSize:13 }}>មិន​ទាន់​មាន​ចំណាយ</div>}
+        )}
       </div>
 
-      {editExp && (
-        <Modal title={editExp.expense_id?"កែ​ចំណាយ":"ចំណាយ​ថ្មី"} onClose={()=>setEditExp(null)}>
-          <ExpenseForm exp={editExp} onSave={saveExp} />
-        </Modal>
-      )}
+      {/* ── SCROLLABLE CONTENT ── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 32px" }}>
+        {filtered.length === 0
+          ? <Empty icon="📭" label="មិនមានការបញ្ជាទិញ" />
+          : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {filtered.map(o => (
+              <div key={o.order_id} style={{
+                background: "var(--bg-card)", border: "1px solid var(--border)",
+                borderRadius: 14, padding: "14px 18px", display: "flex", gap: 16, flexWrap: "wrap",
+                transition: "border-color .15s"
+              }}>
+                {/* Left — items + time */}
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  {/* Item list — each on its own line */}
+                  <div style={{ marginBottom: 6 }}>
+                    {o.items.map((i, idx) => (
+                      <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 16 }}>{i.emoji}</span>
+                        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--text-main)" }}>{i.product_name}</span>
+                        <span style={{ fontSize: 12, color: "var(--accent)", fontWeight: 700 }}>×{i.qty}</span>
+                        <span style={{ fontSize: 12, color: "var(--text-dim)", marginLeft: "auto" }}>{fmt(i.price * i.qty)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Time + table */}
+                  <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span>🕐 {o.ts}</span>
+                    {o.table && <span style={{ color: "var(--accent)" }}>🪑 តុ {o.table}</span>}
+                    {o.cashier && <span>👤 {o.cashier}</span>}
+                  </div>
+                </div>
+                {/* Right — total + method */}
+                <div style={{ textAlign: "right", flexShrink: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: "var(--accent)", fontSize: 17 }}>{fmt(o.total + o.tax)}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>VAT {fmt(o.tax)}</div>
+                  </div>
+                  <Tag color={o.method === "cash" ? "#27AE60" : o.method === "qr" ? "#5BA3E0" : "#9B59B6"}>
+                    {o.method === "cash" ? "💵 Cash" : o.method === "qr" ? "📱 QR" : "🏦 Bank"}
+                  </Tag>
+                </div>
+              </div>
+            ))}
+          </div>
+        }
+      </div>
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+//  REPORT PAGE  — ថ្ងៃ / ខែ / ឆ្នាំ
+// ═══════════════════════════════════════════════════════════════════
+
+function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
+  const [period, setPeriod] = useState("day");   // day | month | year
+  const [selDate, setSelDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [selYear, setSelYear] = useState(() => String(new Date().getFullYear()));
+  const [reportMode, setReportMode] = useState("branch"); // branch | all
+  const [allOrders, setAllOrders] = useState([]);
+  const [allLoading, setAllLoading] = useState(false);
+  const [branches, setBranches] = useState([]);
+
+  useEffect(() => {
+    if (reportMode !== "all" || !isAdmin) return;
+    setAllLoading(true);
+    fetch(`${API}/api/all-orders`)
+      .then(r => r.json()).then(data => { setAllOrders(Array.isArray(data) ? data : []); setAllLoading(false); })
+      .catch(() => setAllLoading(false));
+    fetch(`${API}/api/branches`)
+      .then(r => r.json()).then(data => setBranches(Array.isArray(data) ? data : []))
+      .catch(() => { });
+  }, [reportMode, isAdmin]);
+
+  // Source orders depending on mode
+  const sourceOrders = reportMode === "all" ? allOrders : orders;
+
+  // ── Filter orders by period ──────────────────────────────────────
+  const filtered = sourceOrders.filter(o => {
+    try {
+      const d = new Date(o.order_id);
+      if (period === "day") return d.toISOString().slice(0, 10) === selDate;
+      if (period === "month") return d.toISOString().slice(0, 7) === selMonth;
+      if (period === "year") return String(d.getFullYear()) === selYear;
+    } catch { return false; }
+    return false;
+  });
+
+  // ── Aggregates ───────────────────────────────────────────────────
+  const totalRev = filtered.reduce((s, o) => s + o.total + o.tax, 0);
+  const totalItems = filtered.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty, 0), 0);
+  const avgOrder = filtered.length ? totalRev / filtered.length : 0;
+
+  const counts = {};
+  filtered.forEach(o => o.items.forEach(i => { counts[i.product_name] = (counts[i.product_name] || 0) + i.qty; }));
+  const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const maxTop = top[0]?.[1] || 1;
+
+  const byMethod = { cash: 0, qr: 0, bank: 0 };
+  filtered.forEach(o => { byMethod[o.method] = (byMethod[o.method] || 0) + o.total + o.tax; });
+
+  // ── For month view: group by day ─────────────────────────────────
+  const byDay = {};
+  if (period === "month") {
+    filtered.forEach(o => {
+      const day = new Date(o.order_id).toISOString().slice(0, 10);
+      byDay[day] = (byDay[day] || 0) + o.total + o.tax;
+    });
+  }
+
+  // ── For year view: group by month ────────────────────────────────
+  const byMon = {};
+  const MON_KH = ["មករា", "កុម្ភៈ", "មីនា", "មេសា", "ឧសភា", "មិថុនា", "កក្កដា", "សីហា", "កញ្ញា", "តុលា", "វិច្ឆិកា", "ធ្នូ"];
+  if (period === "year") {
+    filtered.forEach(o => {
+      const m = new Date(o.order_id).getMonth();
+      byMon[m] = (byMon[m] || 0) + o.total + o.tax;
+    });
+  }
+
+  // ── For day view: group by hour ──────────────────────────────────
+  const byHour = {};
+  if (period === "day") {
+    filtered.forEach(o => {
+      const h = new Date(o.order_id).getHours();
+      byHour[h] = (byHour[h] || 0) + o.total + o.tax;
+    });
+  }
+
+  const periodLabel = period === "day"
+    ? new Date(selDate).toLocaleDateString("km-KH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })
+    : period === "month"
+      ? `${MON_KH[parseInt(selMonth.slice(5)) - 1]} ${selYear}`
+      : `ឆ្នាំ ${selYear}`;
+
+  // ── Available years from orders ──────────────────────────────────
+  const allYears = [...new Set(orders.map(o => String(new Date(o.order_id).getFullYear())))].sort().reverse();
+  if (!allYears.includes(selYear)) allYears.unshift(selYear);
+
+  // ── Export helpers ───────────────────────────────────────────────
+  const doExportCSV = () => {
+    // Sheet 1: Summary KPI
+    const prodCount = {};
+    filtered.forEach(o => o.items.forEach(i => { prodCount[i.product_name] = (prodCount[i.product_name] || 0) + i.qty; }));
+    const payBreak = { cash: 0, qr: 0, bank: 0 };
+    filtered.forEach(o => { payBreak[o.method] = (payBreak[o.method] || 0) + o.total + o.tax; });
+
+    // Build combined CSV with sections separated by blank rows
+    const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+
+    const lines = [];
+    // ── Section 1: Summary ──
+    lines.push(`"=== សង្ខេប ${periodLabel} ==="`);
+    lines.push(`"ចំណូលសរុប","${fmt(totalRev)}"`);
+    lines.push(`"ការបញ្ជាទិញ","${filtered.length} លើក"`);
+    lines.push(`"មុខម្ហូបលក់","${totalItems} ចាន"`);
+    lines.push(`"មធ្យម/Order","${fmt(avgOrder)}"`);
+    lines.push(`"💵 សាច់ប្រាក់","${fmt(payBreak.cash)}"`);
+    lines.push(`"📱 QR Code","${fmt(payBreak.qr)}"`);
+    lines.push(`"🏦 ធនាគារ","${fmt(payBreak.bank)}"`);
+    lines.push("");
+
+    // ── Section 2: Top products ──
+    lines.push(`"=== 🏆 មុខម្ហូបលក់ច្រើន ==="`);
+    lines.push(`"#","មុខម្ហូប","ចំនួន (ចាន)"`);
+    Object.entries(prodCount).sort((a, b) => b[1] - a[1]).forEach(([n, q], i) => {
+      lines.push(`"${i + 1}",${escape(n)},"${q}"`);
+    });
+    lines.push("");
+
+    // ── Section 3: All orders ──
+    lines.push(`"=== 📋 តារាង Orders ==="`);
+    lines.push(`"ថ្ងៃទី","តុ","មុខម្ហូប","សរុប ($)","VAT ($)","វិធីទូទាត់"`);
+    filtered.forEach(o => {
+      lines.push([
+        escape(o.ts), escape(o.table || ""), escape(o.items.map(i => `${i.product_name}×${i.qty}`).join(", ")),
+        `"${(o.total + o.tax).toFixed(2)}"`, `"${o.tax.toFixed(2)}"`, escape(o.method)
+      ].join(","));
+    });
+    lines.push(`"សរុប","","","${fmt(totalRev)}","${fmt(filtered.reduce((s, o) => s + o.tax, 0))}",""`);
+    lines.push("");
+
+    // ── Section 4: Stock status ──
+    lines.push(`"=== ⚠️ ស្ថានភាពស្តុក ==="`);
+    lines.push(`"គ្រឿងផ្សំ","ស្តុកបច្ចុប្បន្ន","ដែនកំណត់","ស្ថានភាព","ឯកតា"`);
+    ings.forEach(i => {
+      const s = Number(i.current_stock), t = Number(i.threshold);
+      const status = s <= t ? "⚠️ ជិតអស់" : s <= t * 1.5 ? "🔶 ប្រុង" : "✅ ល្អ";
+      lines.push([escape(i.ingredient_name), `"${fmtStock(s)}"`, `"${fmtStock(t)}"`, escape(status), escape(i.unit)].join(","));
+    });
+
+    const csv = lines.join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `report-${period}-${periodLabel}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const doExportPDF = () => {
+    const prodCount = {};
+    filtered.forEach(o => o.items.forEach(i => { prodCount[i.product_name] = (prodCount[i.product_name] || 0) + i.qty; }));
+    const top = Object.entries(prodCount).sort((a, b) => b[1] - a[1]);
+    const payBreak = { cash: 0, qr: 0, bank: 0 };
+    filtered.forEach(o => { payBreak[o.method] = (payBreak[o.method] || 0) + o.total + o.tax; });
+
+    // Summary rows for month/year
+    let periodSummaryHtml = "";
+    if (period === "month") {
+      const byDay = {};
+      filtered.forEach(o => { const d = new Date(o.order_id).getDate(); byDay[d] = (byDay[d] || { rev: 0, cnt: 0, items: 0 }); byDay[d].rev += (o.total + o.tax); byDay[d].cnt++; byDay[d].items += o.items.reduce((s, i) => s + i.qty, 0); });
+      const dayRows = Object.entries(byDay).sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([d, v]) => `<tr><td>${String(d).padStart(2, "0")}</td><td style="color:#5BA3E0">${v.cnt}</td><td style="color:#5C9E5C">${v.items}</td><td style="font-weight:700;color:#B8732A">${fmt(v.rev)}</td></tr>`).join("");
+      periodSummaryHtml = `<h3>📅 សង្ខេបប្រចាំថ្ងៃ — ${periodLabel}</h3>
+        <table><thead><tr><th>ថ្ងៃ</th><th>Orders</th><th>Items</th><th>ចំណូល</th></tr></thead><tbody>${dayRows}
+        <tr class="total-row"><td>សរុប</td><td>${filtered.length}</td><td>${totalItems}</td><td>${fmt(totalRev)}</td></tr>
+        </tbody></table><br/>`;
+    } else if (period === "year") {
+      const byMonth = {};
+      filtered.forEach(o => { const m = new Date(o.order_id).getMonth(); byMonth[m] = (byMonth[m] || { rev: 0, cnt: 0, items: 0 }); byMonth[m].rev += (o.total + o.tax); byMonth[m].cnt++; byMonth[m].items += o.items.reduce((s, i) => s + i.qty, 0); });
+      const monRows = Object.entries(byMonth).sort((a, b) => Number(a[0]) - Number(b[0]))
+        .map(([m, v]) => `<tr><td>${MON_KH[Number(m)] || m}</td><td style="color:#5BA3E0">${v.cnt}</td><td style="color:#5C9E5C">${v.items}</td><td style="font-weight:700;color:#B8732A">${fmt(v.rev)}</td></tr>`).join("");
+      periodSummaryHtml = `<h3>📆 សង្ខេបប្រចាំខែ — ${periodLabel}</h3>
+        <table><thead><tr><th>ខែ</th><th>Orders</th><th>Items</th><th>ចំណូល</th></tr></thead><tbody>${monRows}
+        <tr class="total-row"><td>សរុប</td><td>${filtered.length}</td><td>${totalItems}</td><td>${fmt(totalRev)}</td></tr>
+        </tbody></table><br/>`;
+    }
+
+    // Orders table (day: all rows; month/year: top 50)
+    const orderRows = (period === "day" ? filtered : filtered.slice(0, 50)).map(o => `<tr>
+      <td style="white-space:nowrap;font-size:11px">${o.ts}</td>
+      <td>${o.table || "—"}</td>
+      <td style="font-size:11px">${o.items.map(i => `${i.product_name}×${i.qty}`).join(", ")}</td>
+      <td style="text-align:right;font-weight:600;color:#B8732A">${fmt(o.total + o.tax)}</td>
+      <td>${o.method === "cash" ? "💵" : o.method === "qr" ? "📱" : "🏦"} ${o.method}</td>
+    </tr>`).join("");
+    const orderNote = (period !== "day" && filtered.length > 50) ? `<p style="font-size:11px;color:#888">(បង្ហាញ 50 ក្នុង ${filtered.length} orders)</p>` : "";
+
+    // Stock status
+    const stockRows = ings.map(i => {
+      const s = Number(i.current_stock), t = Number(i.threshold);
+      const isLow = s <= t, isWarn = s <= t * 1.5 && !isLow;
+      const col = isLow ? "#E74C3C" : isWarn ? "#E67E22" : "#27AE60";
+      const pct = Math.min(100, (s / (t * 4 || 1)) * 100);
+      return `<tr>
+        <td>${i.ingredient_name}</td>
+        <td style="font-weight:700;color:${col}">${fmtStock(s)} ${i.unit}</td>
+        <td style="color:#888">${fmtStock(t)} ${i.unit}</td>
+        <td><div style="background:#eee;border-radius:4px;height:8px;width:120px"><div style="background:${col};height:8px;border-radius:4px;width:${pct}%"></div></div></td>
+        <td style="color:${col};font-weight:600">${isLow ? "⚠️ ជិតអស់" : isWarn ? "🔶 ប្រុង" : "✅ ល្អ"}</td>
+      </tr>`;
+    }).join("");
+
+    const topRows = top.map(([n, q], i) => `<tr><td>#${i + 1}</td><td>${n}</td><td style="font-weight:700;color:#B8732A">${q} ចាន</td></tr>`).join("");
+
+    const win = window.open("", "_blank", "width=1000,height=750");
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>Café Boom — របាយការណ៍ ${periodLabel}</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px;background:#fff}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #B8732A}
+      .logo{font-size:22px;font-weight:700;color:#B8732A}
+      .logo span{font-size:12px;color:#888;display:block;font-weight:400}
+      .meta{text-align:right;font-size:12px;color:#888}
+      h2{font-size:15px;font-weight:700;color:#B8732A;margin:20px 0 10px;padding:6px 10px;background:#fff7f0;border-left:4px solid #B8732A}
+      h3{font-size:13px;font-weight:700;color:#555;margin:16px 0 8px}
+      table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:12px}
+      th{background:#B8732A;color:#fff;padding:7px 10px;text-align:left;font-size:11px}
+      td{padding:6px 10px;border-bottom:1px solid #f0ece8}
+      tr:nth-child(even) td{background:#fdf9f6}
+      .total-row td{background:#fff3e8!important;font-weight:700;color:#B8732A}
+      .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:12px 0 20px}
+      .kpi{background:#fff7f0;border:1px solid #e8d8c8;border-radius:8px;padding:12px 14px}
+      .kpi .val{font-size:20px;font-weight:700;color:#B8732A;margin-top:4px}
+      .kpi .lbl{font-size:11px;color:#888}
+      .pay-row{display:flex;gap:12px;margin:8px 0 16px}
+      .pay-card{flex:1;background:#f8f8f8;border:1px solid #eee;border-radius:8px;padding:10px 14px;text-align:center}
+      .pay-card .icon{font-size:18px}
+      .pay-card .amt{font-size:15px;font-weight:700;color:#333;margin-top:2px}
+      .footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
+      @media print{body{padding:16px 20px} .no-print{display:none}}
+    </style></head><body>
+    <div class="header">
+      <div><div class="logo">☕ Café Boom<span>POS System</span></div></div>
+      <div class="meta">
+        <b>របាយការណ៍${period === "day" ? "ប្រចាំថ្ងៃ" : period === "month" ? "ប្រចាំខែ" : "ប្រចាំឆ្នាំ"}</b><br/>
+        ${periodLabel}<br/>
+        បោះពុម្ព: ${new Date().toLocaleString("km-KH")}
+      </div>
+    </div>
+
+    <h2>📊 សង្ខេបទូទៅ</h2>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="lbl">💰 ចំណូលសរុប</div><div class="val">${fmt(totalRev)}</div></div>
+      <div class="kpi"><div class="lbl">🛒 ការបញ្ជាទិញ</div><div class="val">${filtered.length} លើក</div></div>
+      <div class="kpi"><div class="lbl">☕ មុខម្ហូបលក់</div><div class="val">${totalItems} ចាន</div></div>
+      <div class="kpi"><div class="lbl">📊 មធ្យម/Order</div><div class="val">${fmt(avgOrder)}</div></div>
+    </div>
+    <div class="pay-row">
+      <div class="pay-card"><div class="icon">💵</div><div class="lbl">សាច់ប្រាក់</div><div class="amt">${fmt(payBreak.cash)}</div></div>
+      <div class="pay-card"><div class="icon">📱</div><div class="lbl">QR Code</div><div class="amt">${fmt(payBreak.qr)}</div></div>
+      <div class="pay-card"><div class="icon">🏦</div><div class="lbl">ធនាគារ</div><div class="amt">${fmt(payBreak.bank)}</div></div>
+    </div>
+
+    ${periodSummaryHtml}
+
+    <h2>📋 តារាង Orders</h2>
+    <table><thead><tr><th>ថ្ងៃទី</th><th>តុ</th><th>មុខម្ហូប</th><th>ចំណូល</th><th>ទូទាត់</th></tr></thead>
+    <tbody>${orderRows}
+    <tr class="total-row"><td colspan="3" style="text-align:right">សរុបរួម</td><td>${fmt(totalRev)}</td><td></td></tr>
+    </tbody></table>
+    ${orderNote}
+
+    <h2>🏆 មុខម្ហូបលក់ច្រើន</h2>
+    <table><thead><tr><th>#</th><th>មុខម្ហូប</th><th>ចំនួន</th></tr></thead>
+    <tbody>${topRows}</tbody></table>
+
+    <h2>⚠️ ស្ថានភាពស្តុក</h2>
+    <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Progress</th><th>ស្ថានភាព</th></tr></thead>
+    <tbody>${stockRows}</tbody></table>
+
+    <div class="footer">Café Boom POS © ${new Date().getFullYear()} · Generated ${new Date().toLocaleString()}</div>
+    <script>window.onload=()=>{window.print();}<\/script>
+    </body></html>`);
+    win.document.close();
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+
+      {/* ── STICKY HEADER ── */}
+      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid #1A181C", background: "var(--bg-main)" }}>
+        <SectionHeader title="📊 របាយការណ៍លក់" sub={periodLabel} />
+
+        {/* Multi-Branch Toggle */}
+        {isAdmin && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>📍 មើល:</span>
+            {[["branch", "🏪 តូបខ្ញុំ"], ["all", "🌐 តូបទាំងអស់"]].map(([k, lb]) => (
+              <button key={k} onClick={() => setReportMode(k)} style={{
+                padding: "6px 16px", borderRadius: 20, border: "none", cursor: "pointer",
+                fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+                background: reportMode === k ? `linear-gradient(135deg,var(--accent-dk),var(--accent))` : "var(--bg-card)",
+                color: reportMode === k ? "#fff" : "var(--text-dim)",
+                boxShadow: reportMode === k ? `0 4px 14px var(--accent)44` : "none",
+              }}>{lb}</button>
+            ))}
+            {reportMode === "all" && (
+              <button onClick={() => { setAllLoading(true); fetch(`${API}/api/all-orders`).then(r => r.json()).then(d => { setAllOrders(Array.isArray(d) ? d : []); setAllLoading(false); }).catch(() => setAllLoading(false)); }}
+                style={{
+                  marginLeft: "auto", padding: "6px 12px", borderRadius: 20, border: "1px solid var(--border)",
+                  background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11, color: "var(--text-dim)"
+                }}>
+                🔄 Refresh
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Period Tabs + Date Picker */}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {[["day", "📅 ប្រចាំថ្ងៃ"], ["month", "📆 ប្រចាំខែ"], ["year", "🗓️ ប្រចាំឆ្នាំ"]].map(([k, lb]) => (
+            <button key={k} onClick={() => setPeriod(k)} style={{
+              padding: "7px 18px", borderRadius: 20, border: "none", cursor: "pointer", fontFamily: "inherit",
+              fontSize: 12, fontWeight: 700,
+              background: period === k ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "#1A181C",
+              color: period === k ? "#fff" : "#666",
+              boxShadow: period === k ? "0 4px 14px #B8732A44" : "none",
+            }}>{lb}</button>
+          ))}
+          {period === "day" && (
+            <input type="date" value={selDate} onChange={e => setSelDate(e.target.value)}
+              style={{ ...inputSt, fontSize: 12, padding: "6px 12px", marginLeft: "auto" }} />
+          )}
+          {period === "month" && (
+            <input type="month" value={selMonth} onChange={e => setSelMonth(e.target.value)}
+              style={{ ...inputSt, fontSize: 12, padding: "6px 12px", marginLeft: "auto" }} />
+          )}
+          {period === "year" && (
+            <select value={selYear} onChange={e => setSelYear(e.target.value)}
+              style={{ ...inputSt, fontSize: 12, padding: "6px 12px", marginLeft: "auto" }}>
+              {allYears.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          )}
+        </div>
+
+        {/* Export buttons */}
+        {filtered.length > 0 && (
+          <div style={{ display: "flex", gap: 8, paddingTop: 10 }}>
+            <button onClick={doExportCSV} style={{ ...btnSmall, color: "#27AE60", borderColor: "#27AE6044", fontSize: 12, padding: "6px 14px" }}>
+              📊 Save CSV
+            </button>
+            <button onClick={doExportPDF} style={{ ...btnSmall, color: "#E8A84B", borderColor: "#E8A84B44", fontSize: 12, padding: "6px 14px" }}>
+              🖨️ Print / PDF
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── SCROLLABLE CONTENT ── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 32px" }}>
+
+        {/* Per-branch summary (all mode only) */}
+        {reportMode === "all" && !allLoading && branches.length > 0 && (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>🏪 សង្ខេបតាមតូប</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 10 }}>
+              {branches.filter(b => b.active).map(b => {
+                const bOrders = filtered.filter(o => o.branch_id === b.branch_id);
+                const bRev = bOrders.reduce((s, o) => s + o.total + o.tax, 0);
+                return (
+                  <div key={b.branch_id} style={{
+                    background: "var(--bg-card)", border: "1px solid var(--border)",
+                    borderRadius: 12, padding: "12px 14px"
+                  }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>🏪 {b.branch_name}</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)" }}>{fmt(bRev)}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>{bOrders.length} orders</div>
+                    {/* Revenue bar */}
+                    {filtered.length > 0 && (
+                      <div style={{ height: 4, background: "var(--bg-main)", borderRadius: 2, marginTop: 8 }}>
+                        <div style={{
+                          height: "100%", borderRadius: 2,
+                          background: `linear-gradient(90deg,var(--accent-dk),var(--accent))`,
+                          width: `${Math.round((bRev / filtered.reduce((s, o) => s + o.total + o.tax, 0) || 1) * 100)}%`
+                        }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Loading all-orders */}
+        {reportMode === "all" && allLoading && (
+          <div style={{ textAlign: "center", padding: 32, color: "var(--text-dim)" }}>
+            <div style={{
+              width: 28, height: 28, border: "3px solid var(--border)", borderTop: `3px solid var(--accent)`,
+              borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 10px"
+            }} />
+            កំពុងទាញ Orders ពីតូបទាំងអស់...
+          </div>
+        )}
+
+        {/* ── KPI Cards ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 12, marginBottom: 20 }}>
+          {[
+            ["💰", "ចំណូលសរុប", fmt(totalRev), "#E8A84B"],
+            ["🛒", "ការបញ្ជាទិញ", filtered.length + " លើក", "#5BA3E0"],
+            ["☕", "មុខម្ហូបលក់", totalItems + " ចាន", "#5C9E5C"],
+            ["📊", "មធ្យម/Order", fmt(avgOrder), "#9B59B6"],
+          ].map(([ic, lb, val, col]) => (
+            <div key={lb} style={{
+              background: "#120F13", border: `1px solid ${col}33`, borderRadius: 14, padding: "14px 12px",
+              display: "flex", flexDirection: "column", gap: 4
+            }}>
+              <div style={{ fontSize: 22 }}>{ic}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: col }}>{val}</div>
+              <div style={{ fontSize: 11, color: "#555" }}>{lb}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Chart: by hour/day/month ── */}
+        {filtered.length > 0 && (
+          <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 18, marginBottom: 18 }}>
+            <div style={{ fontWeight: 700, marginBottom: 14, fontSize: 13 }}>
+              {period === "day" ? "⏰ ចំណូលតាមម៉ោង" : period === "month" ? "📅 ចំណូលតាមថ្ងៃ" : "📆 ចំណូលតាមខែ"}
+            </div>
+            {(() => {
+              let bars = [];
+              if (period === "day") {
+                bars = Array.from({ length: 14 }, (_, i) => i + 7).map(h => ({ label: `${h}h`, val: byHour[h] || 0 }));
+              } else if (period === "month") {
+                const days = new Date(parseInt(selMonth.slice(0, 4)), parseInt(selMonth.slice(5)), 0).getDate();
+                bars = Array.from({ length: days }, (_, i) => i + 1).map(d => {
+                  const key = `${selMonth}-${String(d).padStart(2, "0")}`;
+                  return { label: String(d), val: byDay[key] || 0 };
+                });
+              } else {
+                bars = Array.from({ length: 12 }, (_, i) => i).map(m => ({ label: MON_KH[m].slice(0, 3), val: byMon[m] || 0 }));
+              }
+              const maxVal = Math.max(...bars.map(b => b.val), 0.01);
+              return (
+                <div style={{
+                  display: "flex", alignItems: "flex-end", gap: period === "month" ? 3 : 6,
+                  height: 120, overflowX: "auto", paddingBottom: 4
+                }}>
+                  {bars.map((b, i) => (
+                    <div key={i} style={{
+                      display: "flex", flexDirection: "column", alignItems: "center",
+                      gap: 3, minWidth: period === "month" ? 14 : 28, flex: period === "month" ? "0 0 14px" : "1"
+                    }}>
+                      <div style={{ fontSize: 9, color: b.val > 0 ? "#E8A84B" : "transparent", fontWeight: 700 }}>
+                        {b.val > 0 ? `$${b.val.toFixed(0)}` : ""}
+                      </div>
+                      <div style={{
+                        width: "100%", background: b.val > 0 ? "linear-gradient(0deg,#B8732A,#E8A84B)" : "#1A181C",
+                        borderRadius: "3px 3px 0 0", transition: "height .4s",
+                        height: `${Math.max(2, (b.val / maxVal) * 90)}px`
+                      }} />
+                      <div style={{ fontSize: 9, color: "#444", whiteSpace: "nowrap" }}>{b.label}</div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+          {/* Top products */}
+          <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16 }}>
+            <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>🏆 មុខម្ហូបលក់ដាច់</div>
+            {top.length === 0
+              ? <div style={{ color: "#444", fontSize: 12 }}>មិនទាន់មានទិន្នន័យ</div>
+              : top.map(([name, qty], i) => (
+                <div key={name} style={{ marginBottom: 9 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                    <span style={{
+                      color: i === 0 ? "#E8A84B" : "#aaa", overflow: "hidden", textOverflow: "ellipsis",
+                      whiteSpace: "nowrap", maxWidth: "70%"
+                    }}>#{i + 1} {name}</span>
+                    <span style={{ color: "#E8A84B", fontWeight: 700, flexShrink: 0 }}>{qty} ចាន</span>
+                  </div>
+                  <div style={{ height: 4, background: "#1A181C", borderRadius: 2 }}>
+                    <div style={{
+                      height: "100%", width: `${(qty / maxTop) * 100}%`,
+                      background: `linear-gradient(90deg,#B8732A,#E8A84B)`, borderRadius: 2
+                    }} />
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+
+          {/* Payment breakdown */}
+          <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16 }}>
+            <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>💳 វិធីទូទាត់</div>
+            {filtered.length === 0
+              ? <div style={{ color: "#444", fontSize: 12 }}>មិនទាន់មានទិន្នន័យ</div>
+              : [["💵", "សាច់ប្រាក់", "cash", "#27AE60"], ["📱", "QR Code", "qr", "#5BA3E0"], ["🏦", "ធនាគារ", "bank", "#9B59B6"]].map(([ic, lb, k, col]) => (
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                  <span style={{ fontSize: 16 }}>{ic}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 2 }}>
+                      <span style={{ color: "#888" }}>{lb}</span>
+                      <span style={{ color: col, fontWeight: 700 }}>{fmt(byMethod[k] || 0)}</span>
+                    </div>
+                    <div style={{ height: 4, background: "#1A181C", borderRadius: 2 }}>
+                      <div style={{
+                        height: "100%", width: totalRev ? `${((byMethod[k] || 0) / totalRev) * 100}%` : "0%",
+                        background: col, borderRadius: 2
+                      }} />
+                    </div>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+
+          {/* Order list for day view */}
+          {period === "day" && (
+            <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+              <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>🧾 តារាង Order ថ្ងៃនេះ ({filtered.length})</div>
+              {filtered.length === 0
+                ? <div style={{ color: "#444", fontSize: 12 }}>គ្មានការលក់ថ្ងៃនេះ</div>
+                : filtered.slice().reverse().map(o => (
+                  <div key={o.order_id} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "8px 0", borderBottom: "1px solid #1A181B", gap: 8
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, color: "#777", fontFamily: "'DM Mono',monospace" }}>
+                        {new Date(o.order_id).toLocaleTimeString("km-KH", { hour: "2-digit", minute: "2-digit" })}
+                        {o.table && <span style={{ marginLeft: 6, color: "#B8732A" }}>តុ{o.table}</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#aaa", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {o.items.map(i => `${i.emoji}${i.product_name}×${i.qty}`).join(", ")}
+                      </div>
+                    </div>
+                    <div style={{ fontWeight: 700, color: "#E8A84B", fontSize: 13, flexShrink: 0 }}>{fmt(o.total + o.tax)}</div>
+                  </div>
+                ))
+              }
+            </div>
+          )}
+
+          {/* Monthly breakdown table */}
+          {period === "month" && filtered.length > 0 && (
+            <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+              <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>📋 សង្ខេបប្រចាំថ្ងៃ</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 1, fontSize: 11 }}>
+                {["ថ្ងៃ", "Orders", "Items", "ចំណូល"].map(h => (
+                  <div key={h} style={{ background: "#1A181C", padding: "6px 8px", fontWeight: 700, color: "#E8A84B" }}>{h}</div>
+                ))}
+                {Object.entries(byDay).sort().map(([day, rev]) => {
+                  const dayOrders = filtered.filter(o => new Date(o.order_id).toISOString().slice(0, 10) === day);
+                  const items = dayOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty, 0), 0);
+                  return [
+                    <div key={day + "d"} style={{ padding: "6px 8px", color: "#aaa" }}>{day.slice(8)}</div>,
+                    <div key={day + "o"} style={{ padding: "6px 8px", color: "#5BA3E0" }}>{dayOrders.length}</div>,
+                    <div key={day + "i"} style={{ padding: "6px 8px", color: "#5C9E5C" }}>{items}</div>,
+                    <div key={day + "r"} style={{ padding: "6px 8px", color: "#E8A84B", fontWeight: 700 }}>{fmt(rev)}</div>,
+                  ];
+                })}
+                <div style={{ background: "#1A2A1A", padding: "6px 8px", fontWeight: 700, color: "#fff" }}>សរុប</div>
+                <div style={{ background: "#1A2A1A", padding: "6px 8px", fontWeight: 700, color: "#5BA3E0" }}>{filtered.length}</div>
+                <div style={{ background: "#1A2A1A", padding: "6px 8px", fontWeight: 700, color: "#5C9E5C" }}>{totalItems}</div>
+                <div style={{ background: "#1A2A1A", padding: "6px 8px", fontWeight: 700, color: "#E8A84B" }}>{fmt(totalRev)}</div>
+              </div>
+            </div>
+          )}
+
+          {/* Yearly breakdown table */}
+          {period === "year" && filtered.length > 0 && (
+            <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+              <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>📋 សង្ខេបប្រចាំខែ</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 1, fontSize: 11 }}>
+                {["ខែ", "Orders", "Items", "ចំណូល"].map(h => (
+                  <div key={h} style={{ background: "#1A181C", padding: "6px 8px", fontWeight: 700, color: "#E8A84B" }}>{h}</div>
+                ))}
+                {Array.from({ length: 12 }, (_, m) => m).filter(m => byMon[m] > 0).map(m => {
+                  const monOrders = filtered.filter(o => new Date(o.order_id).getMonth() === m);
+                  const items = monOrders.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty, 0), 0);
+                  return [
+                    <div key={m + "n"} style={{ padding: "6px 8px", color: "#aaa" }}>{MON_KH[m]}</div>,
+                    <div key={m + "o"} style={{ padding: "6px 8px", color: "#5BA3E0" }}>{monOrders.length}</div>,
+                    <div key={m + "i"} style={{ padding: "6px 8px", color: "#5C9E5C" }}>{items}</div>,
+                    <div key={m + "r"} style={{ padding: "6px 8px", color: "#E8A84B", fontWeight: 700 }}>{fmt(byMon[m])}</div>,
+                  ];
+                })}
+                <div style={{ background: "#1A2A1A", padding: "6px 8px", fontWeight: 700, color: "#fff" }}>សរុប</div>
+                <div style={{ background: "#1A2A1A", padding: "6px 8px", fontWeight: 700, color: "#5BA3E0" }}>{filtered.length}</div>
+                <div style={{ background: "#1A2A1A", padding: "6px 8px", fontWeight: 700, color: "#5C9E5C" }}>{totalItems}</div>
+                <div style={{ background: "#1A2A1A", padding: "6px 8px", fontWeight: 700, color: "#E8A84B" }}>{fmt(totalRev)}</div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Sales by User ── */}
+          {(() => {
+            const userSales = {};
+            filtered.forEach(o => {
+              const key = o.cashier || o.user || "unknown";
+              if (!userSales[key]) userSales[key] = { orders: 0, revenue: 0, items: 0 };
+              userSales[key].orders++;
+              userSales[key].revenue += o.total + o.tax;
+              userSales[key].items += (o.items||[]).reduce((s,i) => s+i.qty, 0);
+            });
+            const entries = Object.entries(userSales).sort((a,b) => b[1].revenue - a[1].revenue);
+            if (entries.length === 0) return null;
+            const maxRev = entries[0][1].revenue || 1;
+            return (
+              <div style={{ background:"#120F13", border:"1px solid #1E1B1F", borderRadius:14, padding:16, gridColumn:"1/-1" }}>
+                <div style={{ fontWeight:700, marginBottom:14, fontSize:13, display:"flex", alignItems:"center", gap:8 }}>
+                  👤 ការលក់តាម User
+                  <span style={{ fontSize:11, color:"#555", fontWeight:400 }}>({entries.length} នាក់)</span>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:10 }}>
+                  {entries.map(([name, s], idx) => {
+                    const pct = (s.revenue / maxRev) * 100;
+                    const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx+1}`;
+                    const col = idx === 0 ? "#E8A84B" : idx === 1 ? "#aaa" : idx === 2 ? "#CD7F32" : "#555";
+                    return (
+                      <div key={name} style={{
+                        background:"#0E0C0F", border:"1px solid #1A181C",
+                        borderRadius:12, padding:"12px 14px"
+                      }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                          <div style={{
+                            width:36, height:36, borderRadius:10, flexShrink:0,
+                            background: idx===0 ? "linear-gradient(135deg,#8B5520,#E8A84B)"
+                              : idx===1 ? "linear-gradient(135deg,#555,#aaa)"
+                              : idx===2 ? "linear-gradient(135deg,#7A4A1A,#CD7F32)"
+                              : "linear-gradient(135deg,#1A1820,#2A2530)",
+                            display:"flex", alignItems:"center", justifyContent:"center", fontSize:17
+                          }}>{medal}</div>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontWeight:700, fontSize:13, color:col, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {name}
+                            </div>
+                            <div style={{ fontSize:11, color:"#555", marginTop:1 }}>
+                              {s.orders} Order · {s.items} មុខ
+                            </div>
+                          </div>
+                          <div style={{ fontWeight:700, fontSize:14, color:col, fontFamily:"'DM Mono',monospace", flexShrink:0 }}>
+                            {fmt(s.revenue)}
+                          </div>
+                        </div>
+                        <div style={{ height:5, background:"#1A181C", borderRadius:3, overflow:"hidden" }}>
+                          <div style={{
+                            height:"100%", width:pct+"%", borderRadius:3,
+                            background: idx===0
+                              ? "linear-gradient(90deg,#B8732A,#E8A84B)"
+                              : idx===1 ? "linear-gradient(90deg,#777,#bbb)"
+                              : idx===2 ? "linear-gradient(90deg,#7A4A1A,#CD7F32)"
+                              : "#2A2530",
+                            transition:"width .4s"
+                          }} />
+                        </div>
+                        <div style={{ display:"flex", justifyContent:"space-between", marginTop:5, fontSize:10, color:"#444" }}>
+                          <span>avg {fmt(s.orders ? s.revenue/s.orders : 0)}/order</span>
+                          <span>{Math.round(pct)}% នៃការលក់</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Stock health + Usage */}
+          <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+
+            {/* ── Stock Status ── */}
+            <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13, color: lowStock.length ? "#E74C3C" : "#aaa" }}>⚠️ ស្ថានភាពស្តុក</div>
+            {ings.map(i => {
+              const isLow = Number(i.current_stock) <= Number(i.threshold);
+              const pct = Math.min(100, (Number(i.current_stock) / (Number(i.threshold) * 4 || 1)) * 100);
+              const col = isLow ? "#E74C3C" : Number(i.current_stock) <= Number(i.threshold) * 1.5 ? "#F39C12" : "#27AE60";
+              return (
+                <div key={i.ingredient_id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+                  <div style={{ width: 130, fontSize: 11, color: "#aaa", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.ingredient_name}</div>
+                  <div style={{ flex: 1, height: 5, background: "#1A181C", borderRadius: 3 }}>
+                    <div style={{ height: "100%", width: pct+"%", background: col, borderRadius: 3 }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: col, minWidth: 70, textAlign: "right", fontFamily: "'DM Mono',monospace" }}>{fmtStock(Number(i.current_stock))}{i.unit}</div>
+                </div>
+              );
+            })}
+
+            {/* ── Ingredient Usage (Day / Month) ── */}
+            {(() => {
+              // Calculate usage from filtered orders via recipes
+              const usageMap = {}; // ingredient_id → qty used
+              filtered.forEach(o => {
+                (o.items || []).forEach(item => {
+                  const prod = prods.find(p => p.product_name === item.product_name || p.product_id === item.product_id);
+                  if (!prod) return;
+                  (recipes || []).filter(r => r.product_id === prod.product_id).forEach(r => {
+                    usageMap[r.ingredient_id] = (usageMap[r.ingredient_id] || 0) + r.quantity_required * item.qty;
+                  });
+                });
+              });
+              const usedIngs = ings.filter(i => usageMap[i.ingredient_id] > 0);
+              if (usedIngs.length === 0) return null;
+              const periodLabel = period === "day" ? "ថ្ងៃនេះ" : period === "month" ? "ខែនេះ" : "ឆ្នាំនេះ";
+              return (
+                <div style={{ marginTop: 20, borderTop: "1px solid #1E1B1F", paddingTop: 16 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#5BA3E0", marginBottom: 12 }}>
+                    📦 ការប្រើប្រាស់គ្រឿងផ្សំ — {periodLabel}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 8 }}>
+                    {usedIngs.map(i => {
+                      const used = usageMap[i.ingredient_id] || 0;
+                      const stock = Number(i.current_stock);
+                      const pctUsed = stock > 0 ? Math.min(100, (used / (stock + used)) * 100) : 100;
+                      const col = pctUsed > 70 ? "#E74C3C" : pctUsed > 40 ? "#F39C12" : "#5BA3E0";
+                      return (
+                        <div key={i.ingredient_id} style={{ background: "#0E0C0F", border: "1px solid #1A181C", borderRadius: 10, padding: "10px 12px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-main)" }}>{i.ingredient_name}</span>
+                            <span style={{ fontSize: 12, color: col, fontFamily: "'DM Mono',monospace", fontWeight: 700 }}>
+                              -{fmtStock(used)}{i.unit}
+                            </span>
+                          </div>
+                          <div style={{ height: 4, background: "#1A181C", borderRadius: 2, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: pctUsed+"%", background: col, borderRadius: 2, transition: "width .3s" }} />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, fontSize: 10, color: "#555" }}>
+                            <span>ប្រើ {Math.round(pctUsed)}% នៃស្តុក</span>
+                            <span>នៅសល់ {fmtStock(stock)}{i.unit}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* Telegram button */}
+        <div style={{ marginTop: 20 }}>
+          <button onClick={async () => { await sendDailySummary(orders); alert("✅ ផ្ញើ Telegram Summary រួចហើយ!"); }}
+            style={{ ...btnGold, display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+            📲 ផ្ញើ Summary ថ្ងៃនេះ ទៅ Telegram
+          </button>
+        </div>
+      </div>{/* end scroll */}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  FINANCE PAGE  — ចំណូល ចំណាយ ចំណេញ ប្រចាំខែ
+// ═══════════════════════════════════════════════════════════════════
+
+// Default expense categories (used if none saved yet)
+const DEFAULT_EXPENSE_CATS = [
+  { id:"salary",      label:"💰 ប្រាក់ខែបុគ្គលិក", color:"#E74C3C" },
+  { id:"electricity", label:"⚡ ភ្លើង",              color:"#F39C12" },
+  { id:"tax",         label:"🏛️ ពន្ធ",               color:"#9B59B6" },
+  { id:"rent",        label:"🏠 ជួលកន្លែង",          color:"#5BA3E0" },
+  { id:"supplies",    label:"🧴 គ្រឿងប្រើប្រាស់",   color:"#27AE60" },
+  { id:"other",       label:"📦 ចំណាយផ្សេងៗ",       color:"#7F8C8D" },
+];
+
+const CAT_COLORS = ["#E74C3C","#F39C12","#9B59B6","#5BA3E0","#27AE60","#7F8C8D","#E8A84B","#1ABC9C","#E91E63","#FF5722"];
+const CAT_EMOJIS = ["💰","⚡","🏛️","🏠","🧴","📦","🚗","💊","🍱","📱","🔧","💡","🎁","📋","🏦"];
+
+
+function FinancePage({ orders, expenses, setExpenses, notify, isAdmin }) {
+  const MON_KH = ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
+  const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0,7));
+  const [editMode, setEditMode] = useState(false);  // edit amounts
+  const [catMode,  setCatMode]  = useState(false);  // manage categories
+  const [draft,    setDraft]    = useState({});
+  const [newCat,   setNewCat]   = useState({ label:"", color:"#E8A84B", emoji:"📦" });
+  const [editCatId, setEditCatId] = useState(null);
+
+  const [y, m]     = selMonth.split("-");
+  const monthLabel = MON_KH[parseInt(m)-1] + " " + y;
+
+  // Load expense_cats from array meta entry
+  const expCats = (() => {
+    if (!Array.isArray(expenses)) return DEFAULT_EXPENSE_CATS;
+    const meta = expenses.find(e => e && e._meta);
+    return (meta && meta._cats && meta._cats.length > 0) ? meta._cats : DEFAULT_EXPENSE_CATS;
+  })();
+
+  const monthOrders = (orders||[]).filter(o => {
+    try { return new Date(o.order_id).toISOString().slice(0,7) === selMonth; } catch { return false; }
+  });
+  const revenue  = monthOrders.reduce((s,o) => s + o.total + o.tax, 0);
+
+  // expenses is array of monthly records + _cats meta
+  const monthlyRecords = Array.isArray(expenses) ? expenses.filter(e => e && e.month) : [];
+  const monthExp = monthlyRecords.find(e => e.month === selMonth) || { month:selMonth, items:{} };
+  const expItems = monthExp.items || {};
+  const totalExp = expCats.reduce((s,c) => s + (Number(expItems[c.id])||0), 0);
+  const profit   = revenue - totalExp;
+  const profitColor = profit > 0 ? "#27AE60" : profit < 0 ? "#E74C3C" : "#888";
+
+  const orderMonths = [...new Set((orders||[]).map(o => {
+    try { return new Date(o.order_id).toISOString().slice(0,7); } catch { return null; }
+  }).filter(Boolean))].sort().reverse();
+  if (!orderMonths.includes(selMonth)) orderMonths.unshift(selMonth);
+
+  // ── Save cats to meta ──────────────────────────────────────────────
+  const saveCats = (newCats) => {
+    // Keep all monthly records, replace/add _meta entry
+    const monthRecs = Array.isArray(expenses) ? expenses.filter(e => e && !e._meta) : [];
+    const meta = { _meta: true, _cats: newCats };
+    setExpenses([...monthRecs, meta]);
+  };
+
+  // Helper: get _cats from expenses array (same as expCats but callable)
+  const getCats = () => expCats;
+
+  // ── Add new category ───────────────────────────────────────────────
+  const addCat = () => {
+    if (!newCat.label.trim()) return;
+    const id = "cat_" + Date.now();
+    const cats = [...getCats(), { id, label: newCat.emoji + " " + newCat.label.trim(), color: newCat.color }];
+    saveCats(cats);
+    setNewCat({ label:"", color: CAT_COLORS[cats.length % CAT_COLORS.length], emoji:"📦" });
+    notify("✓ បន្ថែមមុខចំណាយ: " + newCat.label);
+  };
+
+  // ── Delete category ────────────────────────────────────────────────
+  const delCat = (id) => {
+    const cats = getCats().filter(c => c.id !== id);
+    // Also remove this category's amount from ALL monthly records
+    const monthRecs = Array.isArray(expenses) ? expenses.filter(e => e && !e._meta) : [];
+    const updatedRecs = monthRecs.map(e => {
+      if (!e.items || !(id in e.items)) return e;
+      const { [id]: _removed, ...rest } = e.items;
+      return { ...e, items: rest };
+    });
+    const meta = { _meta: true, _cats: cats };
+    setExpenses([...updatedRecs, meta]);
+    notify("✓ លុបមុខចំណាយ + សម្អាតចំនួន");
+  };
+
+  // ── Edit category label ────────────────────────────────────────────
+  const [editCatDraft, setEditCatDraft] = useState({});
+  const startEditCat = (c) => {
+    setEditCatId(c.id);
+    // parse emoji and label
+    const parts = c.label.match(/^(\S+)\s+(.+)$/);
+    setEditCatDraft({ emoji: parts ? parts[1] : "📦", label: parts ? parts[2] : c.label, color: c.color });
+  };
+  const saveEditCat = () => {
+    if (!editCatDraft.label.trim()) return;
+    const cats = getCats().map(c => c.id === editCatId
+      ? { ...c, label: editCatDraft.emoji + " " + editCatDraft.label.trim(), color: editCatDraft.color }
+      : c);
+    saveCats(cats);
+    setEditCatId(null);
+    notify("✓ កែប្រែមុខចំណាយ");
+  };
+
+  // ── Start edit amounts ─────────────────────────────────────────────
+  const startEdit = () => {
+    const d = {};
+    expCats.forEach(c => { d[c.id] = expItems[c.id] != null ? String(expItems[c.id]) : ""; });
+    setDraft(d);
+    setEditMode(true);
+  };
+
+  const saveEdit = () => {
+    const items = {};
+    expCats.forEach(c => { const v = parseFloat(draft[c.id]); if (!isNaN(v) && v > 0) items[c.id] = v; });
+    const meta = Array.isArray(expenses) ? expenses.find(e => e && e._meta) : null;
+    const updated = monthlyRecords.filter(e => e.month !== selMonth);
+    updated.push({ month:selMonth, items });
+    if (meta) updated.push(meta);
+    setExpenses(updated);
+    setEditMode(false);
+    notify("💾 រក្សាទុកចំណាយខែ " + monthLabel + " ហើយ!");
+  };
+
+  // ── Print PDF ──────────────────────────────────────────────────────
+  const doPrint = () => {
+    const expRows = expCats.map(c => {
+      const val = Number(expItems[c.id])||0;
+      return "<tr><td>" + c.label + "</td><td style='text-align:right;font-weight:"+(val>0?700:400)+";color:"+(val>0?"#c0392b":"#aaa")+"'>" + (val>0?fmt(val):"—") + "</td></tr>";
+    }).join("");
+    const histRows = monthlyRecords.slice(0,12).map(e => {
+      const parts = e.month.split("-"); const ey=parts[0]; const em=parts[1];
+      const rev2 = (orders||[]).filter(o => { try { return new Date(o.order_id).toISOString().slice(0,7)===e.month; } catch { return false; } }).reduce((s,o) => s+o.total+o.tax, 0);
+      const exp2 = expCats.reduce((s,c) => s+Number((e.items||{})[c.id]||0), 0);
+      const pnl2 = rev2-exp2;
+      return "<tr"+(e.month===selMonth?" style='background:#fff7f0'":'')+">"
+        +"<td>"+MON_KH[parseInt(em)-1]+" "+ey+"</td>"
+        +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
+        +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
+        +"<td style='font-weight:700;color:"+(pnl2>=0?"#27ae60":"#c0392b")+"'>"+(pnl2>=0?"+":"")+fmt(pnl2)+"</td></tr>";
+    }).join("");
+    const barExpW = totalExp>0 ? Math.min(100,(totalExp/Math.max(revenue,totalExp))*100) : 0;
+    const html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Cafe Bloom - ហិរញ្ញវត្ថុ "+monthLabel+"</title>"
+      +"<style>@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');"
+      +"*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px}"
+      +".header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #B8732A}"
+      +".logo{font-size:20px;font-weight:700;color:#B8732A}.logo span{font-size:11px;color:#888;display:block;font-weight:400}"
+      +".meta{text-align:right;font-size:12px;color:#888}h2{font-size:14px;font-weight:700;color:#B8732A;margin:18px 0 8px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A}"
+      +".kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:10px 0 16px}"
+      +".kpi{background:#fff7f0;border:1px solid #e8d8c8;border-radius:8px;padding:12px 14px}"
+      +".kpi .val{font-size:20px;font-weight:700;margin-top:3px}.kpi .lbl{font-size:11px;color:#888}"
+      +".bar-wrap{background:#eee;border-radius:6px;height:12px;overflow:hidden;margin:8px 0 4px;display:flex}"
+      +".bar-exp{background:#e74c3c;height:100%}.bar-rev{background:#27ae60;height:100%;flex:1}"
+      +"table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:12px}"
+      +"th{background:#B8732A;color:#fff;padding:7px 10px;text-align:left;font-size:11px}"
+      +"td{padding:7px 10px;border-bottom:1px solid #f0ece8}tr:nth-child(even) td{background:#fdf9f6}"
+      +".footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}"
+      +"@media print{body{padding:14px}}</style></head><body>"
+      +"<div class='header'><div class='logo'>☕ Cafe Bloom <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ</span></div>"
+      +"<div class='meta'><b>"+monthLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div></div>"
+      +"<h2>📊 សង្ខេបហិរញ្ញវត្ថុ</h2>"
+      +"<div class='kpi-grid'>"
+      +"<div class='kpi'><div class='lbl'>💰 ចំណូលសរុប</div><div class='val' style='color:#B8732A'>"+fmt(revenue)+"</div></div>"
+      +"<div class='kpi'><div class='lbl'>💸 ចំណាយសរុប</div><div class='val' style='color:#e74c3c'>"+fmt(totalExp)+"</div></div>"
+      +"<div class='kpi'><div class='lbl'>📈 ចំណេញសុទ្ធ</div><div class='val' style='color:"+(profit>=0?"#27ae60":"#e74c3c")+"'>"+(profit>=0?"+":"")+fmt(profit)+"</div></div>"
+      +"</div>"
+      +(revenue>0||totalExp>0?"<div class='bar-wrap'>"+(totalExp>0?"<div class='bar-exp' style='width:"+barExpW+"%'></div>":"")+(revenue>totalExp?"<div class='bar-rev'></div>":"")+"</div><div style='display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:12px'><span style='color:#e74c3c'>ចំណាយ "+fmt(totalExp)+"</span><span style='color:#27ae60'>ចំណូល "+fmt(revenue)+"</span></div>":"")
+      +"<h2>📋 បញ្ជីចំណាយ</h2>"
+      +"<table><thead><tr><th>ប្រភេទចំណាយ</th><th style='text-align:right'>ចំនួន</th></tr></thead>"
+      +"<tbody>"+expRows+"<tr style='background:#fff3e8'><td style='font-weight:700'>💸 ចំណាយសរុប</td><td style='text-align:right;font-weight:700;color:#c0392b'>"+fmt(totalExp)+"</td></tr></tbody></table>"
+      +(histRows?"<h2>📅 ប្រវត្តិប្រចាំខែ</h2><table><thead><tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr></thead><tbody>"+histRows+"</tbody></table>":"")
+      +"<div class='footer'>Cafe Bloom POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+monthLabel+"</div>"
+      +"<script>window.onload=function(){window.print();}<\/script></body></html>";
+    const win = window.open("","_blank","width=1000,height=750");
+    win.document.write(html);
+    win.document.close();
+  };
+
+  const inSt2 = { ...inputSt, fontSize:12, padding:"6px 10px" };
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
+
+      {/* Sticky Header */}
+      <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid #E8A84B44", background:"#E8A84B44" }}>
+        <div style={{ fontWeight:700, fontSize:18, marginBottom:8 }}>💼 ហិរញ្ញវត្ថុប្រចាំខែ</div>
+        <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
+          <span style={{ fontSize:12, color:"#ffffff" }}>📆 ខែ:</span>
+          <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
+            style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
+            {orderMonths.map(mo => {
+              const [oy,om] = mo.split("-");
+              return <option key={mo} value={mo}>{MON_KH[parseInt(om)-1]} {oy}</option>;
+            })}
+          </select>
+          <button onClick={doPrint} style={{ ...btnSmall, color:"#ffffff", borderColor:"#E8A84B44", fontSize:12, padding:"6px 14px" }}>
+            🖨️ Print / PDF
+          </button>
+        </div>
+      </div>
+
+      {/* Scrollable Body */}
+      <div style={{ flex:1, overflowY:"auto", padding:"16px" }}>
+        <div style={{ maxWidth:720, margin:"0 auto" }}>
+
+          {/* KPI Cards */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:18 }}>
+            {[
+              ["💰","ចំណូល",  revenue,  "#E8A84B"],
+              ["💸","ចំណាយ",  totalExp, "#E74C3C"],
+              ["📈","ចំណេញ",  profit,   profitColor],
+            ].map(([ic,lb,val,col]) => (
+              <div key={lb} style={{ background:"#120F13", border:"1px solid "+col+"33", borderRadius:14, padding:"14px 10px", textAlign:"center" }}>
+                <div style={{ fontSize:24 }}>{ic}</div>
+                <div style={{ fontSize:18, fontWeight:700, color:col, marginTop:4 }}>{fmt(val)}</div>
+                <div style={{ fontSize:11, color:"#555", marginTop:2 }}>{lb}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Revenue vs Expense bar */}
+          {(revenue > 0 || totalExp > 0) && (
+            <div style={{ background:"#120F13", border:"1px solid #1E1B1F", borderRadius:14, padding:16, marginBottom:16 }}>
+              <div style={{ fontSize:12, color:"#666", marginBottom:8, fontWeight:600 }}>ចំណូល vs ចំណាយ</div>
+              <div style={{ height:14, background:"#1A181C", borderRadius:7, overflow:"hidden", display:"flex" }}>
+                {totalExp > 0 && (
+                  <div style={{ width:Math.min(100,(totalExp/Math.max(revenue,totalExp))*100)+"%", background:"linear-gradient(90deg,#8B1A1A,#E74C3C)" }} />
+                )}
+                {revenue > totalExp && (
+                  <div style={{ flex:1, background:"linear-gradient(90deg,#1A7A3A,#27AE60)" }} />
+                )}
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", marginTop:5, fontSize:11 }}>
+                <span style={{ color:"#E74C3C" }}>ចំណាយ {fmt(totalExp)}</span>
+                <span style={{ color:"#27AE60" }}>ចំណូល {fmt(revenue)}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Expense Breakdown */}
+          <div style={{ background:"#120F13", border:"1px solid #1E1B1F", borderRadius:14, padding:16, marginBottom:16 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontWeight:700, fontSize:14 }}>📋 បញ្ជីចំណាយ</div>
+              {isAdmin && (
+                <div style={{ display:"flex", gap:6 }}>
+                  {!editMode && !catMode && (
+                    <>
+                      <button onClick={() => setCatMode(true)}
+                        style={{ ...btnSmall, color:"#5BA3E0", borderColor:"#5BA3E044", fontSize:12 }}>⚙️ គ្រប់គ្រង</button>
+                      <button onClick={startEdit}
+                        style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B44", fontSize:12 }}>✏️ កែប្រែ</button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── CAT MANAGEMENT MODE ── */}
+            {catMode && (
+              <div>
+                <div style={{ fontSize:12, color:"#888", marginBottom:12 }}>⚙️ គ្រប់គ្រងប្រភេទចំណាយ</div>
+
+                {/* Existing cats */}
+                {expCats.map(c => (
+                  <div key={c.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, padding:"8px 10px", background:"#0E0C0F", borderRadius:8, border:"1px solid #1A181C" }}>
+                    {editCatId === c.id ? (
+                      <>
+                        <select value={editCatDraft.emoji} onChange={e => setEditCatDraft(p=>({...p,emoji:e.target.value}))}
+                          style={{ ...inSt2, width:60 }}>
+                          {CAT_EMOJIS.map(em => <option key={em} value={em}>{em}</option>)}
+                        </select>
+                        <input value={editCatDraft.label} onChange={e => setEditCatDraft(p=>({...p,label:e.target.value}))}
+                          style={{ ...inSt2, flex:1 }} placeholder="ឈ្មោះ..." />
+                        <select value={editCatDraft.color} onChange={e => setEditCatDraft(p=>({...p,color:e.target.value}))}
+                          style={{ ...inSt2, width:50, background:editCatDraft.color, color:"#fff", border:"none" }}>
+                          {CAT_COLORS.map(cl => <option key={cl} value={cl} style={{background:cl}}>■</option>)}
+                        </select>
+                        <button onClick={saveEditCat} style={{ ...btnSmall, color:"#27AE60", borderColor:"#27AE6044", fontSize:11 }}>✓</button>
+                        <button onClick={() => setEditCatId(null)} style={{ ...btnSmall, fontSize:11 }}>✕</button>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ width:8, height:8, borderRadius:"50%", background:c.color, flexShrink:0 }} />
+                        <span style={{ flex:1, fontSize:13, color:"#EDE8E1" }}>{c.label}</span>
+                        <button onClick={() => startEditCat(c)}
+                          style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B33", fontSize:11, padding:"3px 10px" }}>✏️</button>
+                        <button onClick={() => delCat(c.id)}
+                          style={{ ...btnSmall, color:"#E74C3C", borderColor:"#E74C3C33", fontSize:11, padding:"3px 10px" }}>🗑️</button>
+                      </>
+                    )}
+                  </div>
+                ))}
+
+                {/* Add new cat */}
+                <div style={{ marginTop:14, padding:"12px", background:"#0E0C0F", borderRadius:10, border:"1px dashed #2A2730" }}>
+                  <div style={{ fontSize:12, color:"#888", marginBottom:8 }}>➕ បន្ថែមមុខចំណាយថ្មី</div>
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+                    <select value={newCat.emoji} onChange={e => setNewCat(p=>({...p,emoji:e.target.value}))}
+                      style={{ ...inSt2, width:60 }}>
+                      {CAT_EMOJIS.map(em => <option key={em} value={em}>{em}</option>)}
+                    </select>
+                    <input value={newCat.label} onChange={e => setNewCat(p=>({...p,label:e.target.value}))}
+                      onKeyDown={e => e.key==="Enter" && addCat()}
+                      style={{ ...inSt2, flex:1, minWidth:120 }} placeholder="ឈ្មោះចំណាយ..." />
+                    <select value={newCat.color} onChange={e => setNewCat(p=>({...p,color:e.target.value}))}
+                      style={{ ...inSt2, width:50, background:newCat.color, color:"#fff", border:"none" }}>
+                      {CAT_COLORS.map(cl => <option key={cl} value={cl} style={{background:cl}}>■</option>)}
+                    </select>
+                    <button onClick={addCat} style={{ ...btnGold, padding:"7px 16px", fontSize:12 }}>+ បន្ថែម</button>
+                  </div>
+                </div>
+
+                <div style={{ display:"flex", justifyContent:"flex-end", marginTop:12 }}>
+                  <button onClick={() => { setCatMode(false); setEditCatId(null); }}
+                    style={{ ...btnGhost }}>✓ រួចរាល់</button>
+                </div>
+              </div>
+            )}
+
+            {/* ── EDIT AMOUNTS MODE ── */}
+            {!catMode && editMode && (
+              <div>
+                {expCats.map(c => (
+                  <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                    <div style={{ width:170, fontSize:13, color:c.color, fontWeight:600, flexShrink:0 }}>{c.label}</div>
+                    <div style={{ position:"relative", flex:1 }}>
+                      <span style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"#888", fontSize:13 }}>$</span>
+                      <input type="number" min="0" step="0.01" value={draft[c.id]||""}
+                        onChange={e => setDraft(p => ({ ...p, [c.id]:e.target.value }))}
+                        placeholder="0.00"
+                        style={{ ...inputSt, width:"100%", paddingLeft:24, fontSize:13 }} />
+                    </div>
+                  </div>
+                ))}
+                <div style={{ display:"flex", gap:8, marginTop:14 }}>
+                  <button onClick={() => setEditMode(false)} style={{ ...btnGhost, flex:1 }}>បោះបង់</button>
+                  <button onClick={saveEdit}                 style={{ ...btnGold,  flex:1 }}>💾 រក្សាទុក</button>
+                </div>
+              </div>
+            )}
+
+            {/* ── VIEW MODE ── */}
+            {!catMode && !editMode && (
+              <div>
+                {expCats.map(c => {
+                  const val = Number(expItems[c.id])||0;
+                  const pct = totalExp > 0 ? (val/totalExp)*100 : 0;
+                  return (
+                    <div key={c.id} style={{ marginBottom:10 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
+                        <span style={{ fontSize:13, color: val>0 ? c.color : "#444" }}>{c.label}</span>
+                        <span style={{ fontSize:13, fontWeight:700, color: val>0 ? "#EDE8E1" : "#444",
+                          fontFamily:"'DM Mono',monospace" }}>{val>0 ? fmt(val) : "—"}</span>
+                      </div>
+                      {val > 0 && (
+                        <div style={{ height:3, background:"#1A181C", borderRadius:2 }}>
+                          <div style={{ height:"100%", width:pct+"%", background:c.color, borderRadius:2 }} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {totalExp === 0 && (
+                  <div style={{ textAlign:"center", color:"#444", padding:"16px 0", fontSize:13 }}>
+                    មិនទាន់បញ្ចូលចំណាយខែនេះ
+                    {isAdmin && <div style={{ marginTop:6, fontSize:12 }}>ចុច ✏️ កែប្រែ ដើម្បីបន្ថែម</div>}
+                  </div>
+                )}
+                {totalExp > 0 && (
+                  <div style={{ borderTop:"1px solid #1E1B1F", marginTop:10, paddingTop:10, display:"flex", justifyContent:"space-between" }}>
+                    <span style={{ fontWeight:700, fontSize:13 }}>💸 ចំណាយសរុប</span>
+                    <span style={{ fontWeight:700, fontSize:14, color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(totalExp)}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Monthly History */}
+          {monthlyRecords.length > 0 && (
+            <div style={{ background:"#120F13", border:"1px solid #1E1B1F", borderRadius:14, padding:16 }}>
+              <div style={{ fontWeight:700, fontSize:13, marginBottom:10 }}>📅 ប្រវត្តិប្រចាំខែ</div>
+              <div style={{ overflowX:"auto" }}>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                  <thead>
+                    <tr style={{ background:"#1A181C" }}>
+                      {["ខែ","ចំណូល","ចំណាយ","ចំណេញ"].map(h => (
+                        <th key={h} style={{ padding:"7px 10px", textAlign:"left", color:"#E8A84B", fontWeight:600, borderBottom:"1px solid #252230" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyRecords.slice(0,12).map(e => {
+                      const [ey,em] = e.month.split("-");
+                      const rev = (orders||[]).filter(o => { try { return new Date(o.order_id).toISOString().slice(0,7)===e.month; } catch { return false; } })
+                                             .reduce((s,o) => s+o.total+o.tax, 0);
+                      const exp = expCats.reduce((s,c) => s+Number((e.items||{})[c.id]||0), 0);
+                      const pnl = rev - exp;
+                      return (
+                        <tr key={e.month} onClick={() => setSelMonth(e.month)}
+                          style={{ cursor:"pointer", background: e.month===selMonth ? "#1A2A1A" : "transparent" }}>
+                          <td style={{ padding:"7px 10px", borderBottom:"1px solid #1A181C", color:"#aaa" }}>{MON_KH[parseInt(em)-1]} {ey}</td>
+                          <td style={{ padding:"7px 10px", borderBottom:"1px solid #1A181C", color:"#E8A84B", fontFamily:"'DM Mono',monospace" }}>{fmt(rev)}</td>
+                          <td style={{ padding:"7px 10px", borderBottom:"1px solid #1A181C", color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(exp)}</td>
+                          <td style={{ padding:"7px 10px", borderBottom:"1px solid #1A181C", fontWeight:700, fontFamily:"'DM Mono',monospace",
+                            color: pnl>=0 ? "#27AE60" : "#E74C3C" }}>{pnl>=0?"+":""}{fmt(pnl)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  THEME PAGE  (Admin only)
+// ═══════════════════════════════════════════════════════════════════
+const THEME_PRESETS = [
+  { name: "☕ Cafe Classic", bgMain: "#09080A", bgCard: "#120F13", bgHeader: "#0E0C0F", accent: "#E8A84B", accentDark: "#B8732A", textMain: "#EDE8E1", textDim: "#666666", borderCol: "#1E1B1F" },
+  { name: "🌙 Midnight Blue", bgMain: "#060B14", bgCard: "#0D1420", bgHeader: "#080E1A", accent: "#5BA3E0", accentDark: "#2A6FA8", textMain: "#E0EDFB", textDim: "#445566", borderCol: "#131E2E" },
+  { name: "🌲 Forest Green", bgMain: "#060D08", bgCard: "#0D160F", bgHeader: "#080F0A", accent: "#4CAF7D", accentDark: "#2E7D52", textMain: "#E0F0E5", textDim: "#3A5544", borderCol: "#111E14" },
+  { name: "🍷 Deep Wine", bgMain: "#0D060A", bgCard: "#180C12", bgHeader: "#10070D", accent: "#C0527A", accentDark: "#8B2A4A", textMain: "#F0E0E8", textDim: "#664455", borderCol: "#1E1018" },
+  { name: "🌅 Sunset Orange", bgMain: "#0D0806", bgCard: "#1A100A", bgHeader: "#120A06", accent: "#E87A3A", accentDark: "#B84A1A", textMain: "#FAE8DC", textDim: "#664433", borderCol: "#201208" },
+  { name: "🪐 Galaxy Purple", bgMain: "#08060D", bgCard: "#100D18", bgHeader: "#0A0810", accent: "#9B6FE8", accentDark: "#6A3FB8", textMain: "#EAE0FA", textDim: "#553377", borderCol: "#16101E" },
+  { name: "🌊 Ocean Teal", bgMain: "#050D0D", bgCard: "#0A1818", bgHeader: "#07100F", accent: "#3ABFBF", accentDark: "#1A8A8A", textMain: "#DCFAFA", textDim: "#336655", borderCol: "#0F1E1E" },
+  { name: "☀️ Light Mode", bgMain: "#F5F2EE", bgCard: "#FFFFFF", bgHeader: "#EDE8E1", accent: "#B8732A", accentDark: "#8B5510", textMain: "#1A1510", textDim: "#888880", borderCol: "#DDD8D0" },
+];
 
 function ExpenseForm({ exp, onSave }) {
   const [v, setV] = useState(exp);
@@ -1788,63 +3049,169 @@ function ExpenseForm({ exp, onSave }) {
 // ═══════════════════════════════════════════════════════════════════
 //  USERS PAGE
 // ═══════════════════════════════════════════════════════════════════
-function UsersPage({ users, setUsers, currentUser }) {
-  const [editUser, setEditUser] = useState(null);
-  const [changePw, setChangePw] = useState(null);
 
-  const saveUser = (u) => {
-    if (!u.username) return alert("ត្រូវ​ការ Username!");
-    setUsers(prev => u.user_id
-      ? prev.map(x => x.user_id === u.user_id ? { ...x, ...u } : x)
-      : [...prev, { ...u, user_id: Date.now(), active:true }]
-    );
-    setEditUser(null);
+function UsersPage({ users, setUsers, currentUser, notify }) {
+  const [modal, setModal] = useState(null);
+  const [delConf, setDelConf] = useState(null);
+  const [permModal, setPermModal] = useState(null); // user to edit perms
+
+  const saveUser = (data) => {
+    if (!data.username.trim() || !data.password.trim() || !data.name.trim()) {
+      notify("⚠️ សូមបំពេញព័ត៌មានឱ្យបរិបូណ៌!", "error"); return;
+    }
+    if (modal.mode === "add") {
+      const dup = users.find(u => u.username === data.username.trim());
+      if (dup) { notify("❌ Username នេះមានរួចហើយ!", "error"); return; }
+      setUsers(p => [...p, {
+        ...data, user_id: Math.max(0, ...p.map(u => u.user_id)) + 1,
+        username: data.username.trim(),
+        permissions: data.role === "admin" ? {} : { ...DEFAULT_PERMS_TPL, ...(data.permissions || {}) }
+      }]);
+      notify("✅ បន្ថែម User រួចហើយ!");
+    } else {
+      setUsers(p => p.map(u => u.user_id === data.user_id ? { ...data, username: data.username.trim() } : u));
+      notify("✅ កែប្រែ User រួចហើយ!");
+    }
+    setModal(null);
   };
-  const toggleUser = (id) => setUsers(prev => prev.map(u => u.user_id === id ? { ...u, active:!u.active } : u));
-  const delUser = (id) => { if (id === currentUser.user_id) return alert("មិន​អាច​លុប​ខ្លួន​ឯង!"); if (confirm("លុប?")) setUsers(prev => prev.filter(u => u.user_id !== id)); };
 
-  const PAGES = ["pos","tables","menu","inventory","orders","report","finance"];
+  const savePerm = (uid, perms) => {
+    setUsers(p => p.map(u => u.user_id === uid ? { ...u, permissions: perms } : u));
+    notify("✅ កំណត់សិទ្ធ រួចហើយ!");
+    setPermModal(null);
+  };
+
+  const toggleActive = (uid) => {
+    if (uid === currentUser.user_id) { notify("⚠️ មិនអាចបិទ account ខ្លួនឯង!", "error"); return; }
+    setUsers(p => p.map(u => u.user_id === uid ? { ...u, active: !u.active } : u));
+  };
+
+  const delUser = (uid) => {
+    if (uid === currentUser.user_id) { notify("⚠️ មិនអាចលុប account ខ្លួនឯង!", "error"); return; }
+    setUsers(p => p.filter(u => u.user_id !== uid));
+    notify("✅ លុប User រួចហើយ!"); setDelConf(null);
+  };
+
+  const ROLES = [{ v: "admin", label: "👑 Admin", color: "#E8A84B" }, { v: "staff", label: "👤 Staff", color: "#5BA3E0" }];
 
   return (
-    <div>
-      <h2 style={{ marginBottom:12 }}>👥 ការ​គ្រប់​គ្រង​អ្នក​ប្រើ</h2>
-      <button className="btn-primary" style={{ marginBottom:12 }} onClick={()=>setEditUser({ username:"", name:"", role:"staff", branch_id:"branch_1", password:"", permissions:{} })}>+ បន្ថែម​អ្នក​ប្រើ</button>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {delConf && <ConfirmDel name={delConf.name} onConfirm={delConf.fn} onCancel={() => setDelConf(null)} />}
 
-      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-        {users.map(u => (
-          <div key={u.user_id} style={{ background:"var(--bg-card)", borderRadius:12, padding:"12px 16px", border:"1px solid var(--border-col)", opacity:u.active===false?.5:1 }}>
-            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
-              <div style={{ flex:1 }}>
-                <div style={{ fontWeight:700 }}>{u.name} <span style={{ fontSize:11, background: u.role==="admin"?"#5c1a1a":"#1a3a1a", color: u.role==="admin"?"#ff8080":"#80ff80", padding:"2px 6px", borderRadius:4 }}>{u.role}</span></div>
-                <div style={{ fontSize:12, color:"var(--text-dim)" }}>@{u.username} · {u.branch_id}</div>
-              </div>
-              <button className="btn-sm" onClick={()=>toggleUser(u.user_id)}>{u.active===false?"▶":"⏸"}</button>
-              <button className="btn-sm" onClick={()=>setEditUser(u)}>✏️</button>
-              <button className="btn-sm" style={{ color:"#ff6b6b" }} onClick={()=>delUser(u.user_id)}>🗑</button>
-            </div>
-            {u.role !== "admin" && (
-              <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-                {PAGES.map(p => (
-                  <button key={p}
-                    style={{ fontSize:10, padding:"2px 6px", borderRadius:4, border:"1px solid var(--border-col)", background: u.permissions?.[p]?"var(--accent)":"var(--bg-main)", color: u.permissions?.[p]?"#000":"var(--text-dim)", cursor:"pointer" }}
-                    onClick={()=>setUsers(prev=>prev.map(x=>x.user_id===u.user_id?{...x,permissions:{...x.permissions,[p]:!x.permissions?.[p]}}:x))}
-                  >{p}</button>
-                ))}
-              </div>
-            )}
+      {modal && (
+        <Modal onClose={() => setModal(null)} maxW={440}>
+          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 18, color: "#E8A84B" }}>
+            {modal.mode === "add" ? "➕ បន្ថែម User ថ្មី" : "✏️ កែប្រែ User"}
           </div>
-        ))}
-      </div>
-
-      {editUser && (
-        <Modal title={editUser.user_id?"កែ​អ្នក​ប្រើ":"អ្នក​ប្រើ​ថ្មី"} onClose={()=>setEditUser(null)}>
-          <UserForm user={editUser} onSave={saveUser} />
+          <UserForm data={modal.data} onSave={saveUser} onCancel={() => setModal(null)} roles={ROLES} />
         </Modal>
       )}
+
+      {permModal && (
+        <PermModal user={permModal} onSave={savePerm} onClose={() => setPermModal(null)} />
+      )}
+
+      {/* Sticky header */}
+      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid #1A181C", background: "var(--bg-main)" }}>
+        <SectionHeader title="👥 គ្រប់គ្រង Users" sub={`${users.length} users · ${users.filter(u => u.active).length} active`} />
+        <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8 }}>
+          <button onClick={() => setModal({ mode: "add", data: { username: "", password: "", name: "", role: "staff", active: true, permissions: { ...DEFAULT_PERMS_TPL } } })}
+            style={btnGold}>➕ បន្ថែម User</button>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 32px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 12 }}>
+          {users.map(u => {
+            const roleInfo = ROLES.find(r => r.v === u.role);
+            const isMe = u.user_id === currentUser.user_id;
+            const perms = u.role === "admin"
+              ? Object.keys(PERM_LABELS).reduce((a, k) => ({ ...a, [k]: true }), {})
+              : { ...DEFAULT_PERMS_TPL, ...(u.permissions || {}) };
+            const allowedPages = Object.entries(perms).filter(([, v]) => v).map(([k]) => k);
+            return (
+              <div key={u.user_id} style={{
+                background: "#120F13",
+                border: `1px solid ${u.active ? "#1E1B1F" : "#2A1A1A"}`, borderRadius: 14, padding: "14px 16px",
+                opacity: u.active ? 1 : 0.6
+              }}>
+                {/* Top row */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{
+                      width: 42, height: 42, borderRadius: 12,
+                      background: `linear-gradient(135deg,${u.role === "admin" ? "#8B5520,#E8A84B" : "#1A3A5A,#5BA3E0"})`,
+                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20
+                    }}>
+                      {u.role === "admin" ? "👑" : "👤"}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 14 }}>
+                        {u.name} {isMe && <span style={{
+                          fontSize: 10, color: "#27AE60", background: "#1A4A1A22",
+                          padding: "2px 6px", borderRadius: 8, marginLeft: 4
+                        }}>ខ្ញុំ</span>}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#555", fontFamily: "'DM Mono',monospace" }}>@{u.username}</div>
+                    </div>
+                  </div>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, color: roleInfo?.color,
+                    background: `${roleInfo?.color}22`, padding: "3px 10px", borderRadius: 20
+                  }}>
+                    {roleInfo?.label}
+                  </span>
+                </div>
+
+                {/* Permissions badges */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: "#555", marginBottom: 5 }}>សិទ្ធចូលប្រើ:</div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {Object.entries(PERM_LABELS).map(([k, { icon, label }]) => {
+                      const has = perms[k];
+                      return (
+                        <span key={k} style={{
+                          fontSize: 10, padding: "2px 7px", borderRadius: 10,
+                          background: has ? "#1A3A1A" : "#1A1A1A",
+                          color: has ? "#27AE60" : "#333",
+                          border: `1px solid ${has ? "#27AE6022" : "#2A2A2A"}`
+                        }}>
+                          {icon} {label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => toggleActive(u.user_id)}
+                    style={{
+                      flex: 1, ...btnSmall, fontSize: 11,
+                      color: u.active ? "#27AE60" : "#E74C3C",
+                      borderColor: u.active ? "#27AE6033" : "#E74C3C33"
+                    }}>
+                    {u.active ? "✅ Active" : "⛔ Inactive"}
+                  </button>
+                  {u.role !== "admin" && (
+                    <button onClick={() => setPermModal(u)}
+                      style={{ ...btnSmall, fontSize: 12, color: "#5BA3E0", borderColor: "#5BA3E033" }}
+                      title="កំណត់សិទ្ធ">🛡️</button>
+                  )}
+                  <button onClick={() => setModal({ mode: "edit", data: { ...u } })} style={{ ...btnSmall, fontSize: 12 }}>✏️</button>
+                  <button onClick={() => setDelConf({ name: u.name, fn: () => delUser(u.user_id) })}
+                    style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33", fontSize: 12 }}>🗑️</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
 
+// Permission editor modal
 function UserForm({ user, onSave }) {
   const [v, setV] = useState(user);
   return (
@@ -1865,63 +3232,317 @@ function UserForm({ user, onSave }) {
 // ═══════════════════════════════════════════════════════════════════
 //  THEME PAGE
 // ═══════════════════════════════════════════════════════════════════
-function ThemePage({ theme, setTheme }) {
-  const [v, setV] = useState(theme);
 
-  const presets = [
-    { name:"Dark Gold (Default)", bgMain:"#09080A", bgCard:"#120F13", bgHeader:"#0E0C0F", accent:"#E8A84B", accentDark:"#B8732A", textMain:"#EDE8E1", textDim:"#666666", borderCol:"#1E1B1F" },
-    { name:"Dark Blue", bgMain:"#0A0D1A", bgCard:"#0F1525", bgHeader:"#0C1020", accent:"#4A9EFF", accentDark:"#2A7EDF", textMain:"#E0E8FF", textDim:"#556688", borderCol:"#1A2035" },
-    { name:"Dark Green", bgMain:"#061208", bgCard:"#0A1F0D", bgHeader:"#081510", accent:"#4AE84B", accentDark:"#2AC82A", textMain:"#E0FFE0", textDim:"#446644", borderCol:"#102015" },
-    { name:"Purple Night", bgMain:"#0D0A1A", bgCard:"#150F25", bgHeader:"#100C20", accent:"#A855F7", accentDark:"#7E22CE", textMain:"#EDE0FF", textDim:"#665588", borderCol:"#1D1535" },
-  ];
+function ThemePage({ theme, setTheme, notify }) {
+  const [custom, setCustom] = useState({ ...theme });
+  const [tab, setTab] = useState("presets"); // presets | custom | brand
+  const [shopName, setShopName] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
+  const [shopLogo, setShopLogo] = useState(() => localStorage.getItem("cb_shop_logo") || "");
+  const [logoPreview, setLogoPreview] = useState(() => localStorage.getItem("cb_shop_logo") || "");
+  const logoRef = useRef(null);
 
-  const fields = [
-    { k:"bgMain", label:"배경 (Main BG)" },
-    { k:"bgCard", label:"Card BG" },
-    { k:"bgHeader", label:"Header BG" },
-    { k:"accent", label:"Accent Color" },
-    { k:"accentDark", label:"Accent Dark" },
-    { k:"textMain", label:"Text Main" },
-    { k:"textDim", label:"Text Dim" },
-    { k:"borderCol", label:"Border" },
-  ];
+  const saveBrand = () => {
+    localStorage.setItem("cb_shop_name", shopName);
+    localStorage.setItem("cb_shop_logo", logoPreview);
+    // Update global so header reacts immediately
+    window.__SHOP_NAME__ = shopName;
+    window.__SHOP_LOGO__ = logoPreview;
+    notify("✅ រក្សាទុក ឈ្មោះហាង + Logo រួចហើយ!");
+    // Force re-render header by dispatching event
+    window.dispatchEvent(new Event("shopBrandUpdate"));
+  };
+
+
+  
+
+
+
+
+  const handleLogoFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { notify("❌ រូបភាពធំពេក! Max 2MB", "error"); return; }
+    const reader = new FileReader();
+    reader.onload = ev => { setLogoPreview(ev.target.result); setShopLogo(ev.target.result); };
+    reader.readAsDataURL(file);
+  };
+
+  const removeLogo = () => {
+    setLogoPreview(""); setShopLogo("");
+    localStorage.removeItem("cb_shop_logo");
+    window.__SHOP_LOGO__ = "";
+    window.dispatchEvent(new Event("shopBrandUpdate"));
+    notify("🗑️ លុប Logo រួចហើយ!");
+  };
+
+  const applyPreset = (p) => {
+    const t = { ...p };
+    delete t.name;
+    setTheme(t);
+    setCustom(t);
+    notify("🎨 ប្តូរ Theme រួចហើយ!");
+  };
+
+  const applyCustom = () => {
+    setTheme(custom);
+    notify("🎨 ប្តូរ Theme Custom រួចហើយ!");
+  };
+
+  const resetDefault = () => {
+    setTheme(DEFAULT_THEME);
+    setCustom(DEFAULT_THEME);
+    notify("🔄 Reset Theme រួចហើយ!");
+  };
+
+  const isActive = (p) => {
+    const t = { ...p }; delete t.name;
+    return Object.keys(t).every(k => t[k] === theme[k]);
+  };
+
+  const ColorRow = ({ label, k }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+      <div style={{ width: 130, fontSize: 12, color: "var(--text-dim)", flexShrink: 0 }}>{label}</div>
+      <input type="color" value={custom[k]} onChange={e => setCustom(p => ({ ...p, [k]: e.target.value }))}
+        style={{
+          width: 44, height: 36, border: "none", borderRadius: 8, cursor: "pointer",
+          background: "transparent", padding: 2
+        }} />
+      <div style={{
+        flex: 1, height: 36, borderRadius: 8, background: custom[k],
+        border: "1px solid var(--border)", boxShadow: "inset 0 2px 4px rgba(0,0,0,.3)"
+      }} />
+      <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'DM Mono',monospace", minWidth: 70 }}>
+        {custom[k]}
+      </div>
+    </div>
+  );
 
   return (
-    <div style={{ maxWidth:600 }}>
-      <h2 style={{ marginBottom:12 }}>🎨 រចនាប័ទ្ម</h2>
+    <div style={{ padding: "16px 14px 32px" }}>
+      <SectionHeader title="🎨 កំណត់រចនាប័ទ្ម" sub="ជ្រើសរើស Theme ឬ កំណត់ពណ៌ផ្ទាល់ខ្លួន" />
 
-      <div style={{ marginBottom:16 }}>
-        <div style={{ fontWeight:700, marginBottom:8 }}>Presets:</div>
-        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-          {presets.map(p => (
-            <button key={p.name}
-              style={{ background:p.bgCard, color:p.textMain, border:`2px solid ${p.accent}`, borderRadius:8, padding:"6px 12px", cursor:"pointer", fontSize:12 }}
-              onClick={()=>{ const {name,...rest}=p; setV(rest); }}
-            >{p.name}</button>
-          ))}
+      {/* Live Preview Bar */}
+      <div style={{ marginBottom: 20, borderRadius: 14, overflow: "hidden", border: "1px solid var(--border)" }}>
+        <div style={{ background: theme.bgHeader, padding: "10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#E74C3C" }} />
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#F39C12" }} />
+          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#27AE60" }} />
+          <span style={{ fontSize: 11, color: theme.textDim, marginLeft: 8 }}>Preview — Café Boom</span>
+        </div>
+        <div style={{ background: theme.bgMain, padding: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div style={{ background: theme.bgCard, border: `1px solid ${theme.borderCol}`, borderRadius: 10, padding: "10px 16px" }}>
+            <div style={{ fontSize: 11, color: theme.textDim }}>ចំណូល</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: theme.accent }}>$245.50</div>
+          </div>
+          <div style={{
+            background: `linear-gradient(135deg,${theme.accentDark},${theme.accent})`,
+            borderRadius: 10, padding: "10px 18px", color: "#fff", fontSize: 13, fontWeight: 700,
+            display: "flex", alignItems: "center", gap: 6
+          }}>
+            🛒 ទូទាត់
+          </div>
+          <div style={{
+            background: theme.bgCard, border: `1px solid ${theme.borderCol}`, borderRadius: 10,
+            padding: "10px 14px", display: "flex", gap: 8, alignItems: "center"
+          }}>
+            <span style={{ fontSize: 18 }}>☕</span>
+            <div>
+              <div style={{ fontSize: 12, color: theme.textMain }}>ឡាតេ</div>
+              <div style={{ fontSize: 11, color: theme.accent }}>$3.50</div>
+            </div>
+          </div>
+          <div style={{
+            background: theme.bgCard, border: `1px solid ${theme.borderCol}`, borderRadius: 10,
+            padding: "8px 14px", fontSize: 11, color: theme.textDim
+          }}>
+            📊 Cards, Borders, Text
+          </div>
         </div>
       </div>
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:16 }}>
-        {fields.map(f=>(
-          <div key={f.k} style={{ display:"flex", flexDirection:"column", gap:4 }}>
-            <label style={{ fontSize:12, color:"var(--text-dim)" }}>{f.label}</label>
-            <div style={{ display:"flex", gap:6 }}>
-              <input type="color" value={v[f.k]||"#000000"} onChange={e=>setV({...v,[f.k]:e.target.value})} style={{ width:40, height:36, border:"none", background:"none", cursor:"pointer" }} />
-              <input className="inp" style={{ flex:1, fontFamily:"monospace", fontSize:12 }} value={v[f.k]||""} onChange={e=>setV({...v,[f.k]:e.target.value})} />
-            </div>
-          </div>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        {[["presets", "🎭 Presets"], ["custom", "🖌️ Custom"], ["brand", "🏪 ហាង"]].map(([k, lb]) => (
+          <button key={k} onClick={() => setTab(k)} style={{
+            padding: "8px 20px", borderRadius: 20, border: "none", cursor: "pointer",
+            fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+            background: tab === k ? `linear-gradient(135deg,${theme.accentDark},${theme.accent})` : "var(--bg-card)",
+            color: tab === k ? "#fff" : "var(--text-dim)",
+            boxShadow: tab === k ? `0 4px 14px ${theme.accent}44` : "none",
+          }}>{lb}</button>
         ))}
+        <button onClick={resetDefault} style={{
+          marginLeft: "auto", padding: "8px 16px", borderRadius: 20,
+          border: "1px solid var(--border)", background: "transparent", cursor: "pointer",
+          fontFamily: "inherit", fontSize: 12, color: "var(--text-dim)"
+        }}>
+          🔄 Reset
+        </button>
       </div>
 
-      <button className="btn-primary" onClick={()=>setTheme(v)}>💾 អនុវត្ត​ & រក្សា​ទុក</button>
+      {/* PRESETS */}
+      {tab === "presets" && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 12 }}>
+          {THEME_PRESETS.map(p => {
+            const active = isActive(p);
+            const t = { ...p }; delete t.name;
+            return (
+              <div key={p.name} onClick={() => applyPreset(p)}
+                style={{
+                  background: p.bgCard, border: `2px solid ${active ? p.accent : p.borderCol}`,
+                  borderRadius: 14, padding: 16, cursor: "pointer",
+                  boxShadow: active ? `0 0 0 2px ${p.accent}66` : "none",
+                  transition: "all .2s"
+                }}>
+                {/* Mini preview */}
+                <div style={{ background: p.bgMain, borderRadius: 8, padding: 10, marginBottom: 10 }}>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                    <div style={{ height: 6, flex: 2, background: p.accent, borderRadius: 3 }} />
+                    <div style={{ height: 6, flex: 1, background: p.borderCol, borderRadius: 3 }} />
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {[p.accent, p.accentDark, p.textDim].map((c, i) => (
+                      <div key={i} style={{ flex: 1, height: 24, borderRadius: 6, background: c, opacity: .8 }} />
+                    ))}
+                  </div>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: p.textMain }}>{p.name}</span>
+                  {active && <span style={{ fontSize: 16 }}>✅</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* BRAND */}
+      {tab === "brand" && (
+        <div style={{ maxWidth: 520 }}>
+          {/* Shop Name */}
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 16 }}>🏪 ឈ្មោះហាង</div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+              <input
+                value={shopName}
+                onChange={e => setShopName(e.target.value)}
+                placeholder="ឈ្មោះហាង..."
+                style={{
+                  ...inputSt, flex: 1, fontSize: 15, fontWeight: 600,
+                  border: "1px solid var(--border)"
+                }}
+              />
+            </div>
+            {/* Live preview */}
+            <div style={{ marginTop: 12, padding: "8px 14px", background: "var(--bg-main)", borderRadius: 10, display: "flex", alignItems: "center", gap: 10 }}>
+              {logoPreview
+                ? <img src={logoPreview} alt="logo" style={{ width: 32, height: 32, borderRadius: 8, objectFit: "cover" }} />
+                : <div style={{ width: 32, height: 32, borderRadius: 8, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>☕</div>
+              }
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--accent)" }}>{shopName || "ឈ្មោះហាង"}</div>
+                <div style={{ fontSize: 10, color: "var(--text-dim)" }}>POS</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Logo Upload */}
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 16 }}>🖼️ Logo ហាង</div>
+
+            {/* Logo preview */}
+            <div style={{ display: "flex", gap: 16, alignItems: "center", marginBottom: 16 }}>
+              <div style={{
+                width: 80, height: 80, borderRadius: 16, background: "var(--bg-main)",
+                border: "2px dashed var(--border)", display: "flex", alignItems: "center",
+                justifyContent: "center", overflow: "hidden", flexShrink: 0
+              }}>
+                {logoPreview
+                  ? <img src={logoPreview} alt="logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  : <span style={{ fontSize: 32 }}>☕</span>
+                }
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>
+                  PNG, JPG — Max 5MB<br/>ណែនាំ: ទំហំ 200×200px
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => document.getElementById("logo-upload-input").click()} style={{
+                    ...btnGold, padding: "8px 16px", fontSize: 12
+                  }}>
+                    📁 ជ្រើស រូបភាព
+                  </button>
+                  {logoPreview && (
+                    <button onClick={removeLogo} style={{ ...btnRed, padding: "8px 14px", fontSize: 12 }}>
+                      🗑️ លុប
+                    </button>
+                  )}
+                </div>
+                <input
+                  id="logo-upload-input"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleLogoFile}
+                  style={{ display: "none" }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Save button */}
+          <button onClick={saveBrand} style={{ ...btnGold, width: "100%", fontSize: 14, padding: "13px" }}>
+            ✅ រក្សាទុក ឈ្មោះ + Logo
+          </button>
+        </div>
+      )}
+
+      {/* CUSTOM */}
+      {tab === "custom" && (
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, maxWidth: 520 }}>
+          <div style={{ fontWeight: 700, marginBottom: 18, fontSize: 13 }}>🖌️ កំណត់ពណ៌ផ្ទាល់ខ្លួន</div>
+          <ColorRow label="🌑 Background ចម្បង" k="bgMain" />
+          <ColorRow label="🗂️ Background Cards" k="bgCard" />
+          <ColorRow label="📌 Background Header" k="bgHeader" />
+          <ColorRow label="⭐ Accent ចម្បង" k="accent" />
+          <ColorRow label="🔆 Accent ងងឹត" k="accentDark" />
+          <ColorRow label="📝 ពណ៌អក្សរ ចម្បង" k="textMain" />
+          <ColorRow label="📝 ពណ៌អក្សរ ស្រាល" k="textDim" />
+          <ColorRow label="📐 Border / Divider" k="borderCol" />
+
+          {/* Custom preview */}
+          <div style={{
+            background: custom.bgMain, borderRadius: 10, padding: 14, marginBottom: 16,
+            border: `1px solid ${custom.borderCol}`
+          }}>
+            <div style={{ fontSize: 11, color: custom.textDim, marginBottom: 6 }}>Preview ផ្ទាល់</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{
+                background: custom.bgCard, border: `1px solid ${custom.borderCol}`,
+                borderRadius: 8, padding: "8px 12px"
+              }}>
+                <div style={{ fontSize: 11, color: custom.textDim }}>ចំណូល</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: custom.accent }}>$128.00</div>
+              </div>
+              <div style={{
+                background: `linear-gradient(135deg,${custom.accentDark},${custom.accent})`,
+                borderRadius: 8, padding: "8px 14px", color: "#fff", fontSize: 12, fontWeight: 700,
+                display: "flex", alignItems: "center"
+              }}>
+                ✅ Apply
+              </div>
+            </div>
+          </div>
+
+          <button onClick={applyCustom} style={{ ...btnGold, width: "100%", fontSize: 14 }}>
+            🎨 Apply Custom Theme
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-// ═══════════════════════════════════════════════════════════════════
-//  SHARED COMPONENTS
-// ═══════════════════════════════════════════════════════════════════
+
 function Modal({ title, children, onClose }) {
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000 }} onClick={onClose}>
@@ -2304,6 +3925,73 @@ function SqlBlock({ code }) {
     </pre>
   );
 }
+
+function SubTabs({ tabs, val, set }) {
+  return (
+    <div style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: "1px solid #1A181C", paddingBottom: 0 }}>
+      {tabs.map(([v, lb]) => (
+        <button key={v} onClick={() => set(v)} style={{
+          padding: "9px 16px", border: "none", background: "transparent", cursor: "pointer",
+          color: val === v ? "#E8A84B" : "#555", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+          borderBottom: val === v ? "2px solid #E8A84B" : "2px solid transparent",
+          marginBottom: -1
+        }}>{lb}</button>
+      ))}
+    </div>
+  );
+}
+
+
+function TableWrap({ headers, children }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: "#1A171C" }}>
+            {headers.map(h => (
+              <th key={h} style={{
+                padding: "10px 14px", textAlign: "left", color: "#E8A84B",
+                fontWeight: 600, fontSize: 11, letterSpacing: .5, borderBottom: "1px solid #252230", whiteSpace: "nowrap"
+              }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+
+function SectionHeader({ title, sub }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ fontWeight: 700, fontSize: 18 }}>{title}</div>
+      {sub && <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+
+function BtnRow({ onSave, onCancel, saveLabel = "រក្សាទុក" }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+      <button onClick={onCancel} style={{ ...btnGhost, flex: 1 }}>បោះបង់</button>
+      <button onClick={onSave} style={{ ...btnGold, flex: 1 }}>{saveLabel}</button>
+    </div>
+  );
+}
+
+
+function F({ label, children }) {
+  return (
+    <div style={{ marginBottom: 13 }}>
+      <label style={{ fontSize: 11, color: "#666", fontWeight: 600, letterSpacing: .4, display: "block", marginBottom: 5 }}>{label}</label>
+      {children}
+    </div>
+  );
+}
+
 function OptRow({ label, items, value, onChange, color, slider }) {
   if (slider) {
     // Slider mode for sugar %
