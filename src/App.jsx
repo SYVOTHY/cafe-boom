@@ -190,7 +190,7 @@ const exportPDF = (title, dateLabel, tableHTML) => {
   <div class="sub">${dateLabel} · បោះពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
   ${tableHTML}
   <div class="footer">Café Bloom POS © ${new Date().getFullYear()}</div>
-  <script>window.onload=()=>{window.print();}<\/script>
+  \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
   </body></html>`);
   win.document.close();
 };
@@ -1725,7 +1725,7 @@ function OrdersPage({ orders, ings }) {
     <tbody>${stockRows}</tbody></table>
 
     <div class="footer">Café Boom POS © ${new Date().getFullYear()}</div>
-    <script>window.onload=()=>{window.print();}<\/script>
+    \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
     </body></html>`);
     win.document.close();
   };
@@ -2115,7 +2115,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
     <tbody>${stockRows}</tbody></table>
 
     <div class="footer">Café Boom POS © ${new Date().getFullYear()} · Generated ${new Date().toLocaleString()}</div>
-    <script>window.onload=()=>{window.print();}<\/script>
+    \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
     </body></html>`);
     win.document.close();
   };
@@ -2770,7 +2770,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin }) {
       +"<tbody>"+expRows+"<tr style='background:#fff3e8'><td style='font-weight:700'>💸 ចំណាយសរុប</td><td style='text-align:right;font-weight:700;color:#c0392b'>"+fmt(totalExp)+"</td></tr></tbody></table>"
       +(histRows?"<h2>📅 ប្រវត្តិប្រចាំខែ</h2><table><thead><tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr></thead><tbody>"+histRows+"</tbody></table>":"")
       +"<div class='footer'>Cafe Bloom POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+monthLabel+"</div>"
-      +"<script>window.onload=function(){window.print();}<\/script></body></html>";
+      +"\x3cscript\x3ewindow.onload=function(){window.print();}\x3c/script\x3e</body></html>";
     const win = window.open("","_blank","width=1000,height=750");
     win.document.write(html);
     win.document.close();
@@ -3855,7 +3855,7 @@ function doBrowserPrint(receipt) {
   <div class="center" style="margin-top:8px;font-size:11px">${method}</div>
   <div class="dash"></div>
   <div class="center" style="font-size:11px;color:#aaa">Thank you! / Arkun! 🙏</div>
-  <script>window.onload=()=>{window.print();}<\/script>
+  \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
   </body></html>`);
   win.document.close();
 }
