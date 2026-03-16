@@ -103,6 +103,12 @@ async function initDB() {
       }
     }
 
+    // Force-fix users: always update users to ensure hashes are correct
+    await client.query(
+      "INSERT INTO shared_data(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2",
+      ["users", JSON.stringify(DEFAULT_SHARED.users)]
+    );
+
     console.log("✅ PostgreSQL tables ready");
   } finally {
     client.release();
@@ -138,12 +144,12 @@ const DEFAULT_SHARED = {
   users: [
     {
       user_id:1, username:"admin",
-      password:"pbkdf2:ef22a263f015553dc05ccf667c2a5bf9:81c1b115ed6a8f7764c943846fdaeec66bb11a9b0c1120db37b5b17223614e4ddbc3aef7cc4d98037e9496d5444047ddc01bdde54f2e485c71141c9f7c3762c2",
+      password:"pbkdf2:6471abaa41f85fed180b35b407dabe8b:8b5cf4f8c6ed754edf7a6fae20c3a2f81ed7a78a65314ae49000ce92955929609c3d0ca8fb2dd7a823949f42a930a433b5f461e2000b821f67ac00e4814a3b2e",
       role:"admin", name:"Administrator", active:true, branch_id:"all"
     },
     {
       user_id:2, username:"staff1",
-      password:"pbkdf2:d74ec5473ec0ccef81316a87bb1f6911:773ee1256561c668581dedb6603b95e6c15feb9a03ef07d59d50a7c3c2fcf1ba33df1dc0ee1762b5bbaec2e35b25366d6c94153adf8cbd64bef7748cb76704ce",
+      password:"pbkdf2:a972d38e3671965c701732408c1b6469:b998f0db270d36269fcee6f1b6044191f8fd5463042ccaf5770bf599e04fbbdc1a46fbef972a82758a8ad391a40a755879cfa47103ff2e4fdec34635d915d38d",
       role:"staff", name:"បុគ្គលិក ១", active:true, branch_id:"branch_1"
     },
   ],
@@ -273,10 +279,20 @@ function hashPassword(pw) {
 function verifyPassword(pw, stored) {
   if (!stored) return false;
   if (!stored.startsWith("pbkdf2:")) return stored === pw;
-  const [, salt, hash] = stored.split(":");
+  const parts = stored.split(":");
+  if (parts.length < 3) return false;
+  const salt = parts[1];
+  const hash = parts[2];
   if (!salt || !hash) return false;
-  const check = crypto.pbkdf2Sync(pw, salt, 100000, 64, "sha512").toString("hex");
-  return crypto.timingSafeEqual(Buffer.from(check, "hex"), Buffer.from(hash, "hex"));
+  try {
+    const check = crypto.pbkdf2Sync(pw, salt, 100000, 64, "sha512").toString("hex");
+    // Ensure both buffers are same length before timingSafeEqual
+    if (check.length !== hash.length) return false;
+    return crypto.timingSafeEqual(Buffer.from(check, "hex"), Buffer.from(hash, "hex"));
+  } catch (e) {
+    console.error("[verifyPassword] Error:", e.message);
+    return false;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
