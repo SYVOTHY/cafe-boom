@@ -3924,9 +3924,7 @@ function ActionBtns({ onEdit, onDel }) {
   );
 }
 
-function FieldWrapper({ label, children }
-const F = FieldWrapper; // alias for RecForm compatibility
-) {
+function FieldWrapper({ label, children }) {
   return (
     <div style={{ marginBottom: 13 }}>
       <label style={{ fontSize: 11, color: "#666", fontWeight: 600, letterSpacing: .4, display: "block", marginBottom: 5 }}>{label}</label>
@@ -3934,6 +3932,7 @@ const F = FieldWrapper; // alias for RecForm compatibility
     </div>
   );
 }
+const F = FieldWrapper; // alias for RecForm compatibility
 
 
 function ConfirmDel({ name, onConfirm, onCancel }) {
