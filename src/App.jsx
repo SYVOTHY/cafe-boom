@@ -114,9 +114,9 @@ function runTransaction(ingredients, recipes, productId, qty) {
     const ing = ingredients.find(i => Number(i.ingredient_id) === Number(r.ingredient_id));
     if (!ing) continue;
     const need = Number(r.quantity_required) * Number(qty);
-    const ok = Number(ing.current_stock) >= need;
+    const ok = Number(ing?.current_stock) >= need;
     checks.push({ ing: { ...ing }, need, ok });
-    if (!ok && !failedOn) failedOn = ing.ingredient_name;
+    if (!ok && !failedOn) failedOn = ing?.ingredient_name;
   }
 
   if (failedOn) return { success: false, reason: failedOn, checks };
@@ -125,7 +125,7 @@ function runTransaction(ingredients, recipes, productId, qty) {
   const newIngredients = ingredients.map(ing => {
     const r = prodRecipes.find(r => Number(r.ingredient_id) === Number(ing.ingredient_id));
     if (!r) return ing;
-    return { ...ing, current_stock: Number(ing.current_stock) - Number(r.quantity_required) * Number(qty) };
+    return { ...ing, current_stock: Number(ing?.current_stock) - Number(r.quantity_required) * Number(qty) };
   });
 
   return { success: true, checks, newIngredients };
@@ -651,11 +651,11 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
         logEntries.push({
           log_id: Date.now() + c.ing.ingredient_id + Math.random(),
           ts, product: item.product_name,
-          ingredient: c.ing.ingredient_name,
-          before: fmtN(c.ing.current_stock),
+          ingredient: c.ing?.ingredient_name,
+          before: fmtN(c.ing?.current_stock),
           deducted: fmtN(c.need),
-          after: fmtN(c.ing.current_stock - c.need),
-          unit: c.ing.unit,
+          after: fmtN(c.ing?.current_stock - c.need),
+          unit: c.ing?.unit,
         });
       });
       currentIngs = result.newIngredients;
@@ -1474,6 +1474,45 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
               {prods.map(p => <option key={p.product_id} value={p.product_id}>{p.emoji} {p.product_name}</option>)}
             </select>
             <button onClick={() => setModal({ mode: "add", entity: "rec", data: { recipe_id: null, product_id: prods[0]?.product_id || "", ingredient_id: ings[0]?.ingredient_id || "", quantity_required: "" } })} style={{ ...btnGold, padding:"9px 16px", width:"auto" }}>➕ បន្ថែម</button>
+            {recipes.length === 0 && prods.length > 0 && ings.length > 0 && (
+              <button style={{ ...btnSmall, fontSize:12, color:"#5BA3E0", borderColor:"#5BA3E044", padding:"8px 14px" }}
+                onClick={() => {
+                  // Generate 20 sample recipes using actual product + ingredient IDs
+                  const ps = prods.slice(0, Math.min(prods.length, 10));
+                  const is_ = ings;
+                  const samples = [];
+                  let id = Date.now();
+                  const qty = [0.5, 1, 2, 5, 10, 15, 20, 30, 50, 100, 150, 200];
+                  ps.forEach((p, pi) => {
+                    // Each product uses 1-3 ingredients
+                    const numIngs = pi < 3 ? 3 : pi < 7 ? 2 : 1;
+                    const used = new Set();
+                    for (let j = 0; j < numIngs && j < is_.length; j++) {
+                      const ing = is_[(pi * 3 + j) % is_.length];
+                      if (used.has(ing.ingredient_id)) continue;
+                      used.add(ing.ingredient_id);
+                      samples.push({
+                        recipe_id: id++,
+                        product_id: p.product_id,
+                        ingredient_id: ing.ingredient_id,
+                        quantity_required: qty[Math.floor(pi * 2 + j) % qty.length],
+                      });
+                    }
+                  });
+                  // Add more to reach 20
+                  while (samples.length < 20 && prods.length > 0 && ings.length > 0) {
+                    const p = prods[samples.length % prods.length];
+                    const ing = ings[(samples.length * 7) % ings.length];
+                    if (!samples.some(s => s.product_id === p.product_id && s.ingredient_id === ing.ingredient_id)) {
+                      samples.push({ recipe_id: id++, product_id: p.product_id, ingredient_id: ing.ingredient_id, quantity_required: qty[samples.length % qty.length] });
+                    } else break;
+                  }
+                  setRecipes(samples.slice(0, 20));
+                  notify(`✅ បន្ថែម ${samples.slice(0,20).length} sample recipes ហើយ!`);
+                }}>
+                🌱 Seed 20 Sample Recipes
+              </button>
+            )}
           </div>
         )}
         {(subTab === "sql" || subTab === "auditlog") && <div style={{ paddingBottom: 10 }} />}
@@ -1555,8 +1594,20 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 </button>
               </div>
               {missingIng>0 && (
-                <div style={{ background:"#E74C3C11",border:"1px solid #E74C3C44",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#E74C3C" }}>
-                  ⚠️ មាន <strong>{missingIng}</strong> mapping ដែល ingredient ត្រូវបានលុប
+                <div style={{ background:"#E74C3C11",border:"1px solid #E74C3C44",borderRadius:10,padding:"12px 16px",marginBottom:12,fontSize:12,color:"#E74C3C" }}>
+                  <div style={{fontWeight:700,marginBottom:6}}>⚠️ មាន {missingIng} mapping ដែល ingredient ត្រូវបានលុប</div>
+                  <div style={{fontSize:11,color:"#E74C3C88"}}>
+                    {recipes.filter(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id)).map(r=>{
+                      const prod = prods.find(p=>p.product_id===r.product_id);
+                      return <span key={r.recipe_id} style={{background:"#E74C3C22",borderRadius:6,padding:"2px 8px",marginRight:6,marginBottom:4,display:"inline-block"}}>
+                        {prod?.product_name||"?"} → ID:{r.ingredient_id}
+                      </span>;
+                    })}
+                  </div>
+                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>i.ingredient_id===r.ingredient_id)))}
+                    style={{...btnSmall,marginTop:8,fontSize:11,color:"#E74C3C",borderColor:"#E74C3C44"}}>
+                    🗑 លុប mappings ខូច​ទាំងអស់
+                  </button>
                 </div>
               )}
               {sorted.map(prod => {
@@ -1566,7 +1617,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                   const ing = ings.find(i=>i.ingredient_id===r.ingredient_id);
                   return sum + (Number(r.quantity_required)*(ing?.cost_per_unit||0));
                 },0);
-                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>i.ingredient_id===r.ingredient_id); return ing && Number(ing.current_stock)>=Number(r.quantity_required); });
+                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>i.ingredient_id===r.ingredient_id); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
                 const hasMissing = pr.some(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id));
                 return (
                   <div key={prod.product_id} style={{ background:"#120F13",border:`1px solid ${hasMissing?"#E74C3C33":canMake?"#27AE6033":"#F39C1233"}`,borderRadius:12,marginBottom:10,overflow:"hidden" }}>
@@ -1584,26 +1635,54 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                       <span style={{ fontSize:13,color:"#555",marginLeft:4 }}>{isCollapsed?"▶":"▼"}</span>
                     </div>
                     {!isCollapsed && (
-                      <TableWrap headers={["#","ingredient","qty","ស្តុក","status",""]}>
+                      <TableWrap headers={["#","ingredient + ប្រើ/serve","ស្តុក​នៅ","status / ចំនួន",""]}>
                         {pr.map((r,idx)=>{
                           const ing=ings.find(i=>i.ingredient_id===r.ingredient_id);
-                          const enough=ing&&Number(ing.current_stock)>=Number(r.quantity_required);
-                          const servings=ing?Math.floor(Number(ing.current_stock)/Number(r.quantity_required)):0;
+                          const enough=ing&&Number(ing?.current_stock)>=Number(r.quantity_required);
+                          const servings=ing?Math.floor(Number(ing?.current_stock)/Number(r.quantity_required)):0;
                           return (
                             <tr key={r.recipe_id}>
                               <Td mono dim>{idx+1}</Td>
-                              <Td>{ing?ing.ingredient_name:<span style={{color:"#E74C3C",fontSize:11}}>⚠️ deleted</span>}</Td>
-                              <Td gold>{r.quantity_required} {ing?.unit||""}</Td>
-                              <Td style={{color:enough?"#27AE60":"#E74C3C"}}>{ing?`${fmtStock(ing.current_stock)} ${ing.unit}`:"—"}</Td>
                               <Td>
-                                {ing?(<span style={{ fontSize:11,padding:"2px 8px",borderRadius:20,background:enough?"#27AE6022":"#E74C3C22",color:enough?"#27AE60":"#E74C3C" }}>
-                                  {enough?`✅ ${servings}x`:"❌ ស្តុកអស់"}
-                                </span>):<span style={{color:"#E74C3C",fontSize:11}}>missing</span>}
+                                {ing
+                                  ? <div>
+                                      <div style={{fontWeight:600,fontSize:12}}>{ing?.ingredient_name}</div>
+                                      <div style={{fontSize:11,color:"#555",marginTop:2}}>
+                                        ប្រើ <span style={{color:"#E8A84B",fontWeight:700}}>{r.quantity_required} {ing?.unit}</span>/serve
+                                      </div>
+                                    </div>
+                                  : <span style={{color:"#E74C3C",fontSize:11}}>⚠️ deleted</span>}
+                              </Td>
+                              <Td>
+                                {ing
+                                  ? <div>
+                                      <div style={{fontSize:12,color:enough?"#27AE60":"#E74C3C",fontWeight:600}}>
+                                        {fmtStock(ing?.current_stock)} {ing?.unit} នៅ
+                                      </div>
+                                      <div style={{fontSize:11,color:"#555",marginTop:2}}>
+                                        ស្តុក / {fmtStock(ing?.threshold)} {ing?.unit} min
+                                      </div>
+                                    </div>
+                                  : <span style={{color:"#555",fontSize:11}}>—</span>}
+                              </Td>
+                              <Td>
+                                {ing
+                                  ? <div style={{textAlign:"center"}}>
+                                      <span style={{ display:"block",fontSize:12,padding:"3px 8px",borderRadius:20,
+                                        background:enough?"#27AE6022":"#E74C3C22",
+                                        color:enough?"#27AE60":"#E74C3C",fontWeight:600 }}>
+                                        {enough ? `✅ ${servings}x` : "❌ ស្តុកអស់"}
+                                      </span>
+                                      {enough && <div style={{fontSize:10,color:"#555",marginTop:2}}>
+                                        {servings} ចំនួន​អាចធ្វើ
+                                      </div>}
+                                    </div>
+                                  : <span style={{color:"#E74C3C",fontSize:11}}>missing</span>}
                               </Td>
                               <Td>
                                 <div style={{display:"flex",gap:4}}>
                                   <button onClick={()=>setModal({mode:"edit",entity:"rec",data:{...r}})} style={{...btnSmall,padding:"4px 8px"}}>✏️</button>
-                                  <button onClick={()=>setDelConf({name:`${prod.product_name}→${ing?.ingredient_name||r.recipe_id}`,fn:()=>{setRecipes(p=>p.filter(x=>x.recipe_id!==r.recipe_id));notify("✓ លុប");setDelConf(null);}})}
+                                  <button onClick={()=>setDelConf({name:`${prod.product_name} → ${ing?.ingredient_name||r.recipe_id}`,fn:()=>{setRecipes(p=>p.filter(x=>x.recipe_id!==r.recipe_id));notify("✓ លុប");setDelConf(null);}})}
                                     style={{...btnSmall,padding:"4px 8px",color:"#E74C3C",borderColor:"#E74C3C33"}}>🗑</button>
                                 </div>
                               </Td>
