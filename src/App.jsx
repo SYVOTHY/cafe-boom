@@ -162,6 +162,18 @@ const PERM_LABELS = {
   theme: { icon: "🎨", label: "រចនាប័ទ្ម" },
 };
 
+const DEFAULT_PERMS_TPL = {
+  pos: false,
+  tables: false,
+  menu: false,
+  inventory: false,
+  orders: false,
+  report: false,
+  finance: false,
+  users: false,
+  theme: false,
+};
+
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
 const MILK = ["គ្មានទឹកដោះ", "ទឹកដោះគោ", "ទឹកសណ្ដែក", "Oat", "មិនថែមអ្វីទេ"];
 
@@ -488,8 +500,8 @@ function LoginPage({ theme, loading, error, onLogin }) {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const t = theme;
-  const shopName = localStorage.getItem("cb_shop_name") || "Café Boom";
-  const shopLogo = localStorage.getItem("cb_shop_logo") || "";
+  const shopName = window.__SHOP_NAME__ || localStorage.getItem("cb_shop_name") || "Café Boom";
+  const shopLogo = window.__SHOP_LOGO__ || localStorage.getItem("cb_shop_logo") || "";
   return (
     <div style={{ minHeight:"100vh", background:t.bgMain, display:"flex", alignItems:"center", justifyContent:"center" }}>
       <style>{CSS}</style>
@@ -3261,6 +3273,7 @@ function ThemePage({ theme, setTheme, notify }) {
     localStorage.setItem("cb_shop_logo", logoPreview);
     // Update global so header reacts immediately
     window.__SHOP_NAME__ = shopName;
+    window.__SHOP_LOGO__ = logoPreview;
     window.__SHOP_LOGO__ = logoPreview;
     notify("✅ រក្សាទុក ឈ្មោះហាង + Logo រួចហើយ!");
     // Force re-render header by dispatching event
