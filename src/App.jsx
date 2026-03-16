@@ -407,7 +407,7 @@ export default function CafeBloom() {
   ].filter(n => !n.adminOnly || currentUser.role === "admin");
 
   return (
-    <div style={{ minHeight:"100vh", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif" }}>
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }}>
       <style>{CSS}</style>
 
       {/* ── Toast ── */}
@@ -433,7 +433,7 @@ export default function CafeBloom() {
       </div>
 
       {/* ── Page content ── */}
-      <div className="page-pad" style={{ padding:"16px" }}>
+      <div className={"page-pad" + (page==="pos" ? " page-pos-active" : "")} style={{ padding: page==="pos" ? "0" : "16px", display:"flex", flexDirection:"column", flex:1, minHeight:0, overflow: page==="pos" ? "hidden" : "auto" }}>
         {page === "pos"       && <POSPage       {...shared} />}
         {page === "tables"    && <TablesPage    {...shared} />}
         {page === "menu"      && <MenuPage      {...shared} />}
@@ -636,7 +636,7 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
   };
 
   return (
-    <div className="pos-layout" style={{ flex: 1, minHeight: 0 }}>
+    <div className="pos-layout" style={{ flex: 1, minHeight: 0, height: "100%", overflow: "hidden" }}>
       {/* ── RECEIPT MODAL ── */}
       {receipt && <ReceiptModal receipt={receipt} onClose={() => setReceipt(null)} />}
 
@@ -2207,24 +2207,9 @@ const CSS = `
   }
 
   /* ── Responsive ── */
-  .pos-layout {
-    display: grid;
-    grid-template-columns: 1fr 300px;
-    gap: 16px;
-    max-width: 1400px;
-    align-items: start;
-  }
-  @media (max-width: 900px) {
-    .pos-layout { grid-template-columns: 1fr; }
-    .pos-cart {
-      position: fixed !important;
-      bottom: 0; left: 0; right: 0; z-index: 200;
-      border-radius: 20px 20px 0 0 !important;
-      max-height: 55vh; overflow-y: auto;
-      top: auto !important;
-    }
-    .page-pad { padding: 8px 8px 200px !important; }
-  }
+  /* POS page active — no padding, full height */
+  .page-pos-active { padding: 0 !important; }
+
   @media (max-width: 640px) {
     .nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
     .nav-label { display: none; }
