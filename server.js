@@ -182,7 +182,14 @@ const BRANCH_TABLES_DEF = Array.from({length:8},(_,i)=>({table_id:i+1,status:"fr
 async function loadShared() {
   const { rows } = await pool.query("SELECT key, value FROM shared_data");
   const db = {};
-  for (const r of rows) db[r.key] = r.value;
+  for (const r of rows) {
+    // Normalize date fields in orders, logs, expenses arrays
+    if (["orders","logs","expenses"].includes(r.key) && Array.isArray(r.value)) {
+      db[r.key] = normalizeRows(r.value);
+    } else {
+      db[r.key] = r.value;
+    }
+  }
   // Fill missing keys with defaults
   for (const [k, v] of Object.entries(DEFAULT_SHARED)) {
     if (!(k in db)) {
@@ -265,6 +272,27 @@ async function saveBranchKey(bid, key, value) {
     INSERT INTO branch_data(branch_id,key,value) VALUES($1,$2,$3)
     ON CONFLICT(branch_id,key) DO UPDATE SET value=$3
   `, [bid, key, JSON.stringify(value)]);
+}
+
+// Normalize order/expense dates — ensures created_at is always ISO string
+// Fixes: "slice is not a function" crash when frontend receives numbers/objects
+function normalizeRows(rows) {
+  if (!Array.isArray(rows)) return rows;
+  return rows.map(row => {
+    if (!row || typeof row !== "object") return row;
+    const out = { ...row };
+    // Normalize created_at
+    if (out.created_at !== undefined) {
+      if (out.created_at instanceof Date)   out.created_at = out.created_at.toISOString();
+      else if (typeof out.created_at === "number") out.created_at = new Date(out.created_at).toISOString();
+      else if (out.created_at === null)     out.created_at = new Date().toISOString();
+    }
+    // Normalize order_id (used as fallback date) — keep as string
+    if (out.order_id !== undefined && typeof out.order_id === "number") {
+      out.order_id = new Date(out.order_id).toISOString();
+    }
+    return out;
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -435,7 +463,7 @@ async function handler(req, res) {
     const all = [];
     for (const b of branches) {
       const bd = await loadBranch(b.branch_id);
-      (bd.orders||[]).forEach(o => all.push({ ...o, branch_id:b.branch_id, branch_name:b.branch_name }));
+      normalizeRows(bd.orders||[]).forEach(o => all.push({ ...o, branch_id:b.branch_id, branch_name:b.branch_name }));
     }
     all.sort((a,b) => new Date(b.order_id) - new Date(a.order_id));
     send(res, 200, all);
