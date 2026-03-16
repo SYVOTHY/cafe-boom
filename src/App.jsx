@@ -220,6 +220,10 @@ const btnRed = {
   background: "linear-gradient(135deg,#7A1A1A,#E74C3C)", color: "#fff",
   fontWeight: 700, fontFamily: "inherit", fontSize: 13,
 };
+const btnSmall = {
+  padding: "5px 10px", borderRadius: 7, border: "1px solid #2A2730",
+  background: "transparent", color: "#aaa", cursor: "pointer", fontFamily: "inherit", fontSize: 12,
+};
 
 function fmtDate(iso) {
   if (!iso) return "";
@@ -3954,6 +3958,7 @@ const CSS = `
     --bg-main: #09080A; --bg-card: #120F13; --bg-header: #0E0C0F;
     --accent: #E8A84B; --accent-dk: #B8732A;
     --text-main: #EDE8E1; --text-dim: #666666; --border-col: #1E1B1F;
+    --border: #1E1B1F;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: var(--bg-main); color: var(--text-main); }
