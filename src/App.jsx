@@ -53,6 +53,77 @@ const now  = ()  => new Date().toISOString();
 const uid  = ()  => Date.now() + "_" + Math.random().toString(36).slice(2, 6);
 const TAX  = 0.10;
 
+const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
+const MILK = ["គ្មានទឹកដោះ", "ទឹកដោះគោ", "ទឹកសណ្ដែក", "Oat", "មិនថែមអ្វីទេ"];
+
+// ── EXPORT UTILITIES ────────────────────────────────────────────────
+// Download CSV from array of objects
+const exportCSV = (rows, filename) => {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csv = [headers.join(","), ...rows.map(r => headers.map(h => escape(r[h])).join(","))].join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+};
+
+// Print as PDF using browser print dialog (styled)
+const exportPDF = (title, dateLabel, tableHTML) => {
+  const win = window.open("", "_blank", "width=900,height=700");
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+  <title>${title}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Kantumruy Pro',sans-serif;color:#111;padding:24px;font-size:13px}
+    h1{font-size:20px;font-weight:700;margin-bottom:4px;color:#B8732A}
+    .sub{font-size:12px;color:#666;margin-bottom:20px}
+    table{width:100%;border-collapse:collapse;margin-top:12px}
+    th{background:#B8732A;color:#fff;padding:8px 10px;text-align:left;font-size:12px}
+    td{padding:7px 10px;border-bottom:1px solid #eee;font-size:12px}
+    tr:nth-child(even) td{background:#fafafa}
+    .total{margin-top:16px;text-align:right;font-size:14px;font-weight:700;color:#B8732A}
+    .footer{margin-top:24px;font-size:11px;color:#aaa;text-align:center}
+    @media print{body{padding:12px}}
+  </style></head><body>
+  <h1>☕ Café Bloom — ${title}</h1>
+  <div class="sub">${dateLabel} · បោះពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
+  ${tableHTML}
+  <div class="footer">Café Bloom POS © ${new Date().getFullYear()}</div>
+  <script>window.onload=()=>{window.print();}<\/script>
+  </body></html>`);
+  win.document.close();
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  STYLE TOKENS  (must be before all components)
+// ═══════════════════════════════════════════════════════════════════
+const inputSt = {
+  background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 9,
+  padding: "9px 13px", color: "var(--text-main)", fontFamily: "inherit", fontSize: 13,
+};
+const btnGold = {
+  padding: "10px 20px", borderRadius: 10, border: "none", cursor: "pointer",
+  background: "linear-gradient(135deg,#B8732A,#E8A84B)", color: "#fff",
+  fontWeight: 700, fontFamily: "inherit", fontSize: 13,
+};
+const btnGhost = {
+  padding: "10px 18px", borderRadius: 10, cursor: "pointer", fontFamily: "inherit", fontSize: 13,
+  border: "1px solid #2A2730", background: "transparent", color: "#888",
+};
+const btnGreen = {
+  padding: "10px 18px", borderRadius: 10, border: "none", cursor: "pointer",
+  background: "linear-gradient(135deg,#1A7A3A,#27AE60)", color: "#fff",
+  fontWeight: 700, fontFamily: "inherit", fontSize: 13,
+};
+const btnRed = {
+  padding: "10px 18px", borderRadius: 10, border: "none", cursor: "pointer",
+  background: "linear-gradient(135deg,#7A1A1A,#E74C3C)", color: "#fff",
+  fontWeight: 700, fontFamily: "inherit", fontSize: 13,
+};
+
 function fmtDate(iso) {
   if (!iso) return "";
   try { return new Date(iso).toLocaleDateString("km-KH", { day:"2-digit", month:"2-digit", year:"numeric" }); }
@@ -187,6 +258,13 @@ export default function CafeBloom() {
     setCurrentUser(null);
   }, []);
 
+  // ── Toast notification (used by POSPage) ─────────────────────────
+  const [toast, setToast] = useState("");
+  const notify = useCallback((msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(""), 2500);
+  }, []);
+
   // ── Permission check ────────────────────────────────────────────
   const canAccess = useCallback((p) => {
     if (!currentUser) return false;
@@ -220,6 +298,7 @@ export default function CafeBloom() {
     setTheme, offline, socketOnline, reload,
     branchId: BRANCH_ID, branchName: BRANCH_NAME,
     doLogout, canAccess,
+    notify,
   };
 
   const NAV = [
@@ -238,6 +317,12 @@ export default function CafeBloom() {
     <div style={{ minHeight:"100vh", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif" }}>
       <style>{CSS}</style>
 
+      {/* ── Toast ── */}
+      {toast && (
+        <div style={{ position:"fixed", bottom:80, left:"50%", transform:"translateX(-50%)", background:"#1a3a1a", color:"#80ff80", borderRadius:10, padding:"10px 20px", fontSize:13, fontWeight:700, zIndex:999, boxShadow:"0 4px 20px rgba(0,0,0,.4)", whiteSpace:"nowrap" }}>
+          {toast}
+        </div>
+      )}
       {/* ── TopBar ── */}
       <TopBar socketOnline={socketOnline} offline={offline} currentUser={currentUser} doLogout={doLogout} />
 
@@ -351,222 +436,348 @@ function TopBar({ socketOnline, offline, currentUser, doLogout }) {
   );
 }
 
-function POSPage({ prods, cats, ings, recipes, options, orders, setOrders, logs, setLogs, setIngs, tables, theme, currentUser, branchId, branchName }) {
-  const [cart,       setCart]       = useState([]);
-  const [selCat,     setSelCat]     = useState(0);
-  const [search,     setSearch]     = useState("");
-  const [customize,  setCustomize]  = useState(null);
-  const [payModal,   setPayModal]   = useState(false);
-  const [payMethod,  setPayMethod]  = useState("cash");
-  const [tableNum,   setTableNum]   = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
+function POSPage({ cats, prods, ings, recipes, options, tables, setTables, orders, setOrders, logs, setLogs, notify, setIngs, currentUser }) {
+  const [cart, setCart] = useState([]);
+  const [selCat, setSelCat] = useState(0);
+  const [search, setSearch] = useState("");
+  const [selTable, setSelTable] = useState(null);
+  const [payMethod, setPayMethod] = useState("cash");
+  const [customize, setCustomize] = useState(null);
+  const [custOpts, setCustOpts] = useState({ sugar: "50%", milk: "ទឹកដោះគោ", size: "M" });
+  const [receipt, setReceipt] = useState(null);
+  const [txRunning, setTxRunning] = useState(false);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [customerDisplay, setCustomerDisplay] = useState(false); // customer-facing payment page
 
-  const filtered = prods.filter(p =>
-    p.is_active !== false &&
+  const activeProds = prods.filter(p => p.is_active &&
     (selCat === 0 || p.category_id === selCat) &&
-    (p.product_name || "").toLowerCase().includes(search.toLowerCase())
-  );
+    (search === "" || p.product_name.includes(search)));
 
-  const cartTotal   = cart.reduce((s, i) => s + i.price * i.qty, 0);
-  const cartTax     = cartTotal * TAX;
-  const cartGrand   = cartTotal + cartTax;
+  const cartTotal = Math.round(cart.reduce((s, i) => s + Number(i.price) * Number(i.qty), 0) * 100) / 100;
+  const cartTax = Math.round(cartTotal * 0.1 * 100) / 100;
+  const getCat = id => cats.find(c => c.category_id === id);
 
-  function addToCart(prod, opts = {}) {
-    const price = prod.base_price + (opts.addPrice || 0);
-    const key   = prod.product_id + JSON.stringify(opts);
+  const openCustomize = (prod) => {
+    setCustomize(prod);
+    const opts = options.filter(o => o.product_id === prod.product_id);
+    const sizes = opts.filter(o => o.option_name === "ទំហំ").map(o => o.option_value);
+    setCustOpts({ sugar: "50%", milk: "ទឹកដោះគោ", size: sizes[0] || "M" });
+  };
+
+  const addToCart = () => {
+    const opts = options.filter(o => Number(o.product_id) === Number(customize.product_id));
+    const sizeOpt = opts.find(o => o.option_name === "ទំហំ" && o.option_value === custOpts.size);
+    const extra = sizeOpt ? (parseFloat(sizeOpt.additional_price) || 0) : 0;
+    const price = Math.round((parseFloat(customize.base_price) + extra) * 100) / 100; // round to cents
+    const key = `${customize.product_id}-${custOpts.sugar}-${custOpts.milk}-${custOpts.size}`;
     setCart(prev => {
       const ex = prev.find(i => i.key === key);
-      if (ex) return prev.map(i => i.key === key ? { ...i, qty: i.qty + 1 } : i);
-      return [...prev, { key, product_id: prod.product_id, product_name: prod.product_name, price, qty: 1, emoji: prod.emoji, opts }];
+      return ex
+        ? prev.map(i => i.key === key ? { ...i, qty: i.qty + 1 } : i)
+        : [...prev, { ...customize, price, qty: 1, key, opts: { ...custOpts } }];
     });
-  }
-
-  function openCustomize(prod) {
-    const prodOpts = options.filter(o => o.product_id === prod.product_id);
-    if (!prodOpts.length) { addToCart(prod); return; }
-    setCustomize({ prod, opts: prodOpts, sel: {} });
-  }
-
-  function confirmCustomize() {
-    if (!customize) return;
-    const { prod, sel } = customize;
-    const addPrice = Object.values(sel).reduce((s, o) => s + (o?.additional_price || 0), 0);
-    addToCart(prod, { ...sel, addPrice });
     setCustomize(null);
-  }
+    notify(`✓ បន្ថែម ${customize.product_name} — ${fmt(price)}`);
+  };
 
-  function removeFromCart(key) { setCart(prev => prev.filter(i => i.key !== key)); }
-  function qtyChange(key, delta) {
-    setCart(prev => prev.map(i => i.key === key ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0));
-  }
+  // CHECKOUT with full DB transaction
+  const checkout = async () => {
+    if (!cart.length || txRunning) return;
+    setTxRunning(true);
 
-  async function checkout() {
-    if (!cart.length) return;
-    const order = {
-      order_id:    now(),
-      branch_id:   branchId,
-      cashier:     currentUser.username,
-      cashier_name: currentUser.name,
-      table:       tableNum,
-      items:       cart,
-      subtotal:    cartTotal,
-      tax:         cartTax,
-      total:       cartGrand,
-      method:      payMethod,
-      created_at:  now(),
-    };
+    let currentIngs = [...ings];
+    const logEntries = [];
+    const ts = new Date().toLocaleString("km-KH");
 
-    // Deduct ingredients
-    const newIngs = [...ings];
     for (const item of cart) {
-      const rec = recipes.filter(r => r.product_id === item.product_id);
-      for (const r of rec) {
-        const ing = newIngs.find(i => i.ingredient_id === r.ingredient_id);
-        if (ing) ing.current_stock = Math.max(0, (ing.current_stock || 0) - (r.quantity || 0) * item.qty);
+      const result = runTransaction(currentIngs, recipes, item.product_id, item.qty);
+      if (!result.success) {
+        notify(`❌ ${result.reason} ស្តុកមិនគ្រប់!`, "error");
+        setTxRunning(false);
+        return;
       }
-    }
-    setIngs(newIngs);
-
-    const newOrders = [order, ...orders];
-    setOrders(newOrders);
-
-    const log = { log_id: uid(), type:"order", ref: order.order_id, amount: cartGrand, note: `${cart.length} items`, created_at: now(), cashier: currentUser.username };
-    setLogs([log, ...logs]);
-
-    // Telegram
-    const lines = cart.map(i => `  ${i.qty}x ${i.product_name} — ${fmt(i.price * i.qty)}`).join("\n");
-    sendTelegram(`🧾 <b>ការបញ្ជាទិញថ្មី — ${branchName}</b>\nតុ: ${tableNum || "—"}\nCashier: ${currentUser.name}\n${lines}\n<b>សរុប: ${fmt(cartGrand)}</b>`);
-
-    // Print
-    try {
-      await fetch(CLOUD_URL + "/api/print?branch=" + branchId, {
-        method: "POST",
-        headers: { "Content-Type":"application/json", "ngrok-skip-browser-warning":"true" },
-        body: JSON.stringify({ receipt: { items: cart, total: cartTotal, tax: cartTax, method: payMethod, table: tableNum, ts: fmtDateTime(now()) } }),
+      // Collect log entries
+      result.checks.forEach(c => {
+        logEntries.push({
+          log_id: Date.now() + c.ing.ingredient_id + Math.random(),
+          ts, product: item.product_name,
+          ingredient: c.ing.ingredient_name,
+          before: fmtN(c.ing.current_stock),
+          deducted: fmtN(c.need),
+          after: fmtN(c.ing.current_stock - c.need),
+          unit: c.ing.unit,
+        });
       });
-    } catch {}
+      currentIngs = result.newIngredients;
+    }
 
+    // COMMIT
+    setIngs(currentIngs);
+    setLogs(p => [...logEntries, ...p]);
+
+    // Mark table busy
+    if (selTable) {
+      setTables(p => p.map(t => t.table_id === selTable ? { ...t, status: "busy" } : t));
+    }
+
+    const rec = {
+      order_id: Date.now(),
+      items: [...cart], table: selTable,
+      total: cartTotal, tax: cartTax,
+      method: payMethod, ts,
+      cashier: currentUser?.name || currentUser?.username || "unknown",
+    };
+    setOrders(p => [rec, ...p]);
+    setReceipt(rec);
     setCart([]);
-    setTableNum("");
-    setPayModal(false);
-    setSuccessMsg(`✅ ការបញ្ជាទិញ ${fmt(cartGrand)} បានរក្សាទុក!`);
-    setTimeout(() => setSuccessMsg(""), 3000);
-  }
+    setSelTable(null);
+    setTxRunning(false);
+    notify("✅ ការទូទាត់ជោគជ័យ!");
+
+    // 📲 Send Telegram notification (await + log result)
+    sendTelegram(rec).then(() => {
+      console.log('[Telegram] Notification sent for order:', rec.order_id);
+    }).catch(e => {
+      console.error('[Telegram] Failed to send:', e.message);
+    });
+  };
 
   return (
-    <div className="pos-layout">
-      {/* ── Products ── */}
-      <div>
-        {successMsg && <div style={{ background:"#1a3a1a", color:"#80ff80", borderRadius:8, padding:"10px 14px", marginBottom:12, fontWeight:700 }}>{successMsg}</div>}
+    <div className="pos-layout" style={{ flex: 1, minHeight: 0 }}>
+      {/* ── RECEIPT MODAL ── */}
+      {receipt && <ReceiptModal receipt={receipt} onClose={() => setReceipt(null)} />}
 
-        {/* Search + Category */}
-        <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap" }}>
-          <input className="inp" style={{ flex:1, minWidth:160 }} placeholder="🔍 ស្វែងរក..." value={search} onChange={e=>setSearch(e.target.value)} />
-        </div>
-        <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
-          <button className={"cat-btn" + (selCat===0?" active":"")} onClick={()=>setSelCat(0)}>ទាំងអស់</button>
-          {cats.map(c => (
-            <button key={c.category_id} className={"cat-btn" + (selCat===c.category_id?" active":"")} onClick={()=>setSelCat(c.category_id)}>
-              {c.emoji} {c.category_name}
-            </button>
-          ))}
-        </div>
+      {/* ── CUSTOMER DISPLAY ── */}
+      {customerDisplay && (
+        <CustomerDisplay
+          cart={cart} cartTotal={cartTotal} cartTax={cartTax}
+          payMethod={payMethod}
+          selTable={selTable}
+          onClose={() => setCustomerDisplay(false)}
+          onConfirmPay={async () => {
+            setCustomerDisplay(false);
+            await checkout();
+          }}
+        />
+      )}
 
-        {/* Product Grid */}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:12 }}>
-          {filtered.map(p => (
-            <div key={p.product_id} className="prod-card" onClick={()=>openCustomize(p)}>
-              <div className="prod-img-wrap">
-                {p.image_url
-                  ? <img src={p.image_url} alt={p.product_name} style={{ width:"100%", height:"100%", objectFit:"cover", borderRadius:10 }} />
-                  : <span style={{ fontSize:44 }}>{p.emoji || "☕"}</span>
-                }
-              </div>
-              <div style={{ fontSize:13, fontWeight:600, textAlign:"center", lineHeight:1.3, marginTop:4 }}>{p.product_name}</div>
-              <div style={{ fontSize:12, color:"var(--text-dim)" }}>{cats.find(c=>c.category_id===p.category_id)?.category_name}</div>
-              <div style={{ color:"var(--accent)", fontWeight:700, fontSize:14 }}>{fmt(p.base_price)}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Cart ── */}
-      <div className="pos-cart" style={{ background:"var(--bg-card)", borderRadius:16, border:"1px solid var(--border-col)", padding:18, display:"flex", flexDirection:"column", gap:10, position:"sticky", top:70, maxHeight:"calc(100vh - 80px)", overflowY:"auto" }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:2 }}>
-          <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)" }}>🛒 កញ្ចប់​ទិញ</div>
-          {cart.length > 0 && <span style={{ fontSize:11, background:"var(--accent)", color:"#000", borderRadius:10, padding:"2px 8px", fontWeight:700 }}>{cart.reduce((s,i)=>s+i.qty,0)} item</span>}
-        </div>
-        <input className="inp" placeholder="លេខ​តុ..." value={tableNum} onChange={e=>setTableNum(e.target.value)} />
-
-        {!cart.length && <div style={{ color:"var(--text-dim)", textAlign:"center", padding:24, fontSize:13 }}>មិន​ទាន់​មាន​ទំនិញ</div>}
-
-        {cart.map(item => (
-          <div key={item.key} style={{ display:"flex", alignItems:"center", gap:8, borderBottom:"1px solid var(--border-col)", paddingBottom:8 }}>
-            <span>{item.emoji || "☕"}</span>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:12, fontWeight:600 }}>{item.product_name}</div>
-              {item.opts && Object.entries(item.opts).filter(([k])=>k!=="addPrice").map(([k,v])=>(
-                <div key={k} style={{ fontSize:10, color:"var(--text-dim)" }}>{k}: {typeof v === "object" ? v?.option_name : v}</div>
-              ))}
-              <div style={{ fontSize:12, color:"var(--accent)" }}>{fmt(item.price)} × {item.qty} = {fmt(item.price*item.qty)}</div>
-            </div>
-            <div style={{ display:"flex", gap:4, alignItems:"center" }}>
-              <button className="btn-sm" onClick={()=>qtyChange(item.key,-1)}>−</button>
-              <button className="btn-sm" onClick={()=>qtyChange(item.key,+1)}>+</button>
-              <button className="btn-sm" style={{ color:"#ff6b6b" }} onClick={()=>removeFromCart(item.key)}>✕</button>
-            </div>
-          </div>
-        ))}
-
-        {cart.length > 0 && (
-          <>
-            <div style={{ fontSize:13, color:"var(--text-dim)" }}>
-              <div style={{ display:"flex", justifyContent:"space-between" }}><span>សរុប:</span><span>{fmt(cartTotal)}</span></div>
-              <div style={{ display:"flex", justifyContent:"space-between" }}><span>VAT 10%:</span><span>{fmt(cartTax)}</span></div>
-            </div>
-            <div style={{ display:"flex", justifyContent:"space-between", fontWeight:700, fontSize:16, color:"var(--accent)" }}>
-              <span>សរុបរួម:</span><span>{fmt(cartGrand)}</span>
-            </div>
-
-            <div style={{ display:"flex", gap:6 }}>
-              {["cash","qr","bank"].map(m => (
-                <button key={m} className={"pay-btn" + (payMethod===m?" active":"")} onClick={()=>setPayMethod(m)}>
-                  {m==="cash"?"💵 សាច់ប្រាក់":m==="qr"?"📱 QR":"🏦 ប្រាក់​គណនី"}
-                </button>
-              ))}
-            </div>
-            <button className="btn-primary" onClick={checkout}>✅ Checkout</button>
-            <button className="btn-sm" style={{ width:"100%" }} onClick={()=>setCart([])}>🗑 លុប​ទាំង​អស់</button>
-          </>
-        )}
-      </div>
-
-      {/* ── Customize Modal ── */}
+      {/* ── CUSTOMIZE MODAL ── */}
       {customize && (
-        <Modal title={`🛠 ${customize.prod.product_name}`} onClose={()=>setCustomize(null)}>
-          {["size","sugar","milk","ice"].map(grp => {
-            const grpOpts = customize.opts.filter(o => o.option_group === grp);
-            if (!grpOpts.length) return null;
-            const labels = { size:"ទំហំ", sugar:"ស្ករ", milk:"ទឹកដោះ", ice:"ទឹកកក" };
-            return (
-              <div key={grp} style={{ marginBottom:10 }}>
-                <div style={{ fontWeight:700, marginBottom:6, fontSize:13 }}>{labels[grp] || grp}:</div>
-                <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                  {grpOpts.map(o => (
-                    <button key={o.option_id}
-                      className={"opt-btn" + (customize.sel[grp]?.option_id===o.option_id?" active":"")}
-                      onClick={()=>setCustomize(prev=>({ ...prev, sel:{ ...prev.sel, [grp]:o } }))}
-                    >
-                      {o.option_name}{o.additional_price>0?` +${fmt(o.additional_price)}`:""}
-                    </button>
-                  ))}
+        <Modal onClose={() => setCustomize(null)} maxW={380}>
+          <div style={{ textAlign: "center", marginBottom: 16 }}>
+            {customize.image_url
+              ? <img src={customize.image_url} alt={customize.product_name}
+                style={{ width: 90, height: 90, borderRadius: 14, objectFit: "cover", margin: "0 auto", display: "block" }} />
+              : <div style={{ fontSize: 52 }}>{customize.emoji}</div>
+            }
+            <div style={{ fontWeight: 700, fontSize: 17, marginTop: 8 }}>{customize.product_name}</div>
+            {/* Live price preview */}
+            {(() => {
+              const sizeOpt = options.find(o => o.product_id === customize.product_id && o.option_name === "ទំហំ" && o.option_value === custOpts.size);
+              const extra = sizeOpt ? (parseFloat(sizeOpt.additional_price) || 0) : 0;
+              const total = parseFloat(customize.base_price) + extra;
+              return (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 4 }}>
+                  <span style={{ color: "#666", fontSize: 13, textDecoration: extra > 0 ? "line-through" : "none" }}>{fmt(customize.base_price)}</span>
+                  {extra > 0 && <span style={{ color: "#5BA3E0", fontSize: 12 }}>+{fmt(extra)}</span>}
+                  <span style={{ color: "#E8A84B", fontWeight: 700, fontSize: 16 }}>{fmt(total)}</span>
                 </div>
-              </div>
-            );
-          })}
-          <button className="btn-primary" style={{ marginTop:10 }} onClick={confirmCustomize}>បន្ថែម​ទៅ​កញ្ចប់</button>
+              );
+            })()}
+          </div>
+          {/* Size options — always show, default S/M/L/XL if none defined in menu */}
+          <OptRow label="ទំហំ"
+            items={options.filter(o => o.product_id === customize.product_id && o.option_name === "ទំហំ").length > 0
+              ? options.filter(o => o.product_id === customize.product_id && o.option_name === "ទំហំ").map(o => o.option_value)
+              : ["S", "M", "L", "XL"]}
+            value={custOpts.size} onChange={v => setCustOpts(p => ({ ...p, size: v }))} color="#E8A84B" />
+          <OptRow label="ស្ករ" items={SUGAR} value={custOpts.sugar}
+            onChange={v => setCustOpts(p => ({ ...p, sugar: v }))} color="#F39C12" slider={true} />
+          <OptRow label="ទឹកដោះ" items={MILK} value={custOpts.milk}
+            onChange={v => setCustOpts(p => ({ ...p, milk: v }))} color="#5BA3E0" />
+          <button onClick={addToCart} style={{ ...btnGold, width: "100%", marginTop: 18, padding: 14, fontSize: 15 }}>
+            ➕ បន្ថែមទៅកម្ម៉ង់
+          </button>
         </Modal>
       )}
+
+      {/* LEFT: Menu */}
+      <div className="pos-menu" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg-main)" }}>
+        {/* Search + Cats */}
+        <div style={{ padding: "12px 14px 8px", background: "var(--bg-card)", borderBottom: "1px solid var(--border)" }}>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ស្វែងរក..."
+            style={{
+              width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10,
+              padding: "8px 14px", color: "var(--text-main)", fontFamily: "inherit", fontSize: 13, marginBottom: 10
+            }} />
+          <div style={{ display: "flex", gap: 7, overflowX: "auto", paddingBottom: 2 }}>
+            {[{ category_id: 0, category_name: "ទាំងអស់", emoji: "✨" }, ...cats].map(c => (
+              <button key={c.category_id} onClick={() => setSelCat(c.category_id)} style={{
+                padding: "6px 16px", borderRadius: 20, border: "none", cursor: "pointer", whiteSpace: "nowrap",
+                background: selCat === c.category_id ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "#1A181C",
+                color: selCat === c.category_id ? "#fff" : "#777", fontFamily: "inherit", fontSize: 12, fontWeight: 600
+              }}>{c.emoji} {c.category_name}</button>
+            ))}
+          </div>
+        </div>
+        {/* Grid */}
+        <div style={{
+          flex: 1, overflowY: "auto", padding: 10,
+          display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10, alignContent: "start"
+        }}>
+          {activeProds.map(p => {
+            const cat = getCat(p.category_id);
+            return (
+              <button key={p.product_id} onClick={() => openCustomize(p)} className="hover-lift"
+                style={{
+                  background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14,
+                  padding: "10px 8px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 5
+                }}>
+                {/* Image or Emoji */}
+                {p.image_url
+                  ? <img src={p.image_url} alt={p.product_name}
+                    style={{ width: "100%", height: 120, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
+                  : <div style={{
+                    width: "100%", height: 120, borderRadius: 10, background: "var(--bg-main)",
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48
+                  }}>{p.emoji}</div>
+                }
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#E8E3DB", lineHeight: 1.3 }}>{p.product_name}</div>
+                <div style={{ fontSize: 13, color: "#E8A84B", fontWeight: 700 }}>{fmt(p.base_price)}</div>
+                <div style={{ fontSize: 10, background: "var(--bg-main)", color: "var(--text-dim)", padding: "2px 8px", borderRadius: 20 }}>{cat?.emoji} {cat?.category_name}</div>
+              </button>
+            );
+          })}
+          {activeProds.length === 0 && <div style={{ gridColumn: "1/-1", textAlign: "center", color: "#333", paddingTop: 40 }}>គ្មានមុខម្ហូប</div>}
+        </div>
+      </div>
+
+      {/* RIGHT: Cart */}
+      <div className={`pos-cart${cartOpen ? " cart-open" : ""}`} style={{
+        background: "var(--bg-card)", borderLeft: "1px solid var(--border)",
+        display: "flex", flexDirection: "column", overflow: "hidden"
+      }}>
+        {/* Mobile cart header with close btn */}
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "10px 12px 6px", borderBottom: "1px solid var(--border)"
+        }}>
+          <span style={{ fontWeight: 700, fontSize: 13 }}>🛒 កម្ម៉ង់
+            {cart.length > 0 && <span style={{
+              marginLeft: 8, background: "#B8732A", color: "#fff",
+              borderRadius: 10, padding: "1px 8px", fontSize: 11
+            }}>{cart.reduce((s, i) => s + i.qty, 0)}</span>}
+          </span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {selTable && <span style={{ fontSize: 11, background: "#B8732A22", color: "#E8A84B", padding: "3px 10px", borderRadius: 20 }}>តុ {selTable}</span>}
+            <button onClick={() => setCartOpen(false)}
+              style={{
+                background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 8,
+                color: "#888", cursor: "pointer", fontSize: 18, width: 28, height: 28,
+                display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1
+              }}>✕</button>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", padding: "8px 12px", borderBottom: "1px solid #1A181B" }}>
+          {tables.map(t => (
+            <button key={t.table_id} onClick={() => setSelTable(selTable === t.table_id ? null : t.table_id)}
+              style={{
+                width: 34, height: 34, borderRadius: 8, border: "none", cursor: "pointer",
+                background: selTable === t.table_id ? "var(--accent-dk)" : t.status === "busy" ? "#1A0A0A" : "var(--bg-card)",
+                color: selTable === t.table_id ? "#fff" : t.status === "busy" ? "#6B2020" : "#777",
+                fontWeight: 700, fontSize: 12, fontFamily: "inherit"
+              }}>{t.table_id}</button>
+          ))}
+        </div>
+
+        {/* Cart items */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "8px 10px" }}>
+          {cart.length === 0 && (
+            <div style={{ textAlign: "center", color: "#333", paddingTop: 40 }}>
+              <div style={{ fontSize: 36 }}>🛒</div>
+              <div style={{ marginTop: 10, fontSize: 13 }}>ជ្រើសរើសមុខម្ហូប</div>
+            </div>
+          )}
+          {cart.map(item => (
+            <div key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid #1A181B" }}>
+              {item.image_url
+                ? <img src={item.image_url} alt={item.product_name} style={{ width: 32, height: 32, borderRadius: 7, objectFit: "cover", flexShrink: 0 }} />
+                : <div style={{ fontSize: 22, flexShrink: 0 }}>{item.emoji}</div>
+              }
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#E8E3DB", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.product_name}</div>
+                <div style={{ fontSize: 10, color: "#555" }}>{item.opts.size} · {item.opts.sugar}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                <button onClick={() => setCart(p => p.map(i => i.key === item.key ? { ...i, qty: Math.max(0, i.qty - 1) } : i).filter(i => i.qty > 0))}
+                  style={{ width: 22, height: 22, borderRadius: 5, border: "none", background: "var(--bg-main)", color: "var(--text-main)", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>−</button>
+                <span style={{ fontSize: 12, fontWeight: 700, minWidth: 14, textAlign: "center" }}>{item.qty}</span>
+                <button onClick={() => setCart(p => p.map(i => i.key === item.key ? { ...i, qty: i.qty + 1 } : i))}
+                  style={{ width: 22, height: 22, borderRadius: 5, border: "none", background: "#B8732A", color: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>+</button>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#E8A84B", minWidth: 40, textAlign: "right" }}>{fmt(item.price * item.qty)}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Totals + Pay */}
+        <div style={{ padding: "12px", borderTop: "1px solid #1A181B" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#666", marginBottom: 4 }}>
+            <span>សរុប</span><span>{fmt(cartTotal)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#666", marginBottom: 10 }}>
+            <span>VAT 10%</span><span>{fmt(cartTax)}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, marginBottom: 12 }}>
+            <span>សរុបរួម</span><span style={{ color: "#E8A84B" }}>{fmt(cartTotal + cartTax)}</span>
+          </div>
+          {/* Pay method */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+            {[["cash", "💵", "សាច់ប្រាក់"], ["qr", "📱", "QR"], ["bank", "🏦", "ធនាគារ"]].map(([v, ic, lb]) => (
+              <button key={v} onClick={() => setPayMethod(v)} style={{
+                flex: 1, padding: "7px 4px", borderRadius: 8, cursor: "pointer", fontFamily: "inherit", fontSize: 11, fontWeight: 600,
+                border: payMethod === v ? "1px solid #B8732A" : "1px solid #1E1B20",
+                background: payMethod === v ? "#B8732A22" : "transparent",
+                color: payMethod === v ? "#E8A84B" : "#666"
+              }}>{ic} {lb}</button>
+            ))}
+          </div>
+          <button onClick={checkout} disabled={!cart.length || txRunning} style={{
+            ...btnGold, width: "100%", padding: "13px", fontSize: 14, opacity: (!cart.length || txRunning) ? 0.4 : 1,
+            cursor: (!cart.length || txRunning) ? "not-allowed" : "pointer"
+          }}>{txRunning ? "⏳ ដំណើរការ..." : "✓ ទូទាត់ប្រាក់"}</button>
+          {cart.length > 0 && (
+            <button onClick={() => setCustomerDisplay(true)}
+              style={{
+                ...btnGhost, width: "100%", marginTop: 6, padding: "10px", fontSize: 13, fontWeight: 700,
+                color: "#5BA3E0", borderColor: "#5BA3E055"
+              }}>
+              📺 បង្ហាញភ្ញៀវ
+            </button>
+          )}
+          {cart.length > 0 && (
+            <button onClick={() => setCart([])} style={{ ...btnGhost, width: "100%", marginTop: 6, padding: "8px", fontSize: 12 }}>
+              លុបកម្ម៉ង់
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── MOBILE FAB cart button ── */}
+      <button onClick={() => setCartOpen(o => !o)} className="mobile-fab"
+        style={{ bottom: 68, right: 14, zIndex: 150 }}>
+        {cartOpen ? "✕" : "🛒"}
+        {cart.length > 0 && !cartOpen && (
+          <span style={{
+            position: "absolute", top: -3, right: -3, background: "#E74C3C", color: "#fff",
+            borderRadius: "50%", width: 20, height: 20, fontSize: 11, fontWeight: 700,
+            display: "flex", alignItems: "center", justifyContent: "center"
+          }}>
+            {cart.reduce((s, i) => s + i.qty, 0)}
+          </span>
+        )}
+      </button>
     </div>
   );
 }
@@ -1435,6 +1646,50 @@ function Modal({ title, children, onClose }) {
   );
 }
 
+function OptRow({ label, items, value, onChange, color, slider }) {
+  if (slider) {
+    // Slider mode for sugar %
+    const idx = items.indexOf(value);
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: "#666", fontWeight: 600, letterSpacing: .5 }}>{label.toUpperCase()}</div>
+          <div style={{
+            fontSize: 14, fontWeight: 700, color, background: `${color}22`,
+            padding: "3px 12px", borderRadius: 20, minWidth: 52, textAlign: "center"
+          }}>{value}</div>
+        </div>
+        {/* Slider track */}
+        <input type="range" min={0} max={items.length - 1} value={idx >= 0 ? idx : 0}
+          onChange={e => onChange(items[parseInt(e.target.value)])}
+          style={{ width: "100%", accentColor: color, cursor: "pointer", height: 4 }} />
+        {/* Tick labels */}
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+          {items.filter((_, i) => i % 2 === 0).map(v => (
+            <span key={v} style={{ fontSize: 9, color: value === v ? color : "#444" }}>{v}</span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, color: "#666", marginBottom: 7, fontWeight: 600, letterSpacing: .5 }}>{label.toUpperCase()}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+        {items.map(v => (
+          <button key={v} onClick={() => onChange(v)} style={{
+            padding: "6px 14px", borderRadius: 20, cursor: "pointer", fontFamily: "inherit", fontSize: 12,
+            border: value === v ? `2px solid ${color}` : "1px solid #2A2730",
+            background: value === v ? `${color}22` : "#111",
+            color: value === v ? color : "#888",
+            fontWeight: value === v ? 700 : 400,
+          }}>{v}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 //  CSS
 // ═══════════════════════════════════════════════════════════════════
@@ -1584,4 +1839,71 @@ const CSS = `
     .no-print { display: none !important; }
     body { background: #fff !important; color: #000 !important; }
   }
+
+  /* ── POS Layout (from old version) ── */
+  .pos-layout{display:flex;flex-direction:row;flex:1;overflow:hidden;height:100%;min-height:0}
+        .pos-menu{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+        .pos-cart{width:300px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+        .mobile-bottom-nav{display:none}
+        .mobile-fab{display:none}
+
+        /* Mobile ≤768px */
+        @media(max-width:768px){
+          .desktop-nav{display:none!important}
+          .mobile-spacer{display:block}
+          .hamburger-btn{display:flex!important}
+          .header-logo-text{display:block}
+
+          /* POS layout: menu full screen */
+          .pos-layout{flex-direction:column;position:relative;height:100%}
+          .pos-menu{flex:1;min-height:0}
+          .pos-cart{
+            position:fixed;bottom:0;left:0;right:0;
+            width:100%!important;max-height:72vh;
+            background:var(--bg-card);
+            border-top:2px solid var(--accent-dk)!important;
+            border-left:none!important;
+            z-index:100;
+            transform:translateY(105%);
+            transition:transform .28s cubic-bezier(.4,0,.2,1);
+            display:flex!important;flex-direction:column;overflow:hidden;
+          }
+          .pos-cart.cart-open{transform:translateY(0)}
+
+          /* Bottom nav */
+          .mobile-bottom-nav{
+            display:none;
+            position:fixed;bottom:0;left:0;right:0;
+            height:56px;
+            background:var(--bg-header);
+            border-top:1px solid var(--border);
+            z-index:200;
+          }
+          .mobile-bottom-nav button{
+            flex:1;border:none;background:transparent;
+            display:flex;flex-direction:column;align-items:center;
+            justify-content:center;gap:1px;
+            cursor:pointer;color:#444;
+            transition:color .15s;padding:0;
+          }
+          .mobile-bottom-nav button.active{color:#E8A84B}
+          .mobile-bottom-nav button.active span:first-child{
+            background:#B8732A22;border-radius:12px;padding:2px 12px;
+          }
+
+          /* FAB cart button */
+          .mobile-fab{
+            display:flex!important;
+            align-items:center;justify-content:center;
+            position:fixed;bottom:14px;right:14px;
+            width:52px;height:52px;border-radius:50%;
+            border:none;cursor:pointer;
+            background:linear-gradient(135deg,#B8732A,#E8A84B);
+            box-shadow:0 4px 16px rgba(184,115,42,.55);
+            font-size:22px;z-index:150;
+          }
+
+          /* All pages padding for bottom nav */
+          main > div{padding-bottom:80px!important}
+        }
 `;
