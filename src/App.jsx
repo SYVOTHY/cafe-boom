@@ -1051,8 +1051,7 @@ function ReportPage({ orders, prods, currentUser, branchId }) {
     rows.push(["TOP PRODUCTS"]);
     prodRanking.forEach(([name,d],i) => rows.push([i+1, name, d.qty+" ដង", d.revenue.toFixed(2)]));
 
-    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("
-");
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
     const bom = "﻿"; // UTF-8 BOM for Khmer text in Excel
     const blob = new Blob([bom+csv], { type:"text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
