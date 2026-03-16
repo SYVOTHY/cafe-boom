@@ -143,7 +143,6 @@ const fmtStock = (n, decimals = 1) => {
   // Remove .0 for clean display
   return decimals === 1 && parts[1] === "0" ? parts[0] : parts.join(".");
 };
-const nextId = a => Math.max(0, ...a.map(x => Object.values(x)[0])) + 1;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 const fmt  = (n) => "$" + Number(n || 0).toFixed(2);
