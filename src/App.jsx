@@ -878,35 +878,83 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 // ═══════════════════════════════════════════════════════════════════
 //  TABLES PAGE
 // ═══════════════════════════════════════════════════════════════════
-function TablesPage({ tables, setTables }) {
-  const statuses = ["free","occupied","reserved","cleaning"];
-  const statusLabel = { free:"ទំ", occupied:"កំពុង​ប្រើ", reserved:"បាន​RA", cleaning:"សំអាត" };
-  const statusColor = { free:"#27AE60", occupied:"#E74C3C", reserved:"#F39C12", cleaning:"#3498DB" };
+function TablesPage({ tables, setTables, orders }) {
+  const busy = tables.filter(t => t.status === "busy").length;
 
-  function cycleStatus(tid) {
+  function toggleTable(tid) {
     setTables(prev => prev.map(t => t.table_id === tid
-      ? { ...t, status: statuses[(statuses.indexOf(t.status)+1) % statuses.length] }
+      ? { ...t, status: t.status === "busy" ? "free" : "busy" }
       : t
     ));
   }
 
   return (
-    <div>
-      <h2 style={{ marginBottom:16 }}>🪑 ស្ថានភាព​តុ</h2>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))", gap:12, maxWidth:700 }}>
-        {tables.map(t => (
-          <div key={t.table_id} className="table-card" style={{ borderColor: statusColor[t.status] || "#666" }} onClick={()=>cycleStatus(t.table_id)}>
-            <div style={{ fontSize:32 }}>🪑</div>
-            <div style={{ fontWeight:700 }}>តុ {t.table_id}</div>
-            <div style={{ fontSize:11, color: statusColor[t.status], fontWeight:600 }}>{statusLabel[t.status] || t.status}</div>
-          </div>
-        ))}
+    <div style={{ padding:"16px 14px 32px" }}>
+      {/* Header */}
+      <div style={{ marginBottom:20 }}>
+        <div style={{ fontWeight:700, fontSize:20, display:"flex", alignItems:"center", gap:8 }}>
+          🪑 គ្រប់គ្រងតុ
+        </div>
+        <div style={{ fontSize:12, color:"#555", marginTop:4 }}>
+          {busy} / {tables.length} តុ កំពុងប្រើ
+        </div>
       </div>
-      <div style={{ marginTop:12, display:"flex", gap:10, flexWrap:"wrap" }}>
-        {statuses.map(s => (
-          <div key={s} style={{ display:"flex", alignItems:"center", gap:4, fontSize:12 }}>
-            <div style={{ width:10, height:10, borderRadius:"50%", background: statusColor[s] }} />
-            {statusLabel[s]}
+
+      {/* Table grid */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:14 }}>
+        {tables.map(t => {
+          const isBusy = t.status === "busy";
+          // Find orders for this table
+          const tableOrders = (orders||[]).filter(o => String(o.table) === String(t.table_id) || o.table === t.table_id);
+          const tableTotal = tableOrders.reduce((s,o) => s + (o.total||0) + (o.tax||0), 0);
+          return (
+            <div key={t.table_id} style={{
+              background:"var(--bg-card)",
+              border:`2px solid ${isBusy ? "#8B1A1A" : "#1A4A1A"}`,
+              borderRadius:16, padding:22, textAlign:"center",
+              boxShadow: isBusy ? "0 0 20px #8B1A1A22" : "0 0 20px #1A4A1A22",
+              transition:"all .2s",
+            }}>
+              <div style={{ fontSize:34 }}>🪑</div>
+              <div style={{ fontWeight:700, fontSize:18, marginTop:8, marginBottom:6 }}>
+                តុ {t.table_id}
+              </div>
+              <div style={{
+                fontSize:12, padding:"4px 14px", borderRadius:20,
+                display:"inline-block", fontWeight:600,
+                background: isBusy ? "#8B1A1A22" : "#1A4A1A22",
+                color: isBusy ? "#E74C3C" : "#27AE60",
+              }}>
+                {isBusy ? "🔴 មានអតិថិជន" : "🟢 ទំនេរ"}
+              </div>
+              {isBusy && tableTotal > 0 && (
+                <div style={{ fontSize:13, color:"#E8A84B", fontWeight:700, marginTop:6 }}>
+                  ${tableTotal.toFixed(2)}
+                </div>
+              )}
+              <button
+                onClick={() => toggleTable(t.table_id)}
+                style={{
+                  marginTop:12, width:"100%", padding:"7px",
+                  borderRadius:8, border:"1px solid rgba(255,255,255,.1)",
+                  background:"rgba(255,255,255,.05)", color: isBusy ? "#E74C3C" : "#27AE60",
+                  cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:600,
+                  transition:"all .15s",
+                }}
+              >
+                {isBusy ? "✓ ចេញ" : "ចូល"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div style={{ marginTop:20, display:"flex", gap:16, flexWrap:"wrap" }}>
+        {[["#27AE60","ទំ"],["#E74C3C","កំពុងប្រើ"],["#F39C12","បានRA"],["#3498DB","សំអាត"]].map(([color,label]) => (
+          <div key={label} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#555" }}>
+            <div style={{ width:10, height:10, borderRadius:"50%", background:color }} />
+            {label}
           </div>
         ))}
       </div>
@@ -1119,7 +1167,33 @@ function ProdForm({ prod, cats, onSave }) {
       )}
       <input className="inp" placeholder="ឈ្មោះ​ផលិតផល" value={v.product_name} onChange={e=>setV({...v,product_name:e.target.value})} />
       <input className="inp" type="number" placeholder="តំលៃ" value={v.base_price} onChange={e=>setV({...v,base_price:+e.target.value})} />
-      <input className="inp" placeholder="Emoji (backup)" value={v.emoji||""} onChange={e=>setV({...v,emoji:e.target.value})} />
+      {/* Emoji Picker */}
+      <div>
+        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:6 }}>Emoji (backup ពេលគ្មានរូបភាព)</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:6, background:"rgba(255,255,255,.03)", borderRadius:10, padding:10, border:"1px solid var(--border-col)" }}>
+          {["☕","🥛","🍵","🧋","🍹","🥤","🧃","🍺","🧊","💧",
+            "🍰","🎂","🍩","🍪","🍫","🍬","🧁","🥐","🥖","🥪",
+            "🍳","🥗","🍜","🍛","🥘","🍲","🍱","🥡","🍣","🥩",
+            "🫖","🍶","🍾","🥂","🍷","🍸","🍹","🫗","🧉","🍃",
+            "🌮","🥙","🧆","🥚","🧀","🥨","🥯","🫓","🍞","🥞",
+            "🍦","🍧","🍨","🍡","🍢","🍭","🍮","🍯","🧇","🫘"].map(em => (
+            <button key={em} type="button"
+              onClick={() => setV(prev => ({ ...prev, emoji: em }))}
+              style={{
+                fontSize:20, width:36, height:36, borderRadius:8, border:"none",
+                cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+                background: v.emoji === em ? "var(--accent)" : "rgba(255,255,255,.05)",
+                transform: v.emoji === em ? "scale(1.15)" : "scale(1)",
+                transition:"all .15s",
+              }}
+            >{em}</button>
+          ))}
+        </div>
+        <div style={{ display:"flex", gap:8, marginTop:6, alignItems:"center" }}>
+          <span style={{ fontSize:22 }}>{v.emoji || "—"}</span>
+          <input className="inp" style={{ flex:1, fontSize:13 }} placeholder="ឬវាយ emoji ផ្ទាល់..." value={v.emoji||""} onChange={e=>setV({...v,emoji:e.target.value})} />
+        </div>
+      </div>
       <select className="inp" value={v.category_id} onChange={e=>setV({...v,category_id:+e.target.value})}>
         {cats.map(c=><option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
       </select>
