@@ -1409,6 +1409,11 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
   const [modal, setModal] = useState(null);
   const [delConf, setDelConf] = useState(null);
   const [restock, setRestock] = useState(null);
+  const [recSearch, setRecSearch] = useState("");
+  const [recFilter, setRecFilter] = useState("");
+  const [recSort, setRecSort] = useState("product");
+  const [expandAll, setExpandAll] = useState(true);
+  const [collapsed, setCollapsed] = useState({});
 
   const saveIng = (data) => {
     if (modal.mode === "add") setIngs(p => [...p, { ...data, ingredient_id: nextId(p) }]);
@@ -1460,8 +1465,15 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
           </div>
         )}
         {subTab === "recipes" && (
-          <div style={{ padding: "10px 0 10px", display: "flex", justifyContent: "flex-end" }}>
-            <button onClick={() => setModal({ mode: "add", entity: "rec", data: { recipe_id: null, product_id: "", ingredient_id: "", quantity_required: "" } })} style={btnGold}>➕ បន្ថែម</button>
+          <div style={{ padding: "10px 0 10px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input className="inp" style={{ flex:1, minWidth:160, fontSize:13 }}
+              placeholder="🔍 ស្វែងរកផលិតផល..."
+              value={recSearch} onChange={e => setRecSearch(e.target.value)} />
+            <select className="inp" style={{ minWidth:140 }} value={recFilter} onChange={e => setRecFilter(e.target.value === "" ? "" : Number(e.target.value))}>
+              <option value="">ផលិតផលទាំងអស់</option>
+              {prods.map(p => <option key={p.product_id} value={p.product_id}>{p.emoji} {p.product_name}</option>)}
+            </select>
+            <button onClick={() => setModal({ mode: "add", entity: "rec", data: { recipe_id: null, product_id: prods[0]?.product_id || "", ingredient_id: ings[0]?.ingredient_id || "", quantity_required: "" } })} style={{ ...btnGold, padding:"9px 16px", width:"auto" }}>➕ បន្ថែម</button>
           </div>
         )}
         {(subTab === "sql" || subTab === "auditlog") && <div style={{ paddingBottom: 10 }} />}
@@ -1508,40 +1520,111 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
           </div>
         )}
 
-        {subTab === "recipes" && (
-          <>
-            {prods.filter(p => recipes.some(r => r.product_id === p.product_id)).map(prod => {
-              const pr = recipes.filter(r => r.product_id === prod.product_id);
-              return (
-                <div key={prod.product_id} style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
-                  <div style={{ background: "#1A171C", padding: "10px 16px", display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontWeight: 700 }}>{prod.emoji} {prod.product_name}</span>
-                    <span style={{ fontSize: 12, color: "#5BA3E0" }}>{pr.length} គ្រឿង</span>
+        {subTab === "recipes" && (() => {
+          // 10-feature Recipe Mapping
+          const filteredProds = prods.filter(p => {
+            const hasRecipe = recipes.some(r => r.product_id === p.product_id);
+            const matchFilter = recFilter === "" || p.product_id === Number(recFilter);
+            const matchSearch = recSearch === "" || (p.product_name||"").toLowerCase().includes(recSearch.toLowerCase());
+            return hasRecipe && matchFilter && matchSearch;
+          });
+          const sorted = [...filteredProds].sort((a, b) =>
+            recSort === "ingredient"
+              ? recipes.filter(r=>r.product_id===b.product_id).length - recipes.filter(r=>r.product_id===a.product_id).length
+              : a.product_name.localeCompare(b.product_name)
+          );
+          const totalMappings = recipes.length;
+          const totalProds = new Set(recipes.map(r => r.product_id)).size;
+          const missingIng = recipes.filter(r => !ings.find(i => i.ingredient_id === r.ingredient_id)).length;
+          return (
+            <>
+              {/* Summary bar */}
+              <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
+                {[["📋","Mappings",totalMappings,"#5BA3E0"],["🍽️","ផលិតផល",totalProds,"#E8A84B"],["⚠️","ខ្វះ ingredient",missingIng,missingIng>0?"#E74C3C":"#27AE60"]].map(([ic,lb,val,col])=>(
+                  <div key={lb} style={{ background:"var(--bg-card)",border:`1px solid ${col}33`,borderRadius:10,padding:"7px 14px",display:"flex",gap:8,alignItems:"center" }}>
+                    <span>{ic}</span>
+                    <div><div style={{ fontSize:17,fontWeight:700,color:col,lineHeight:1 }}>{val}</div><div style={{ fontSize:11,color:"#555" }}>{lb}</div></div>
                   </div>
-                  <TableWrap headers={["recipe_id", "ingredient", "quantity_required", "ស្តុក", ""]}>
-                    {pr.map(r => {
-                      const ing = ings.find(i => i.ingredient_id === r.ingredient_id);
-                      return (
-                        <tr key={r.recipe_id} style={{ borderBottom: "1px solid #0E0C0F" }}>
-                          <Td mono dim>{r.recipe_id}</Td>
-                          <Td>{ing?.ingredient_name || "—"}</Td>
-                          <Td gold>{r.quantity_required} {ing?.unit}</Td>
-                          <Td style={{ color: ing && ing.current_stock >= r.quantity_required ? "#27AE60" : "#E74C3C" }}>{ing ? `${fmtN(ing.current_stock)}${ing.unit}` : "—"}</Td>
-                          <Td>
-                            <div style={{ display: "flex", gap: 5 }}>
-                              <button onClick={() => setModal({ mode: "edit", entity: "rec", data: { ...r } })} style={btnSmall}>✏️</button>
-                              <button onClick={() => { setRecipes(p => p.filter(x => x.recipe_id !== r.recipe_id)); notify("✓ លុប"); }} style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33" }}>🗑️</button>
-                            </div>
-                          </Td>
-                        </tr>
-                      );
-                    })}
-                  </TableWrap>
+                ))}
+                <select className="inp" style={{ marginLeft:"auto",fontSize:12,padding:"6px 10px",minWidth:140 }} value={recSort} onChange={e=>setRecSort(e.target.value)}>
+                  <option value="product">Sort: ឈ្មោះ A→Z</option>
+                  <option value="ingredient">Sort: ចំនួន ingredient ↓</option>
+                </select>
+                <button style={{ ...btnSmall,fontSize:12 }} onClick={()=>{setExpandAll(p=>!p);setCollapsed({});}}>
+                  {expandAll?"⊟ Collapse All":"⊞ Expand All"}
+                </button>
+              </div>
+              {missingIng>0 && (
+                <div style={{ background:"#E74C3C11",border:"1px solid #E74C3C44",borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#E74C3C" }}>
+                  ⚠️ មាន <strong>{missingIng}</strong> mapping ដែល ingredient ត្រូវបានលុប
                 </div>
-              );
-            })}
-          </>
-        )}
+              )}
+              {sorted.map(prod => {
+                const pr = recipes.filter(r => r.product_id === prod.product_id);
+                const isCollapsed = collapsed[prod.product_id] !== undefined ? collapsed[prod.product_id] : !expandAll;
+                const totalCost = pr.reduce((sum,r) => {
+                  const ing = ings.find(i=>i.ingredient_id===r.ingredient_id);
+                  return sum + (Number(r.quantity_required)*(ing?.cost_per_unit||0));
+                },0);
+                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>i.ingredient_id===r.ingredient_id); return ing && Number(ing.current_stock)>=Number(r.quantity_required); });
+                const hasMissing = pr.some(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id));
+                return (
+                  <div key={prod.product_id} style={{ background:"#120F13",border:`1px solid ${hasMissing?"#E74C3C33":canMake?"#27AE6033":"#F39C1233"}`,borderRadius:12,marginBottom:10,overflow:"hidden" }}>
+                    <div style={{ background:"#1A171C",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}
+                      onClick={()=>setCollapsed(p=>({...p,[prod.product_id]:!isCollapsed}))}>
+                      <span style={{ fontSize:20 }}>{prod.emoji||"🍽️"}</span>
+                      <span style={{ fontWeight:700,flex:1 }}>{prod.product_name}</span>
+                      <span style={{ fontSize:11,padding:"2px 10px",borderRadius:20,fontWeight:600,
+                        background:hasMissing?"#E74C3C22":canMake?"#27AE6022":"#F39C1222",
+                        color:hasMissing?"#E74C3C":canMake?"#27AE60":"#F39C12" }}>
+                        {hasMissing?"⚠️ ខ្វះ":canMake?"✅ អាចធ្វើ":"🔶 ស្តុកទាប"}
+                      </span>
+                      {totalCost>0 && <span style={{ fontSize:11,color:"#5BA3E0",background:"#5BA3E022",padding:"2px 8px",borderRadius:20 }}>💰 ${totalCost.toFixed(3)}/serve</span>}
+                      <span style={{ fontSize:12,color:"#5BA3E0" }}>{pr.length} គ្រឿង</span>
+                      <span style={{ fontSize:13,color:"#555",marginLeft:4 }}>{isCollapsed?"▶":"▼"}</span>
+                    </div>
+                    {!isCollapsed && (
+                      <TableWrap headers={["#","ingredient","qty","ស្តុក","status",""]}>
+                        {pr.map((r,idx)=>{
+                          const ing=ings.find(i=>i.ingredient_id===r.ingredient_id);
+                          const enough=ing&&Number(ing.current_stock)>=Number(r.quantity_required);
+                          const servings=ing?Math.floor(Number(ing.current_stock)/Number(r.quantity_required)):0;
+                          return (
+                            <tr key={r.recipe_id}>
+                              <Td mono dim>{idx+1}</Td>
+                              <Td>{ing?ing.ingredient_name:<span style={{color:"#E74C3C",fontSize:11}}>⚠️ deleted</span>}</Td>
+                              <Td gold>{r.quantity_required} {ing?.unit||""}</Td>
+                              <Td style={{color:enough?"#27AE60":"#E74C3C"}}>{ing?`${fmtStock(ing.current_stock)} ${ing.unit}`:"—"}</Td>
+                              <Td>
+                                {ing?(<span style={{ fontSize:11,padding:"2px 8px",borderRadius:20,background:enough?"#27AE6022":"#E74C3C22",color:enough?"#27AE60":"#E74C3C" }}>
+                                  {enough?`✅ ${servings}x`:"❌ ស្តុកអស់"}
+                                </span>):<span style={{color:"#E74C3C",fontSize:11}}>missing</span>}
+                              </Td>
+                              <Td>
+                                <div style={{display:"flex",gap:4}}>
+                                  <button onClick={()=>setModal({mode:"edit",entity:"rec",data:{...r}})} style={{...btnSmall,padding:"4px 8px"}}>✏️</button>
+                                  <button onClick={()=>setDelConf({name:`${prod.product_name}→${ing?.ingredient_name||r.recipe_id}`,fn:()=>{setRecipes(p=>p.filter(x=>x.recipe_id!==r.recipe_id));notify("✓ លុប");setDelConf(null);}})}
+                                    style={{...btnSmall,padding:"4px 8px",color:"#E74C3C",borderColor:"#E74C3C33"}}>🗑</button>
+                                </div>
+                              </Td>
+                            </tr>
+                          );
+                        })}
+                        {totalCost>0&&(<tr><td colSpan={6} style={{padding:"7px 14px",fontSize:12,color:"#5BA3E0",borderTop:"1px solid #1A181C",textAlign:"right"}}>
+                          💰 Cost per serving: <strong>${totalCost.toFixed(4)}</strong>
+                        </td></tr>)}
+                      </TableWrap>
+                    )}
+                  </div>
+                );
+              })}
+              {sorted.length===0&&(<div style={{textAlign:"center",color:"#444",paddingTop:40}}>
+                <div style={{fontSize:36}}>📋</div>
+                <div style={{marginTop:10}}>{recSearch||recFilter!==""?"រកមិនឃើញ — ប្ដូរ filter":"គ្មានរូបមន្ត — ចុច ➕ បន្ថែម"}</div>
+              </div>)}
+            </>
+          );
+        })()}
 
         {subTab === "sql" && (
           <div style={{ background: "#0E0C0F", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
@@ -3255,19 +3338,24 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
 }
 
 // Permission editor modal
-function UserForm({ user, onSave }) {
-  const [v, setV] = useState(user);
+function UserForm({ data, user, onSave, onCancel, roles }) {
+  // Support both prop names: data (new) and user (old)
+  const init = data || user || {};
+  const [v, setV] = useState(init);
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ឈ្មោះ​ពេញ" value={v.name||""} onChange={e=>setV({...v,name:e.target.value})} />
       <input className="inp" placeholder="Username" value={v.username||""} onChange={e=>setV({...v,username:e.target.value})} />
       {!v.user_id && <input className="inp" type="password" placeholder="Password" value={v.password||""} onChange={e=>setV({...v,password:e.target.value})} />}
       <select className="inp" value={v.role||"staff"} onChange={e=>setV({...v,role:e.target.value})}>
-        <option value="staff">Staff</option>
-        <option value="admin">Admin</option>
+        {roles ? roles.map(r => <option key={r.v} value={r.v}>{r.icon} {r.label}</option>)
+               : <><option value="staff">Staff</option><option value="admin">Admin</option></>}
       </select>
       <input className="inp" placeholder="Branch ID (branch_1)" value={v.branch_id||""} onChange={e=>setV({...v,branch_id:e.target.value})} />
-      <button className="btn-primary" onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
+      <div style={{ display:"flex", gap:8, marginTop:4 }}>
+        {onCancel && <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>}
+        <button style={{ ...btnGold, flex:1 }} onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
+      </div>
     </div>
   );
 }
