@@ -965,12 +965,90 @@ function TablesPage({ tables, setTables, orders }) {
 // ═══════════════════════════════════════════════════════════════════
 //  MENU PAGE
 // ═══════════════════════════════════════════════════════════════════
+// ── Reusable Emoji Dropdown ───────────────────────────────────────
+const CAFE_EMOJIS = [
+  "☕","🥛","🍵","🧋","🍹","🥤","🧃","🧊","💧","🫖",
+  "🍰","🎂","🍩","🍪","🍫","🍬","🧁","🥐","🥖","🥪",
+  "🍳","🥗","🍜","🍛","🥘","🍲","🍱","🥡","🍣","🥩",
+  "🌮","🥙","🧆","🥚","🧀","🥨","🥯","🫓","🍞","🥞",
+  "🍦","🍧","🍨","🍡","🍭","🍮","🍯","🧇","🫘","🍺",
+  "🥗","🫕","🧆","🥜","🌽","🍆","🥦","🥕","🧅","🍄",
+];
+
+function EmojiDropdown({ value, onChange, label = "Emoji" }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  // Close when clicking outside
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position:"relative" }}>
+      <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:5 }}>{label}</div>
+      {/* Trigger button */}
+      <button type="button" onClick={() => setOpen(o => !o)}
+        style={{
+          width:"100%", display:"flex", alignItems:"center", gap:10,
+          background:"var(--bg-main)", border:"1px solid var(--border-col)",
+          borderRadius:8, padding:"8px 12px", cursor:"pointer",
+          color:"var(--text-main)", fontFamily:"inherit", fontSize:14,
+          transition:"border-color .2s",
+        }}
+      >
+        <span style={{ fontSize:22 }}>{value || "—"}</span>
+        <span style={{ flex:1, textAlign:"left", fontSize:13, color: value ? "var(--text-main)" : "var(--text-dim)" }}>
+          {value || "ជ្រើស Emoji..."}
+        </span>
+        <span style={{ fontSize:10, color:"var(--text-dim)", transform: open ? "rotate(180deg)" : "none", transition:"transform .2s" }}>▼</span>
+      </button>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div style={{
+          position:"absolute", top:"calc(100% + 4px)", left:0, right:0, zIndex:500,
+          background:"var(--bg-card)", border:"1px solid var(--border-col)",
+          borderRadius:10, padding:10, boxShadow:"0 8px 24px rgba(0,0,0,.5)",
+        }}>
+          {/* Custom input */}
+          <input className="inp" style={{ marginBottom:8, fontSize:13 }}
+            placeholder="ឬវាយ emoji ផ្ទាល់..."
+            value={value||""}
+            onChange={e => onChange(e.target.value)}
+          />
+          {/* Grid */}
+          <div style={{ display:"flex", flexWrap:"wrap", gap:4, maxHeight:160, overflowY:"auto" }}>
+            {CAFE_EMOJIS.map(em => (
+              <button key={em} type="button"
+                onClick={() => { onChange(em); setOpen(false); }}
+                style={{
+                  fontSize:20, width:34, height:34, borderRadius:7, border:"none",
+                  cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+                  background: value === em ? "var(--accent)" : "rgba(255,255,255,.06)",
+                  transform: value === em ? "scale(1.1)" : "scale(1)",
+                  transition:"all .12s",
+                }}
+              >{em}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function CatForm({ cat, onSave }) {
   const [v, setV] = useState(cat);
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ឈ្មោះ​ប្រភេទ" value={v.category_name} onChange={e=>setV({...v,category_name:e.target.value})} />
-      <input className="inp" placeholder="Emoji" value={v.emoji} onChange={e=>setV({...v,emoji:e.target.value})} />
+      <EmojiDropdown value={v.emoji} onChange={em => setV({...v, emoji:em})} label="Emoji ប្រភេទ" />
       <button className="btn-primary" onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
     </div>
   );
@@ -1041,33 +1119,7 @@ function ProdForm({ prod, cats, onSave }) {
       )}
       <input className="inp" placeholder="ឈ្មោះ​ផលិតផល" value={v.product_name} onChange={e=>setV({...v,product_name:e.target.value})} />
       <input className="inp" type="number" placeholder="តំលៃ" value={v.base_price} onChange={e=>setV({...v,base_price:+e.target.value})} />
-      {/* Emoji Picker */}
-      <div>
-        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:6 }}>Emoji (backup ពេលគ្មានរូបភាព)</div>
-        <div style={{ display:"flex", flexWrap:"wrap", gap:6, background:"rgba(255,255,255,.03)", borderRadius:10, padding:10, border:"1px solid var(--border-col)" }}>
-          {["☕","🥛","🍵","🧋","🍹","🥤","🧃","🍺","🧊","💧",
-            "🍰","🎂","🍩","🍪","🍫","🍬","🧁","🥐","🥖","🥪",
-            "🍳","🥗","🍜","🍛","🥘","🍲","🍱","🥡","🍣","🥩",
-            "🫖","🍶","🍾","🥂","🍷","🍸","🍹","🫗","🧉","🍃",
-            "🌮","🥙","🧆","🥚","🧀","🥨","🥯","🫓","🍞","🥞",
-            "🍦","🍧","🍨","🍡","🍢","🍭","🍮","🍯","🧇","🫘"].map(em => (
-            <button key={em} type="button"
-              onClick={() => setV(prev => ({ ...prev, emoji: em }))}
-              style={{
-                fontSize:20, width:36, height:36, borderRadius:8, border:"none",
-                cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
-                background: v.emoji === em ? "var(--accent)" : "rgba(255,255,255,.05)",
-                transform: v.emoji === em ? "scale(1.15)" : "scale(1)",
-                transition:"all .15s",
-              }}
-            >{em}</button>
-          ))}
-        </div>
-        <div style={{ display:"flex", gap:8, marginTop:6, alignItems:"center" }}>
-          <span style={{ fontSize:22 }}>{v.emoji || "—"}</span>
-          <input className="inp" style={{ flex:1, fontSize:13 }} placeholder="ឬវាយ emoji ផ្ទាល់..." value={v.emoji||""} onChange={e=>setV({...v,emoji:e.target.value})} />
-        </div>
-      </div>
+      <EmojiDropdown value={v.emoji||""} onChange={em => setV(prev => ({...prev, emoji:em}))} label="Emoji (backup ពេលគ្មានរូបភាព)" />
       <select className="inp" value={v.category_id} onChange={e=>setV({...v,category_id:+e.target.value})}>
         {cats.map(c=><option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
       </select>
