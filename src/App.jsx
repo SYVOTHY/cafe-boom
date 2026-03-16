@@ -3881,109 +3881,7 @@ function ActionBtns({ onEdit, onDel }) {
   );
 }
 
-function F({ label, children }) {
-  return (
-    <div style={{ marginBottom: 13 }}>
-      <div style={{ fontSize: 11, color: "#666", marginBottom: 5, fontWeight: 600 }}>{label}</div>
-      {children}
-    </div>
-  );
-}
-
-function ConfirmDel({ name, onConfirm, onCancel }) {
-  return (
-    <Modal onClose={onCancel} maxW={320}>
-      <div style={{ textAlign: "center" }}>
-        <div style={{ fontSize: 36 }}>🗑️</div>
-        <div style={{ fontWeight: 700, fontSize: 15, margin: "12px 0 6px" }}>លុប "{name}"?</div>
-        <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-          <button onClick={onCancel} style={{ ...btnGhost, flex: 1 }}>បោះបង់</button>
-          <button onClick={onConfirm} style={{ ...btnRed, flex: 1 }}>លុប</button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function SqlBlock({ code }) {
-  const keywords = ["START", "TRANSACTION", "COMMIT", "ROLLBACK", "UPDATE", "SELECT", "INSERT", "JOIN", "WHERE", "SET", "FROM", "AND", "IF", "SIGNAL", "END", "CREATE", "TABLE", "PRIMARY", "KEY", "NOT", "NULL", "DEFAULT", "FOREIGN", "REFERENCES", "AUTO_INCREMENT", "ON", "DELETE", "CASCADE", "INTO", "VALUES", "INT", "VARCHAR", "DECIMAL", "BOOLEAN", "TEXT"];
-  return (
-    <pre style={{ margin: 0, overflowX: "auto", fontSize: 12, lineHeight: 1.9, fontFamily: "'DM Mono',monospace" }}>
-      {code.split("\n").map((line, i) => {
-        if (line.trim().startsWith("--")) return <span key={i} style={{ color: "#444", display: "block" }}>{line}</span>;
-        const parts = line.split(/\b/);
-        return (
-          <span key={i} style={{ display: "block" }}>
-            {parts.map((part, j) => {
-              if (keywords.includes(part.toUpperCase())) return <span key={j} style={{ color: "#E8A84B", fontWeight: 500 }}>{part}</span>;
-              if (/^['"']/.test(part)) return <span key={j} style={{ color: "#5BA3E0" }}>{part}</span>;
-              return <span key={j} style={{ color: "#9A9A9A" }}>{part}</span>;
-            })}
-          </span>
-        );
-      })}
-    </pre>
-  );
-}
-
-function SubTabs({ tabs, val, set }) {
-  return (
-    <div style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: "1px solid #1A181C", paddingBottom: 0 }}>
-      {tabs.map(([v, lb]) => (
-        <button key={v} onClick={() => set(v)} style={{
-          padding: "9px 16px", border: "none", background: "transparent", cursor: "pointer",
-          color: val === v ? "#E8A84B" : "#555", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
-          borderBottom: val === v ? "2px solid #E8A84B" : "2px solid transparent",
-          marginBottom: -1
-        }}>{lb}</button>
-      ))}
-    </div>
-  );
-}
-
-
-function TableWrap({ headers, children }) {
-  return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-        <thead>
-          <tr style={{ background: "#1A171C" }}>
-            {headers.map(h => (
-              <th key={h} style={{
-                padding: "10px 14px", textAlign: "left", color: "#E8A84B",
-                fontWeight: 600, fontSize: 11, letterSpacing: .5, borderBottom: "1px solid #252230", whiteSpace: "nowrap"
-              }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
-  );
-}
-
-
-function SectionHeader({ title, sub }) {
-  return (
-    <div style={{ marginBottom: 20 }}>
-      <div style={{ fontWeight: 700, fontSize: 18 }}>{title}</div>
-      {sub && <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
-
-
-function BtnRow({ onSave, onCancel, saveLabel = "រក្សាទុក" }) {
-  return (
-    <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
-      <button onClick={onCancel} style={{ ...btnGhost, flex: 1 }}>បោះបង់</button>
-      <button onClick={onSave} style={{ ...btnGold, flex: 1 }}>{saveLabel}</button>
-    </div>
-  );
-}
-
-
-function F({ label, children }) {
+function FieldWrapper({ label, children }) {
   return (
     <div style={{ marginBottom: 13 }}>
       <label style={{ fontSize: 11, color: "#666", fontWeight: 600, letterSpacing: .4, display: "block", marginBottom: 5 }}>{label}</label>
@@ -4238,3 +4136,15 @@ const CSS = `
           main > div{padding-bottom:80px!important}
         }
 `;
+function Td({ children, mono, dim, bold, gold, style = {} }) {
+  return (
+    <td style={{
+      padding: "10px 14px", borderBottom: "1px solid #1A181C",
+      fontFamily: mono ? "'DM Mono',monospace" : "inherit",
+      color: dim ? "#555" : gold ? "#E8A84B" : "inherit",
+      fontWeight: bold ? 600 : "normal", ...style
+    }}>
+      {children}
+    </td>
+  );
+}
