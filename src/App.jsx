@@ -150,6 +150,18 @@ const now  = ()  => new Date().toISOString();
 const uid  = ()  => Date.now() + "_" + Math.random().toString(36).slice(2, 6);
 const TAX  = 0.10;
 
+const PERM_LABELS = {
+  pos: { icon: "🛒", label: "ចំណុចលក់" },
+  tables: { icon: "🪑", label: "តុ" },
+  menu: { icon: "🍽️", label: "ម៉ឺនុយ" },
+  inventory: { icon: "🧂", label: "ស្តុក" },
+  orders: { icon: "📋", label: "ប្រវត្តិ" },
+  report: { icon: "📊", label: "របាយការណ៍" },
+  finance: { icon: "💼", label: "ហិរញ្ញវត្ថុ" },
+  users: { icon: "👥", label: "អ្នកប្រើ" },
+  theme: { icon: "🎨", label: "រចនាប័ទ្ម" },
+};
+
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
 const MILK = ["គ្មានទឹកដោះ", "ទឹកដោះគោ", "ទឹកសណ្ដែក", "Oat", "មិនថែមអ្វីទេ"];
 
