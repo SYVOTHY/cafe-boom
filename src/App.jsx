@@ -450,7 +450,10 @@ function POSPage({ prods, cats, ings, recipes, options, orders, setOrders, logs,
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))", gap:10 }}>
           {filtered.map(p => (
             <div key={p.product_id} className="prod-card" onClick={()=>openCustomize(p)}>
-              <div style={{ fontSize:36 }}>{p.emoji || "☕"}</div>
+              {p.image_url
+                ? <img src={p.image_url} alt={p.product_name} style={{ width:70, height:70, objectFit:"cover", borderRadius:8 }} />
+                : <div style={{ fontSize:36 }}>{p.emoji || "☕"}</div>
+              }
               <div style={{ fontSize:13, fontWeight:600, textAlign:"center", lineHeight:1.3 }}>{p.product_name}</div>
               <div style={{ color:"var(--accent)", fontWeight:700 }}>{fmt(p.base_price)}</div>
             </div>
@@ -653,7 +656,10 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions }) {
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
             {prods.map(p => (
               <div key={p.product_id} style={{ display:"flex", alignItems:"center", gap:10, background:"var(--bg-card)", borderRadius:10, padding:"10px 14px", border:"1px solid var(--border-col)", opacity: p.is_active===false ? 0.5 : 1 }}>
-                <span style={{ fontSize:24 }}>{p.emoji}</span>
+                {p.image_url
+                  ? <img src={p.image_url} alt="" style={{ width:40, height:40, objectFit:"cover", borderRadius:6, flexShrink:0 }} />
+                  : <span style={{ fontSize:24 }}>{p.emoji}</span>
+                }
                 <div style={{ flex:1 }}>
                   <div style={{ fontWeight:600 }}>{p.product_name}</div>
                   <div style={{ fontSize:12, color:"var(--text-dim)" }}>{cats.find(c=>c.category_id===p.category_id)?.category_name} — {fmt(p.base_price)}</div>
@@ -714,11 +720,70 @@ function CatForm({ cat, onSave }) {
 
 function ProdForm({ prod, cats, onSave }) {
   const [v, setV] = useState(prod);
+  const [imgLoading, setImgLoading] = useState(false);
+  const fileRef = useRef(null);
+
+  function handleImageFile(file) {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert("រូបភាពធំពេក! Max 2MB"); return; }
+    setImgLoading(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      // Resize to max 400px for storage efficiency
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 400;
+        let w = img.width, h = img.height;
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+          else       { w = Math.round(w * MAX / h); h = MAX; }
+        }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        setV(prev => ({ ...prev, image_url: canvas.toDataURL("image/jpeg", 0.82) }));
+        setImgLoading(false);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      {/* Image upload */}
+      <div
+        style={{ border:"2px dashed var(--border-col)", borderRadius:10, padding:12, textAlign:"center", cursor:"pointer", position:"relative", minHeight:90, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:6, transition:"border-color .2s" }}
+        onClick={() => fileRef.current?.click()}
+        onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor="var(--accent)"}}
+        onDragLeave={e=>{e.currentTarget.style.borderColor=""}}
+        onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="";handleImageFile(e.dataTransfer.files[0]);}}
+      >
+        {imgLoading ? (
+          <div className="spinner" style={{width:28,height:28}} />
+        ) : v.image_url ? (
+          <>
+            <img src={v.image_url} alt="" style={{ width:80, height:80, objectFit:"cover", borderRadius:8 }} />
+            <span style={{ fontSize:11, color:"var(--text-dim)" }}>ចុចដើម្បីប្ដូររូប</span>
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize:28 }}>📷</span>
+            <span style={{ fontSize:12, color:"var(--text-dim)" }}>ចុច ឬ Drag រូបភាពមក</span>
+            <span style={{ fontSize:10, color:"var(--text-dim)" }}>JPG / PNG / WEBP · Max 2MB</span>
+          </>
+        )}
+        <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }}
+          onChange={e=>handleImageFile(e.target.files[0])} />
+      </div>
+      {v.image_url && (
+        <button className="btn-sm" style={{ color:"#ff6b6b", fontSize:11 }} onClick={()=>setV(prev=>({...prev,image_url:""}))}>
+          🗑 លុប​រូបភាព
+        </button>
+      )}
       <input className="inp" placeholder="ឈ្មោះ​ផលិតផល" value={v.product_name} onChange={e=>setV({...v,product_name:e.target.value})} />
       <input className="inp" type="number" placeholder="តំលៃ" value={v.base_price} onChange={e=>setV({...v,base_price:+e.target.value})} />
-      <input className="inp" placeholder="Emoji" value={v.emoji||""} onChange={e=>setV({...v,emoji:e.target.value})} />
+      <input className="inp" placeholder="Emoji (backup)" value={v.emoji||""} onChange={e=>setV({...v,emoji:e.target.value})} />
       <select className="inp" value={v.category_id} onChange={e=>setV({...v,category_id:+e.target.value})}>
         {cats.map(c=><option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
       </select>
@@ -956,9 +1021,106 @@ function ReportPage({ orders, prods, currentUser, branchId }) {
     byMethod[o.method||"cash"] = (byMethod[o.method||"cash"]||0) + (o.total||0);
   });
 
+  // ── Export CSV ─────────────────────────────────────
+  function exportCSV() {
+    const periodLabel = period==="today"?today:period==="month"?today.slice(0,7):"all";
+    const rows = [
+      ["Order ID","Date","Time","Cashier","Table","Method","Items","Subtotal","VAT","Total"],
+      ...filtered.map(o => [
+        String(o.order_id).slice(-8),
+        safeDate(o.created_at||o.order_id),
+        fmtTime(o.created_at||o.order_id),
+        o.cashier_name||o.cashier||"",
+        o.table||"",
+        o.method||"cash",
+        (o.items||[]).map(i=>`${i.qty}x${i.product_name}`).join(" | "),
+        Number(o.subtotal||0).toFixed(2),
+        Number(o.tax||0).toFixed(2),
+        Number(o.total||0).toFixed(2),
+      ])
+    ];
+    // Summary rows
+    rows.push([]);
+    rows.push(["SUMMARY"]);
+    rows.push(["Period", periodLabel]);
+    rows.push(["Total Orders", count]);
+    rows.push(["Revenue (excl.VAT)", revenue.toFixed(2)]);
+    rows.push(["VAT 10%", tax.toFixed(2)]);
+    rows.push(["Grand Total", total.toFixed(2)]);
+    rows.push([]);
+    rows.push(["TOP PRODUCTS"]);
+    prodRanking.forEach(([name,d],i) => rows.push([i+1, name, d.qty+" ដង", d.revenue.toFixed(2)]));
+
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(",")).join("
+");
+    const bom = "﻿"; // UTF-8 BOM for Khmer text in Excel
+    const blob = new Blob([bom+csv], { type:"text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `report_${BRANCH_NAME}_${periodLabel}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  // ── Print / PDF ─────────────────────────────────────
+  function printReport() {
+    const periodLabel = period==="today"?"ថ្ងៃ​នេះ":period==="month"?"ខែ​នេះ":"ទាំង​អស់";
+    const topProds = prodRanking.slice(0,10).map(([name,d],i)=>
+      `<tr><td>${i+1}</td><td>${name}</td><td style="text-align:right">${d.qty}ដង</td><td style="text-align:right">$${d.revenue.toFixed(2)}</td></tr>`
+    ).join("");
+    const methodRows = Object.entries(byMethod).map(([m,v])=>
+      `<tr><td>${m==="cash"?"💵 សាច់ប្រាក់":m==="qr"?"📱 QR":"🏦 ប្រាក់​គណនី"}</td><td style="text-align:right">$${v.toFixed(2)}</td></tr>`
+    ).join("");
+    const orderRows = filtered.slice(0,50).map(o=>
+      `<tr><td>${safeDate(o.created_at||o.order_id)}</td><td>${fmtTime(o.created_at||o.order_id)}</td><td>${o.cashier_name||o.cashier||""}</td><td>${o.table||"—"}</td><td>${o.method||"cash"}</td><td style="text-align:right">$${Number(o.total||0).toFixed(2)}</td></tr>`
+    ).join("");
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@400;700&display=swap');
+      body{font-family:'Noto Sans Khmer',sans-serif;color:#111;padding:24px;max-width:800px;margin:0 auto}
+      h1{font-size:20px;margin-bottom:4px}
+      .meta{color:#666;font-size:12px;margin-bottom:20px}
+      .kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+      .kpi div{border:1px solid #ddd;border-radius:8px;padding:10px 14px}
+      .kpi .val{font-size:20px;font-weight:700;color:#B8732A}
+      .kpi .lbl{font-size:11px;color:#888}
+      table{width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13px}
+      th{background:#f5f5f5;padding:7px 10px;text-align:left;border-bottom:2px solid #ddd}
+      td{padding:6px 10px;border-bottom:1px solid #eee}
+      tr:nth-child(even){background:#fafafa}
+      .section-title{font-size:14px;font-weight:700;margin:18px 0 8px;border-left:3px solid #E8A84B;padding-left:8px}
+      @media print{body{padding:12px}.no-print{display:none}}
+    </style></head><body>
+    <h1>📊 របាយការណ៍ — ${BRANCH_NAME}</h1>
+    <div class="meta">រយៈ​ពេល: ${periodLabel} · បោះ​ពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
+    <div class="kpi">
+      <div><div class="lbl">ការ​លក់</div><div class="val">${count} ដង</div></div>
+      <div><div class="lbl">រាយ (excl.VAT)</div><div class="val">$${revenue.toFixed(2)}</div></div>
+      <div><div class="lbl">VAT 10%</div><div class="val">$${tax.toFixed(2)}</div></div>
+      <div><div class="lbl">សរុប​រួម</div><div class="val">$${total.toFixed(2)}</div></div>
+    </div>
+    <div class="section-title">🏆 ផលិតផល​លក់​ដាច់</div>
+    <table><thead><tr><th>#</th><th>ឈ្មោះ</th><th>ចំនួន</th><th>ចំណូល</th></tr></thead><tbody>${topProds}</tbody></table>
+    <div class="section-title">💳 វិធី​បង់​ប្រាក់</div>
+    <table><thead><tr><th>វិធី</th><th>សរុប</th></tr></thead><tbody>${methodRows}</tbody></table>
+    <div class="section-title">📋 បញ្ជី​ការ​លក់ (${Math.min(filtered.length,50)} / ${filtered.length})</div>
+    <table><thead><tr><th>ថ្ងៃ</th><th>ម៉ោង</th><th>Cashier</th><th>តុ</th><th>វិធី</th><th>សរុប</th></tr></thead><tbody>${orderRows}</tbody></table>
+    <script>window.onload=()=>window.print()</script></body></html>`;
+    const w = window.open("","_blank","width=900,height=700");
+    w.document.write(html); w.document.close();
+  }
+
   return (
     <div>
-      <h2 style={{ marginBottom:12 }}>📊 របាយការណ៍</h2>
+      <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:12, flexWrap:"wrap" }}>
+        <h2 style={{ margin:0 }}>📊 របាយការណ៍</h2>
+        <div style={{ flex:1 }} />
+        <button className="btn-sm" onClick={exportCSV} style={{ background:"#1a3a1a", color:"#80ff80", borderColor:"#27AE60" }}>
+          📥 CSV
+        </button>
+        <button className="btn-sm" onClick={printReport} style={{ background:"#1a2a3a", color:"#80b0ff", borderColor:"#3498DB" }}>
+          🖨️ PDF / Print
+        </button>
+      </div>
       <div style={{ display:"flex", gap:6, marginBottom:16 }}>
         {["today","month","all"].map(p=>(
           <button key={p} className={"nav-btn"+(period===p?" active":"")} onClick={()=>setPeriod(p)}>
