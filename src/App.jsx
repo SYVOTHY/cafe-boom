@@ -3893,6 +3893,171 @@ function FieldWrapper({ label, children }) {
   );
 }
 
+
+function ConfirmDel({ name, onConfirm, onCancel }) {
+  return (
+    <Modal onClose={onCancel} maxW={320}>
+      <div style={{ textAlign: "center" }}>
+        <div style={{ fontSize: 36 }}>🗑️</div>
+        <div style={{ fontWeight: 700, fontSize: 15, margin: "12px 0 6px" }}>លុប "{name}"?</div>
+        <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+          <button onClick={onCancel} style={{ ...btnGhost, flex: 1 }}>បោះបង់</button>
+          <button onClick={onConfirm} style={{ ...btnRed, flex: 1 }}>លុប</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+
+function Empty({ icon, label }) {
+  return (
+    <div style={{ textAlign: "center", paddingTop: 60, color: "#444" }}>
+      <div style={{ fontSize: 46 }}>{icon}</div>
+      <div style={{ marginTop: 14, color: "#555" }}>{label}</div>
+    </div>
+  );
+}
+
+
+function PermModal({ user, onSave, onClose }) {
+  const [perms, setPerms] = useState({ ...DEFAULT_PERMS_TPL, ...(user.permissions || {}) });
+  const toggle = (k) => setPerms(p => ({ ...p, [k]: !p[k] }));
+  return (
+    <Modal onClose={onClose} maxW={400}>
+      <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6, color: "#E8A84B" }}>🛡️ កំណត់សិទ្ធ</div>
+      <div style={{ fontSize: 13, color: "#888", marginBottom: 18 }}>👤 {user.name} (@{user.username})</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 20 }}>
+        {Object.entries(PERM_LABELS).map(([k, { icon, label }]) => {
+          const on = perms[k];
+          return (
+            <button key={k} onClick={() => toggle(k)} style={{
+              display: "flex", alignItems: "center", gap: 8, padding: "10px 12px",
+              borderRadius: 10, border: `1px solid ${on ? "#27AE6055" : "#2A2A2A"}`,
+              background: on ? "#0A2A0A" : "#111", cursor: "pointer", fontFamily: "inherit",
+              textAlign: "left"
+            }}>
+              <span style={{ fontSize: 18 }}>{icon}</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: on ? "#27AE60" : "#555" }}>{label}</div>
+                <div style={{ fontSize: 10, color: on ? "#5C9E5C" : "#333" }}>{on ? "✅ អនុញ្ញាត" : "❌ បិទ"}</div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      <BtnRow onSave={() => onSave(user.user_id, perms)} onCancel={onClose} saveLabel="💾 រក្សាទុក" />
+    </Modal>
+  );
+}
+
+
+function RecForm({ data, prods, ings, onSave, onCancel }) {
+  const [f, setF] = useState({ ...data });
+  const s = (k, v) => setF(p => ({ ...p, [k]: v }));
+  const selIng = ings.find(i => i.ingredient_id === Number(f.ingredient_id));
+  return (
+    <div>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 18 }}>📋 {data.recipe_id ? "កែប្រែ" : "បន្ថែម"}រូបមន្ត</div>
+      <F label="product *">
+        <select value={f.product_id} onChange={e => s("product_id", Number(e.target.value))} style={{ ...inputSt, width: "100%" }}>
+          {prods.map(p => <option key={p.product_id} value={p.product_id}>{p.emoji} {p.product_name}</option>)}
+        </select>
+      </F>
+      <F label="ingredient *">
+        <select value={f.ingredient_id} onChange={e => s("ingredient_id", Number(e.target.value))} style={{ ...inputSt, width: "100%" }}>
+          {ings.map(i => <option key={i.ingredient_id} value={i.ingredient_id}>{i.ingredient_name} ({i.unit})</option>)}
+        </select>
+      </F>
+      <F label={`quantity_required${selIng ? ` (${selIng.unit})` : ""} *`}>
+        <input type="number" step="0.5" value={f.quantity_required} onChange={e => s("quantity_required", e.target.value)} style={{ ...inputSt, width: "100%" }} />
+      </F>
+      <BtnRow onSave={() => f.quantity_required && onSave(f)} onCancel={onCancel} />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SHARED UI ATOMS
+// ═══════════════════════════════════════════════════════════════════
+
+function SectionHeader({ title, sub }) {
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ fontWeight: 700, fontSize: 18 }}>{title}</div>
+      {sub && <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+
+function SqlBlock({ code }) {
+  const keywords = ["START", "TRANSACTION", "COMMIT", "ROLLBACK", "UPDATE", "SELECT", "INSERT", "JOIN", "WHERE", "SET", "FROM", "AND", "IF", "SIGNAL", "END", "CREATE", "TABLE", "PRIMARY", "KEY", "NOT", "NULL", "DEFAULT", "FOREIGN", "REFERENCES", "AUTO_INCREMENT", "ON", "DELETE", "CASCADE", "INTO", "VALUES", "INT", "VARCHAR", "DECIMAL", "BOOLEAN", "TEXT"];
+  return (
+    <pre style={{ margin: 0, overflowX: "auto", fontSize: 12, lineHeight: 1.9, fontFamily: "'DM Mono',monospace" }}>
+      {code.split("\n").map((line, i) => {
+        if (line.trim().startsWith("--")) return <span key={i} style={{ color: "#444", display: "block" }}>{line}</span>;
+        const parts = line.split(/\b/);
+        return (
+          <span key={i} style={{ display: "block" }}>
+            {parts.map((part, j) => {
+              if (keywords.includes(part.toUpperCase())) return <span key={j} style={{ color: "#E8A84B", fontWeight: 500 }}>{part}</span>;
+              if (/^['"']/.test(part)) return <span key={j} style={{ color: "#5BA3E0" }}>{part}</span>;
+              return <span key={j} style={{ color: "#9A9A9A" }}>{part}</span>;
+            })}
+          </span>
+        );
+      })}
+    </pre>
+  );
+}
+
+function SubTabs({ tabs, val, set }) {
+  return (
+    <div style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: "1px solid #1A181C", paddingBottom: 0 }}>
+      {tabs.map(([v, lb]) => (
+        <button key={v} onClick={() => set(v)} style={{
+          padding: "9px 16px", border: "none", background: "transparent", cursor: "pointer",
+          color: val === v ? "#E8A84B" : "#555", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+          borderBottom: val === v ? "2px solid #E8A84B" : "2px solid transparent",
+          marginBottom: -1
+        }}>{lb}</button>
+      ))}
+    </div>
+  );
+}
+
+
+function TableWrap({ headers, children }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: "#1A171C" }}>
+            {headers.map(h => (
+              <th key={h} style={{
+                padding: "10px 14px", textAlign: "left", color: "#E8A84B",
+                fontWeight: 600, fontSize: 11, letterSpacing: .5, borderBottom: "1px solid #252230", whiteSpace: "nowrap"
+              }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+
+function BtnRow({ onSave, onCancel, saveLabel = "រក្សាទុក" }) {
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 20 }}>
+      <button onClick={onCancel} style={{ ...btnGhost, flex: 1 }}>បោះបង់</button>
+      <button onClick={onSave} style={{ ...btnGold, flex: 1 }}>{saveLabel}</button>
+    </div>
+  );
+}
+
 function OptRow({ label, items, value, onChange, color, slider }) {
   if (slider) {
     // Slider mode for sugar %
