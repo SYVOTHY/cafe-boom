@@ -1,6 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════
 //  Cafe Bloom POS — Multi-Branch React Frontend
-//  PostgreSQL + Socket.io Edition (Full Integrated) v2.1 — fix date crash
+//  PostgreSQL + Socket.io Edition (Full Integrated)
 //  config: public/config.js → window.CAFE_SERVER, window.CAFE_BRANCH
 // ═══════════════════════════════════════════════════════════════════
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
@@ -64,15 +64,15 @@ function fmtTime(iso) {
   catch { return ""; }
 }
 function fmtDateTime(iso) { return fmtDate(iso) + " " + fmtTime(iso); }
-// Safe date string — handles number (timestamp), string, object from PostgreSQL
-function safeDate(val) {
-  if (!val) return "";
-  if (typeof val === "number") return new Date(val).toISOString().slice(0,10);
-  if (typeof val === "string") return val.slice(0,10);
-  if (val instanceof Date) return val.toISOString().slice(0,10);
-  return String(val).slice(0,10);
+// safeDate — fix crash when order_id/created_at is number (Date.now()) from DB
+function safeDate(v) {
+  if (!v) return "";
+  if (typeof v === "number") return new Date(v).toISOString().slice(0,10);
+  if (typeof v === "string") return v.slice(0,10);
+  if (v instanceof Date)     return v.toISOString().slice(0,10);
+  return String(v).slice(0,10);
 }
-function safeMonth(val) { return safeDate(val).slice(0,7); }
+function safeMonth(v) { return safeDate(v).slice(0,7); }
 
 // ═══════════════════════════════════════════════════════════════════
 //  MAIN APP
@@ -239,34 +239,28 @@ export default function CafeBloom() {
       <style>{CSS}</style>
 
       {/* ── TopBar ── */}
-      <div style={{ background:"rgba(14,12,15,0.85)", backdropFilter:"blur(12px)", WebkitBackdropFilter:"blur(12px)", borderBottom:"1px solid rgba(255,255,255,.07)", display:"flex", alignItems:"center", padding:"10px 18px", gap:12, position:"sticky", top:0, zIndex:100, boxShadow:"0 2px 20px rgba(0,0,0,.4)" }}>
-        <span style={{ fontWeight:700, fontSize:16, color:"var(--accent)", letterSpacing:.3 }}>☕ {BRANCH_NAME}</span>
+      <div style={{ background:"var(--bg-header)", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", padding:"8px 16px", gap:12, position:"sticky", top:0, zIndex:100 }}>
+        <span style={{ fontWeight:700, fontSize:16, color:"var(--accent)" }}>☕ {BRANCH_NAME}</span>
         <div style={{ flex:1 }} />
 
         {/* Socket / Offline indicator */}
-        <div style={{ display:"flex", alignItems:"center", gap:6, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"4px 10px" }}>
-          <div className={socketOnline?"dot-live":""} style={{
+        <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+          <div style={{
             width:7, height:7, borderRadius:"50%",
-            background: socketOnline ? "#2ECC71" : offline ? "#E74C3C" : "#F39C12",
-            boxShadow:`0 0 8px ${socketOnline ? "#2ECC71" : offline ? "#E74C3C" : "#F39C12"}`
+            background: socketOnline ? "#27AE60" : offline ? "#E74C3C" : "#F39C12",
+            boxShadow:`0 0 6px ${socketOnline ? "#27AE60" : offline ? "#E74C3C" : "#F39C12"}`
           }} />
-          <span style={{ fontSize:11, fontWeight:600, color: socketOnline ? "#2ECC71" : offline ? "#E74C3C" : "#F39C12" }}>
-            {socketOnline ? "● Live" : offline ? "Offline" : "Connecting…"}
+          <span style={{ fontSize:10, fontWeight:700, color: socketOnline ? "#27AE60" : offline ? "#E74C3C" : "#F39C12" }}>
+            {socketOnline ? "Live" : offline ? "Offline" : "Connecting"}
           </span>
         </div>
 
-        <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"5px 12px" }}>
-          <div style={{ width:26, height:26, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:"#1a0f00" }}>
-            {currentUser.name?.[0]?.toUpperCase() || "U"}
-          </div>
-          <span style={{ fontSize:12, color:"var(--text-main)", fontWeight:600 }}>{currentUser.name}</span>
-          <span style={{ fontSize:10, color:"var(--text-dim)" }}>({currentUser.role})</span>
-        </div>
-        <button className="btn-sm" onClick={doLogout} style={{ borderRadius:20, padding:"5px 14px" }}>ចេញ</button>
+        <span style={{ fontSize:12, color:"var(--text-dim)" }}>{currentUser.name} ({currentUser.role})</span>
+        <button className="btn-sm" onClick={doLogout}>ចេញ</button>
       </div>
 
       {/* ── Nav tabs ── */}
-      <div style={{ display:"flex", gap:2, overflowX:"auto", background:"var(--bg-card)", borderBottom:"1px solid var(--border-col)", padding:"4px 8px" }}>
+      <div className="nav-tab-bar" style={{ display:"flex", gap:2, overflowX:"auto", background:"var(--bg-card)", borderBottom:"1px solid var(--border-col)", padding:"4px 8px" }}>
         {NAV.map(n => (
           <button key={n.id}
             className={"nav-btn" + (page === n.id ? " active" : "")}
@@ -278,7 +272,7 @@ export default function CafeBloom() {
       </div>
 
       {/* ── Page content ── */}
-      <div style={{ padding:"16px" }}>
+      <div className="page-pad" style={{ padding:"16px" }}>
         {page === "pos"       && <POSPage       {...shared} />}
         {page === "tables"    && <TablesPage    {...shared} />}
         {page === "menu"      && <MenuPage      {...shared} />}
@@ -434,7 +428,7 @@ function POSPage({ prods, cats, ings, recipes, options, orders, setOrders, logs,
   }
 
   return (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 320px", gap:16, maxWidth:1200 }}>
+    <div className="pos-layout">
       {/* ── Products ── */}
       <div>
         {successMsg && <div style={{ background:"#1a3a1a", color:"#80ff80", borderRadius:8, padding:"10px 14px", marginBottom:12, fontWeight:700 }}>{successMsg}</div>}
@@ -465,7 +459,7 @@ function POSPage({ prods, cats, ings, recipes, options, orders, setOrders, logs,
       </div>
 
       {/* ── Cart ── */}
-      <div style={{ background:"var(--bg-card)", borderRadius:12, border:"1px solid var(--border-col)", padding:16, display:"flex", flexDirection:"column", gap:10, height:"fit-content" }}>
+      <div className="pos-cart" style={{ background:"var(--bg-card)", borderRadius:12, border:"1px solid var(--border-col)", padding:16, display:"flex", flexDirection:"column", gap:10, height:"fit-content" }}>
         <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)" }}>🛒  កញ្ចប់​ទិញ</div>
         <input className="inp" placeholder="លេខ​តុ..." value={tableNum} onChange={e=>setTableNum(e.target.value)} />
 
@@ -907,31 +901,18 @@ function OrdersPage({ orders, currentUser }) {
         {filtered.length} ការ​លក់ — សរុប: {fmt(total)}
       </div>
       <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-        {filtered.length === 0 && (
-          <div style={{ textAlign:"center", padding:48, color:"var(--text-dim)" }}>
-            <div style={{ fontSize:40, marginBottom:12 }}>📭</div>
-            <div>មិន​ទាន់​មាន​ការ​លក់</div>
-          </div>
-        )}
-        {filtered.map((o,idx) => (
-          <div key={o.order_id} className="order-card" style={{ animationDelay: idx*0.04+"s" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <span style={{ fontSize:16 }}>{o.method==="cash"?"💵":o.method==="qr"?"📱":"🏦"}</span>
-                <span style={{ fontWeight:700, fontSize:16, color:"var(--accent)" }}>{fmt(o.total)}</span>
-              </div>
-              <span style={{ fontSize:11, color:"var(--text-dim)", background:"rgba(255,255,255,.05)", padding:"3px 8px", borderRadius:6 }}>{fmtDateTime(o.created_at)}</span>
+        {filtered.map(o => (
+          <div key={o.order_id} style={{ background:"var(--bg-card)", borderRadius:10, padding:"12px 16px", border:"1px solid var(--border-col)" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
+              <span style={{ fontWeight:700, color:"var(--accent)" }}>{fmt(o.total)}</span>
+              <span style={{ fontSize:12, color:"var(--text-dim)" }}>{fmtDateTime(o.created_at)}</span>
             </div>
-            <div style={{ display:"flex", gap:12, fontSize:12, color:"var(--text-dim)", marginBottom:6 }}>
-              <span>👤 {o.cashier_name || o.cashier}</span>
-              <span>🪑 តុ {o.table||"—"}</span>
-              <span style={{ marginLeft:"auto", color:"rgba(255,255,255,.3)", fontSize:11 }}>#{String(o.order_id).slice(-6)}</span>
+            <div style={{ fontSize:12, color:"var(--text-dim)" }}>
+              Cashier: {o.cashier_name || o.cashier} · តុ: {o.table||"—"} · {o.method==="cash"?"💵":o.method==="qr"?"📱":"🏦"} {o.method}
             </div>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
-              {(o.items||[]).map((i,idx2)=>(
-                <span key={idx2} style={{ fontSize:11, background:"rgba(255,255,255,.06)", borderRadius:5, padding:"2px 8px", color:"var(--text-main)" }}>
-                  {i.qty}× {i.product_name}
-                </span>
+            <div style={{ fontSize:12, marginTop:4 }}>
+              {(o.items||[]).map((i,idx)=>(
+                <span key={idx} style={{ marginRight:8 }}>{i.qty}× {i.product_name}</span>
               ))}
             </div>
           </div>
@@ -987,45 +968,32 @@ function ReportPage({ orders, prods, currentUser, branchId }) {
       </div>
 
       {/* KPI cards */}
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))", gap:12, marginBottom:22 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))", gap:12, marginBottom:20 }}>
         {[
-          { label:"ការ​លក់", val:count+" ដង", color:"#3B9EFF", icon:"🛍️" },
-          { label:"រាយ (excl.VAT)", val:fmt(revenue), color:"#2ECC71", icon:"💵" },
-          { label:"VAT 10%", val:fmt(tax), color:"#F39C12", icon:"🏛️" },
-          { label:"សរុប​រួម", val:fmt(total), color:"var(--accent)", icon:"💰" },
+          { label:"ការ​លក់", val:count+" ដង", color:"#3498DB" },
+          { label:"រាយ​(excl.VAT)", val:fmt(revenue), color:"#27AE60" },
+          { label:"VAT 10%", val:fmt(tax), color:"#F39C12" },
+          { label:"សរុប​រួម", val:fmt(total), color:"var(--accent)" },
         ].map(k=>(
-          <div key={k.label} className="kpi-card" style={{ "--kpi-color": k.color }}>
-            <div style={{ fontSize:20, marginBottom:6 }}>{k.icon}</div>
-            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:6, fontWeight:500 }}>{k.label}</div>
-            <div style={{ fontWeight:700, fontSize:20, color:k.color, letterSpacing:-.3 }}>{k.val}</div>
+          <div key={k.label} style={{ background:"var(--bg-card)", borderRadius:12, padding:"14px 16px", border:`1px solid ${k.color}` }}>
+            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>{k.label}</div>
+            <div style={{ fontWeight:700, fontSize:18, color:k.color }}>{k.val}</div>
           </div>
         ))}
       </div>
 
-      {/* Top products — bar chart */}
-      <div style={{ background:"var(--bg-card)", borderRadius:14, padding:18, border:"1px solid var(--border-col)", marginBottom:16 }}>
-        <div style={{ fontWeight:700, marginBottom:14, display:"flex", alignItems:"center", gap:8 }}>
-          <span>🏆</span><span>ផលិតផល​លក់​ដាច់</span>
-          <span style={{ fontSize:11, color:"var(--text-dim)", fontWeight:400, marginLeft:"auto" }}>{count} order(s)</span>
-        </div>
-        {prodRanking.slice(0,8).map(([name,d],i) => {
-          const maxRev = prodRanking[0]?.[1]?.revenue || 1;
-          const pct = Math.round((d.revenue / maxRev) * 100);
-          const medals = ["🥇","🥈","🥉"];
-          return (
-            <div key={name} className="bar-row">
-              <span style={{ width:22, fontSize:13 }}>{medals[i] || <span style={{ fontSize:11, color:"var(--text-dim)" }}>{i+1}</span>}</span>
-              <div style={{ flex:1 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
-                  <span style={{ fontSize:12, fontWeight:600 }}>{name}</span>
-                  <span style={{ fontSize:11, color:"var(--text-dim)" }}>{d.qty}ដង · <span style={{ color:"var(--accent)", fontWeight:700 }}>{fmt(d.revenue)}</span></span>
-                </div>
-                <div className="bar-track"><div className="bar-fill" style={{ width: pct+"%" }} /></div>
-              </div>
-            </div>
-          );
-        })}
-        {!prodRanking.length && <div style={{ color:"var(--text-dim)", fontSize:13, textAlign:"center", padding:16 }}>📭 មិន​ទាន់​មាន​ទិន្នន័យ</div>}
+      {/* Top products */}
+      <div style={{ background:"var(--bg-card)", borderRadius:12, padding:16, border:"1px solid var(--border-col)", marginBottom:16 }}>
+        <div style={{ fontWeight:700, marginBottom:10 }}>🏆 ផលិតផល​លក់​ដាច់</div>
+        {prodRanking.slice(0,10).map(([name,d],i) => (
+          <div key={name} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6 }}>
+            <span style={{ width:20, color:"var(--text-dim)", fontSize:12 }}>{i+1}.</span>
+            <span style={{ flex:1, fontSize:13 }}>{name}</span>
+            <span style={{ fontSize:12, color:"var(--text-dim)" }}>{d.qty}ដង</span>
+            <span style={{ fontWeight:700, color:"var(--accent)" }}>{fmt(d.revenue)}</span>
+          </div>
+        ))}
+        {!prodRanking.length && <div style={{ color:"var(--text-dim)", fontSize:13 }}>មិន​ទាន់​មាន​ទិន្នន័យ</div>}
       </div>
 
       {/* By payment method */}
@@ -1278,178 +1246,139 @@ function Modal({ title, children, onClose }) {
 //  CSS
 // ═══════════════════════════════════════════════════════════════════
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Khmer:wght@400;600;700&display=swap');
-
   :root {
     --bg-main: #09080A; --bg-card: #120F13; --bg-header: #0E0C0F;
     --accent: #E8A84B; --accent-dk: #B8732A;
-    --text-main: #EDE8E1; --text-dim: #555552; --border-col: #1E1B1F;
-    --radius: 12px;
-    --shadow: 0 4px 24px rgba(0,0,0,.45);
-    --glow: 0 0 16px rgba(232,168,75,.18);
+    --text-main: #EDE8E1; --text-dim: #666666; --border-col: #1E1B1F;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg-main); color: var(--text-main); font-family: 'Noto Sans Khmer', 'Hanuman', sans-serif; }
+  body { background: var(--bg-main); color: var(--text-main); }
 
-  /* ── Inputs ── */
   .inp {
-    background: rgba(255,255,255,.04); color: var(--text-main);
-    border: 1px solid var(--border-col); border-radius: 10px;
-    padding: 9px 13px; font-size: 14px; width: 100%;
-    outline: none; transition: border-color .2s, box-shadow .2s;
-    font-family: 'Noto Sans Khmer', 'Hanuman', sans-serif;
+    background: var(--bg-main); color: var(--text-main);
+    border: 1px solid var(--border-col); border-radius: 8px;
+    padding: 8px 12px; font-size: 14px; width: 100%;
+    outline: none;
+    font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
   }
-  .inp:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(232,168,75,.12); }
+  .inp:focus { border-color: var(--accent); }
 
-  /* ── Buttons ── */
   .btn-primary {
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dk) 100%);
-    color: #1a0f00; border: none; border-radius: 10px;
-    padding: 11px 18px; font-weight: 700; cursor: pointer;
-    font-size: 14px; width: 100%;
-    font-family: 'Noto Sans Khmer', 'Hanuman', sans-serif;
-    transition: opacity .2s, transform .1s, box-shadow .2s;
-    box-shadow: 0 2px 12px rgba(232,168,75,.25);
+    background: var(--accent); color: #000; border: none;
+    border-radius: 8px; padding: 10px 18px; font-weight: 700;
+    cursor: pointer; font-size: 14px; width: 100%;
+    font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
+    transition: opacity .2s;
   }
-  .btn-primary:hover { opacity:.9; transform:translateY(-1px); box-shadow: 0 4px 18px rgba(232,168,75,.35); }
-  .btn-primary:active { transform:translateY(0); }
-  .btn-primary:disabled { opacity:.4; cursor:default; transform:none; box-shadow:none; }
+  .btn-primary:hover { opacity: .85; }
+  .btn-primary:disabled { opacity: .5; cursor: default; }
 
   .btn-sm {
-    background: rgba(255,255,255,.04); color: var(--text-main);
-    border: 1px solid var(--border-col); border-radius: 7px;
-    padding: 5px 11px; cursor: pointer; font-size: 12px;
-    font-family: 'Noto Sans Khmer', 'Hanuman', sans-serif;
-    white-space: nowrap; transition: all .15s;
+    background: var(--bg-main); color: var(--text-main);
+    border: 1px solid var(--border-col); border-radius: 6px;
+    padding: 4px 10px; cursor: pointer; font-size: 12px;
+    font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
+    white-space: nowrap;
   }
-  .btn-sm:hover { border-color: var(--accent); color: var(--accent); background: rgba(232,168,75,.08); }
+  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
 
-  /* ── Nav ── */
   .nav-btn {
-    background: transparent; color: var(--text-dim);
-    border: 1px solid transparent; border-radius: 9px;
-    padding: 7px 15px; cursor: pointer; font-size: 13px;
-    white-space: nowrap; transition: all .18s;
-    font-family: 'Noto Sans Khmer', 'Hanuman', sans-serif;
+    background: var(--bg-main); color: var(--text-dim);
+    border: 1px solid var(--border-col); border-radius: 8px;
+    padding: 6px 14px; cursor: pointer; font-size: 13px;
+    white-space: nowrap;
+    font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
   }
-  .nav-btn:hover { color: var(--text-main); background: rgba(255,255,255,.05); border-color: var(--border-col); }
-  .nav-btn.active {
-    background: linear-gradient(135deg, var(--accent), var(--accent-dk));
-    color: #1a0f00; border-color: transparent;
-    box-shadow: 0 2px 10px rgba(232,168,75,.3);
-    font-weight: 700;
-  }
+  .nav-btn.active, .nav-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
 
-  /* ── Category pills ── */
   .cat-btn {
-    background: rgba(255,255,255,.04); color: var(--text-dim);
+    background: var(--bg-card); color: var(--text-dim);
     border: 1px solid var(--border-col); border-radius: 20px;
-    padding: 6px 16px; cursor: pointer; font-size: 13px;
-    white-space: nowrap; transition: all .18s;
-    font-family: 'Noto Sans Khmer', 'Hanuman', sans-serif;
+    padding: 5px 14px; cursor: pointer; font-size: 13px;
+    white-space: nowrap;
+    font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
   }
-  .cat-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .cat-btn.active { background: var(--accent); color: #1a0f00; border-color: var(--accent); font-weight:700; }
+  .cat-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
-  /* ── Product cards ── */
   .prod-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border-col);
-    border-radius: 14px; padding: 16px 10px;
-    display: flex; flex-direction: column; align-items: center; gap: 7px;
-    cursor: pointer; transition: all .2s;
-    position: relative; overflow: hidden;
+    background: var(--bg-card); border: 1px solid var(--border-col);
+    border-radius: 12px; padding: 14px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    cursor: pointer; transition: border-color .2s, transform .15s;
   }
-  .prod-card::before {
-    content:''; position:absolute; inset:0;
-    background: radial-gradient(circle at 50% 0%, rgba(232,168,75,.07) 0%, transparent 70%);
-    opacity:0; transition: opacity .2s;
-  }
-  .prod-card:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: var(--glow); }
-  .prod-card:hover::before { opacity:1; }
-  .prod-card:active { transform: translateY(-1px); }
+  .prod-card:hover { border-color: var(--accent); transform: scale(1.03); }
 
-  /* ── Table cards ── */
   .table-card {
     background: var(--bg-card); border: 2px solid var(--border-col);
-    border-radius: 14px; padding: 16px 10px;
-    display: flex; flex-direction: column; align-items: center; gap: 7px;
-    cursor: pointer; transition: all .2s;
+    border-radius: 12px; padding: 14px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    cursor: pointer; transition: border-color .2s;
   }
-  .table-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+  .table-card:hover { transform: scale(1.04); }
 
-  /* ── Payment buttons ── */
   .pay-btn {
-    flex: 1; background: rgba(255,255,255,.04); color: var(--text-dim);
-    border: 1px solid var(--border-col); border-radius: 9px;
-    padding: 8px 4px; cursor: pointer; font-size: 11px;
-    font-family: 'Noto Sans Khmer', 'Hanuman', sans-serif;
-    transition: all .18s;
+    flex: 1; background: var(--bg-main); color: var(--text-dim);
+    border: 1px solid var(--border-col); border-radius: 8px;
+    padding: 6px 4px; cursor: pointer; font-size: 11px;
+    font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
   }
-  .pay-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .pay-btn.active { background: linear-gradient(135deg,var(--accent),var(--accent-dk)); color:#1a0f00; border-color:transparent; font-weight:700; }
+  .pay-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
-  /* ── Option buttons ── */
   .opt-btn {
-    background: rgba(255,255,255,.04); color: var(--text-dim);
-    border: 1px solid var(--border-col); border-radius: 7px;
-    padding: 6px 12px; cursor: pointer; font-size: 12px;
-    font-family: 'Noto Sans Khmer', 'Hanuman', sans-serif;
-    transition: all .15s;
+    background: var(--bg-main); color: var(--text-dim);
+    border: 1px solid var(--border-col); border-radius: 6px;
+    padding: 5px 10px; cursor: pointer; font-size: 12px;
+    font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
   }
-  .opt-btn:hover { border-color: var(--accent); color: var(--accent); }
-  .opt-btn.active { background: var(--accent); color: #1a0f00; border-color: var(--accent); font-weight:700; }
+  .opt-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
-  /* ── KPI cards ── */
-  .kpi-card {
-    background: var(--bg-card);
-    border-radius: 14px; padding: 16px 18px;
-    border: 1px solid var(--border-col);
-    transition: transform .2s, box-shadow .2s;
-    position: relative; overflow: hidden;
-  }
-  .kpi-card::after {
-    content:''; position:absolute; bottom:0; left:0; right:0; height:2px;
-    background: var(--kpi-color, var(--accent));
-    border-radius: 0 0 14px 14px;
-  }
-  .kpi-card:hover { transform:translateY(-2px); box-shadow: var(--shadow); }
-
-  /* ── Bar chart ── */
-  .bar-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
-  .bar-track { flex:1; height:8px; background:rgba(255,255,255,.06); border-radius:4px; overflow:hidden; }
-  .bar-fill { height:100%; border-radius:4px; background:linear-gradient(90deg,var(--accent-dk),var(--accent)); transition:width .6s cubic-bezier(.4,0,.2,1); }
-
-  /* ── Order cards ── */
-  .order-card {
-    background: var(--bg-card); border-radius: 12px;
-    padding: 14px 16px; border: 1px solid var(--border-col);
-    transition: border-color .2s, transform .15s;
-    animation: fadeUp .3s ease both;
-  }
-  .order-card:hover { border-color: rgba(232,168,75,.3); transform:translateX(2px); }
-
-  @keyframes fadeUp {
-    from { opacity:0; transform:translateY(8px); }
-    to   { opacity:1; transform:translateY(0); }
-  }
-
-  /* ── Spinner ── */
   .spinner {
-    width: 36px; height: 36px;
-    border: 3px solid rgba(232,168,75,.15);
+    width: 32px; height: 32px; border: 3px solid var(--border-col);
     border-top-color: var(--accent); border-radius: 50%;
-    animation: spin .7s linear infinite;
+    animation: spin .8s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* ── Pulse dot ── */
-  @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.4);opacity:.7} }
-  .dot-live { animation: pulse 1.8s ease-in-out infinite; }
-
   select.inp { cursor: pointer; }
 
-  @media (max-width: 768px) {
-    body { font-size: 14px; }
+  /* ── Responsive ── */
+  .pos-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+    max-width: 1400px;
+  }
+  @media (max-width: 900px) {
+    .pos-layout {
+      grid-template-columns: 1fr;
+    }
+    .pos-cart {
+      position: fixed !important;
+      bottom: 0; left: 0; right: 0;
+      z-index: 200;
+      border-radius: 20px 20px 0 0 !important;
+      max-height: 50vh;
+      overflow-y: auto;
+    }
+    .pos-cart-collapsed {
+      max-height: 60px;
+      overflow: hidden;
+    }
+    .page-pad { padding: 8px !important; }
+  }
+  @media (max-width: 600px) {
+    .nav-tab-bar { gap: 0 !important; }
+    .nav-btn { padding: 5px 8px !important; font-size: 11px !important; }
+    .nav-btn .nav-label { display: none; }
+    .nav-btn .nav-emoji { display: inline !important; }
+    .topbar-name { display: none; }
+    .topbar-role { display: none; }
+  }
+  @media (max-width: 480px) {
+    .prod-card { padding: 10px 6px !important; }
+  }
+  @media print {
+    .no-print { display: none !important; }
+    body { background: #fff !important; color: #000 !important; }
   }
 `;
