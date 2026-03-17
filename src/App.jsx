@@ -331,10 +331,31 @@ export default function CafeBloom() {
   const [offline,     setOffline]     = useState(false);
 
   // ── Real-time DB hook (PostgreSQL + Socket.io) ──────────────────
-  // Use user's branch_id if available, else fallback to config/default
-  const activeBranchId = (currentUser?.branch_id && currentUser.branch_id !== "all")
-    ? currentUser.branch_id
-    : DEFAULT_BRANCH;
+  // ── Branch resolution ──────────────────────────────────────────
+  // Staff: always use their assigned branch_id
+  // Admin with specific branch (e.g. "branch_2"): use that branch
+  // Admin with branch_id="all": use pickedBranch (chosen after login)
+  const [pickedBranch, setPickedBranch] = useState(null); // null = not picked yet
+  const [branchList,   setBranchList]   = useState([]);   // for picker
+
+  const isGlobalAdmin = currentUser?.role === "admin" && currentUser?.branch_id === "all";
+
+  // Load branch list for global admin picker
+  useEffect(() => {
+    if (!isGlobalAdmin) return;
+    const token = localStorage.getItem("pos_token");
+    const hdr = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
+    fetch(`${API}/api/branches`, { headers:hdr })
+      .then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setBranchList(d.filter(b=>b.active)); })
+      .catch(()=>{});
+  }, [isGlobalAdmin]);
+
+  const activeBranchId = (() => {
+    // Staff or admin assigned to specific branch
+    if (currentUser?.branch_id && currentUser.branch_id !== "all") return currentUser.branch_id;
+    // Global admin: use picked branch or default
+    return pickedBranch || DEFAULT_BRANCH;
+  })();
 
   const { db, loading, socketOnline, saveTable, reload } = useRealtimeDB(CLOUD_URL, activeBranchId);
 
@@ -440,6 +461,8 @@ export default function CafeBloom() {
   const [showSelfReset, setShowSelfReset] = useState(false);
   // ── Clear Data modal ─────────────────────────────────────────────
   const [showClearData, setShowClearData] = useState(false);
+  // ── Branch picker (global admin) ─────────────────────────────────
+  const [showBranchPicker, setShowBranchPicker] = useState(false);
   const notify = useCallback((msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2800);
@@ -492,6 +515,7 @@ export default function CafeBloom() {
     expenses: expensesRaw, setExpenses,
     setTheme, offline, socketOnline, reload,
     branchId: activeBranchId, branchName: BRANCH_NAME,
+    branchList, pickedBranch, setPickedBranch, isGlobalAdmin,
     doLogout, canAccess,
     notify,
     isAdmin: currentUser?.role === "admin",
@@ -636,12 +660,46 @@ export default function CafeBloom() {
         </div>
       )}
 
+      {/* ── Branch Picker Modal (global admin) ── */}
+      {showBranchPicker && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:18, padding:28, maxWidth:360, width:"90%" }}>
+            <div style={{ fontWeight:700, fontSize:17, marginBottom:6, color:"var(--accent)" }}>🏪 ជ្រើសសាខា</div>
+            <div style={{ fontSize:12, color:"#888", marginBottom:18 }}>Admin — សូមជ្រើសសាខាដែលចង់គ្រប់គ្រង</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {branchList.map(b => (
+                <button key={b.branch_id}
+                  onClick={() => { setPickedBranch(b.branch_id); setShowBranchPicker(false); reload(); }}
+                  style={{
+                    padding:"12px 16px", borderRadius:12, border:"none", cursor:"pointer",
+                    fontFamily:"inherit", fontSize:14, fontWeight:700, textAlign:"left",
+                    background: activeBranchId === b.branch_id
+                      ? "linear-gradient(135deg,var(--accent-dk),var(--accent))"
+                      : "var(--bg-main)",
+                    color: activeBranchId === b.branch_id ? "#fff" : "var(--text-main)",
+                    display:"flex", alignItems:"center", justifyContent:"space-between"
+                  }}>
+                  <span>🏪 {b.branch_name}</span>
+                  {activeBranchId === b.branch_id && <span style={{fontSize:16}}>✅</span>}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowBranchPicker(false)}
+              style={{ ...btnGhost, width:"100%", marginTop:14 }}>បោះបង់</button>
+          </div>
+        </div>
+      )}
+
       {/* ── TopBar (sticky) ── */}
       <TopBar socketOnline={socketOnline} offline={offline} currentUser={currentUser} doLogout={doLogout}
         onHamburger={() => setMenuOpen(p => !p)} menuOpen={menuOpen}
         onSelfReset={() => setShowSelfReset(true)}
         onClearData={() => setShowClearData(true)}
-        isAdmin={currentUser?.role === "admin"} />
+        isAdmin={currentUser?.role === "admin"}
+        activeBranchId={activeBranchId}
+        branchList={branchList}
+        onSwitchBranch={() => setShowBranchPicker(true)}
+        isGlobalAdmin={isGlobalAdmin} />
 
       {/* ── Desktop Nav tabs ── */}
       <div className="nav-tab-bar desktop-nav" style={{ display:"flex", gap:0, overflowX:"auto", background:"var(--bg-header)", borderBottom:"2px solid var(--border-col)", padding:"0 8px" }}>
@@ -721,7 +779,7 @@ function LoginPage({ theme, loading, error, onLogin }) {
 // ═══════════════════════════════════════════════════════════════════
 //  TOPBAR COMPONENT
 // ═══════════════════════════════════════════════════════════════════
-function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin }) {
+function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin }) {
   const [shopName, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
   const [shopLogo, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
 
@@ -783,6 +841,17 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
       </div>
       {/* Clock */}
       <div className="topbar-clock" style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", fontVariantNumeric:"tabular-nums", minWidth:68, textAlign:"center" }}>{hhmm}</div>
+      {/* Branch switcher — global admin only */}
+      {isGlobalAdmin && branchList.length > 0 && (
+        <div style={{ display:"flex", alignItems:"center", gap:4, background:"rgba(91,163,224,.12)", border:"1px solid #5BA3E044", borderRadius:20, padding:"4px 10px", cursor:"pointer" }}
+          onClick={onSwitchBranch}>
+          <span style={{ fontSize:10, color:"#5BA3E0" }}>🏪</span>
+          <span style={{ fontSize:11, fontWeight:700, color:"#5BA3E0" }} className="topbar-username">
+            {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || activeBranchId}
+          </span>
+          <span style={{ fontSize:9, color:"#5BA3E0" }}>▼</span>
+        </div>
+      )}
       {/* User */}
       <div className="topbar-user-pill" style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"5px 12px" }}>
         {currentUser.avatar
@@ -3966,7 +4035,7 @@ function SelfResetPasswordModal({ currentUser, onClose, notify }) {
   );
 }
 
-function UsersPage({ users, setUsers, currentUser, notify }) {
+function UsersPage({ users, setUsers, currentUser, notify, branchList }) {
   const [modal, setModal] = useState(null);
   const [delConf, setDelConf] = useState(null);
   const [permModal, setPermModal] = useState(null); // user to edit perms
@@ -4282,7 +4351,7 @@ function UploadPhotoForm({ user, onSave, onCancel }) {
 
 
 // Permission editor modal
-function UserForm({ data, user, onSave, onCancel, roles }) {
+function UserForm({ data, user, onSave, onCancel, roles, branchList }) {
   // Support both prop names: data (new) and user (old)
   const init = data || user || {};
   const [v, setV] = useState(init);
@@ -4299,11 +4368,31 @@ function UserForm({ data, user, onSave, onCancel, roles }) {
           value={v.password||""}
           onChange={e=>setV({...v,password:e.target.value})} />
       </div>
-      <select className="inp" value={v.role||"staff"} onChange={e=>setV({...v,role:e.target.value})}>
-        {roles ? roles.map(r => <option key={r.v} value={r.v}>{r.icon} {r.label}</option>)
-               : <><option value="staff">Staff</option><option value="admin">Admin</option></>}
+      <select className="inp" value={v.role||"staff"} onChange={e=>setV({...v,role:e.target.value})}
+        style={{ background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:9, padding:"9px 13px", color:"var(--text-main)", fontFamily:"inherit", fontSize:13 }}>
+        {roles ? roles.map(r => <option key={r.v} value={r.v}>{r.label}</option>)
+               : <><option value="staff">👤 Staff</option><option value="admin">👑 Admin</option></>}
       </select>
-      <input className="inp" placeholder="Branch ID (branch_1)" value={v.branch_id||""} onChange={e=>setV({...v,branch_id:e.target.value})} />
+      {/* Branch selector */}
+      <div>
+        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>
+          🏪 សាខា {v.role==="admin" ? <span style={{color:"#888"}}>(admin: "all" = ទាំងអស់)</span> : "*"}
+        </div>
+        {branchList && branchList.length > 0 ? (
+          <select className="inp" value={v.branch_id||""}
+            onChange={e=>setV({...v,branch_id:e.target.value})}
+            style={{ width:"100%", background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:9, padding:"9px 13px", color:"var(--text-main)", fontFamily:"inherit", fontSize:13 }}>
+            {v.role === "admin" && <option value="all">🌐 ទាំងអស់ (all)</option>}
+            {branchList.map(b => <option key={b.branch_id} value={b.branch_id}>🏪 {b.branch_name} ({b.branch_id})</option>)}
+          </select>
+        ) : (
+          <input className="inp" placeholder="branch_1, branch_2 ... ឬ all"
+            value={v.branch_id||""} onChange={e=>setV({...v,branch_id:e.target.value})} />
+        )}
+        <div style={{ fontSize:10, color:"#666", marginTop:4 }}>
+          💡 Admin + branch_2 = login ចូល branch_2 ដូច staff ប៉ុន្តែមាន permission admin
+        </div>
+      </div>
       <div style={{ display:"flex", gap:8, marginTop:4 }}>
         {onCancel && <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>}
         <button style={{ ...btnGold, flex:1 }} onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
@@ -5374,9 +5463,10 @@ const CSS = `
   @media (max-width: 640px) {
     .nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
     .nav-label { display: none; }
-    /* Compress TopBar on small screens */
-    .topbar-clock { display: none !important; }
-    .topbar-status { display: none !important; }
+    /* Keep clock + status visible on mobile — show compact */
+    .topbar-clock { font-size: 11px !important; min-width: 50px !important; }
+    .topbar-status { padding: 3px 7px !important; }
+    .topbar-status span { display: none !important; } /* hide text, keep dot */
   }
   @media (max-width: 480px) {
     .prod-card { padding: 8px !important; }
