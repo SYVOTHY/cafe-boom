@@ -2268,7 +2268,7 @@ function OrdersPage({ orders, ings }) {
 //  REPORT PAGE  — ថ្ងៃ / ខែ / ឆ្នាំ
 // ═══════════════════════════════════════════════════════════════════
 
-function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
+function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId, currentUser }) {
   const [period, setPeriod] = useState("day");   // day | month | year
   const [selDate, setSelDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -2278,19 +2278,28 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
   const [allLoading, setAllLoading] = useState(false);
   const [branches, setBranches] = useState([]);
 
+  // Non-admin: block switching to "all" mode — always stays on branch
+  const setReportModeSafe = (mode) => {
+    if (!isAdmin && mode === "all") return;
+    setReportMode(mode);
+  };
+
   useEffect(() => {
     if (reportMode !== "all" || !isAdmin) return;
     setAllLoading(true);
-    fetch(`${API}/api/all-orders`)
+    const token = localStorage.getItem("pos_token");
+    const headers = { "Content-Type":"application/json", "ngrok-skip-browser-warning":"true", ...(token ? { Authorization:"Bearer "+token } : {}) };
+    fetch(`${API}/api/all-orders`, { headers })
       .then(r => r.json()).then(data => { setAllOrders(Array.isArray(data) ? data : []); setAllLoading(false); })
       .catch(() => setAllLoading(false));
-    fetch(`${API}/api/branches`)
+    fetch(`${API}/api/branches`, { headers })
       .then(r => r.json()).then(data => setBranches(Array.isArray(data) ? data : []))
       .catch(() => { });
   }, [reportMode, isAdmin]);
 
-  // Source orders depending on mode
-  const sourceOrders = reportMode === "all" ? allOrders : orders;
+  // Non-admin ALWAYS uses own branch orders only — cannot see other branches
+  // Admin in "all" mode: uses all-orders fetched from API
+  const sourceOrders = (isAdmin && reportMode === "all") ? allOrders : orders;
 
   // ── Filter orders by period ──────────────────────────────────────
   const filtered = sourceOrders.filter(o => {
@@ -2550,12 +2559,12 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
       <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
         <SectionHeader title="📊 របាយការណ៍លក់" sub={periodLabel} />
 
-        {/* Multi-Branch Toggle */}
+        {/* Multi-Branch Toggle — admin only */}
         {isAdmin && (
           <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 12, color: "var(--text-dim)" }}>📍 មើល:</span>
             {[["branch", "🏪 តូបខ្ញុំ"], ["all", "🌐 តូបទាំងអស់"]].map(([k, lb]) => (
-              <button key={k} onClick={() => setReportMode(k)} style={{
+              <button key={k} onClick={() => setReportModeSafe(k)} style={{
                 padding: "6px 16px", borderRadius: 20, border: "none", cursor: "pointer",
                 fontFamily: "inherit", fontSize: 12, fontWeight: 700,
                 background: reportMode === k ? `linear-gradient(135deg,var(--accent-dk),var(--accent))` : "var(--bg-card)",
@@ -2564,7 +2573,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
               }}>{lb}</button>
             ))}
             {reportMode === "all" && (
-              <button onClick={() => { setAllLoading(true); fetch(`${API}/api/all-orders`).then(r => r.json()).then(d => { setAllOrders(Array.isArray(d) ? d : []); setAllLoading(false); }).catch(() => setAllLoading(false)); }}
+              <button onClick={() => { setAllLoading(true); const tok = localStorage.getItem('pos_token'); const hdr = { 'Content-Type':'application/json','ngrok-skip-browser-warning':'true',...(tok ? { Authorization:'Bearer '+tok } : {}) }; fetch(`${API}/api/all-orders`, { headers:hdr }).then(r => r.json()).then(d => { setAllOrders(Array.isArray(d) ? d : []); setAllLoading(false); }).catch(() => setAllLoading(false)); }}
                 style={{
                   marginLeft: "auto", padding: "6px 12px", borderRadius: 20, border: "1px solid var(--border)",
                   background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11, color: "var(--text-dim)"
@@ -3057,7 +3066,7 @@ const CAT_COLORS = ["#E74C3C","#F39C12","#9B59B6","#5BA3E0","#27AE60","#7F8C8D",
 const CAT_EMOJIS = ["💰","⚡","🏛️","🏠","🧴","📦","🚗","💊","🍱","📱","🔧","💡","🎁","📋","🏦"];
 
 
-function FinancePage({ orders, expenses, setExpenses, notify, isAdmin }) {
+function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId }) {
   const MON_KH = ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
   const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0,7));
   const [editMode, setEditMode] = useState(false);  // edit amounts
