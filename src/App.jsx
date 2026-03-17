@@ -186,21 +186,24 @@ const uid  = ()  => Date.now() + "_" + Math.random().toString(36).slice(2, 6);
 const TAX  = 0.10;
 
 const PERM_LABELS = {
-  pos: { icon: "🛒", label: "ចំណុចលក់" },
-  tables: { icon: "🪑", label: "តុ" },
-  menu: { icon: "🍽️", label: "ម៉ឺនុយ" },
+  pos:       { icon: "🛒", label: "ចំណុចលក់" },
+  tables:    { icon: "🪑", label: "តុ" },
+  menu:      { icon: "🍽️", label: "ម៉ឺនុយ" },
   inventory: { icon: "🧂", label: "ស្តុក" },
-  orders: { icon: "📋", label: "ប្រវត្តិ" },
-  report: { icon: "📊", label: "របាយការណ៍" },
-  finance: { icon: "💼", label: "ហិរញ្ញវត្ថុ" },
-  users: { icon: "👥", label: "អ្នកប្រើ" },
-  theme: { icon: "🎨", label: "រចនាប័ទ្ម" },
+  orders:    { icon: "📋", label: "ប្រវត្តិ" },
+  report:    { icon: "📊", label: "របាយការណ៍" },
+  finance:   { icon: "💼", label: "ហិរញ្ញវត្ថុ" },
+  // users + theme are admin-only — staff can never get these
 };
+
+// Permissions that only admin can have (never grant to staff)
+const ADMIN_ONLY_PERMS = new Set(["users", "theme"]);
 
 const DEFAULT_PERMS_TPL = {
   pos: false, tables: false, menu: false,
   inventory: false, orders: false, report: false,
-  finance: false, users: false, theme: false,
+  finance: false,
+  // users + theme intentionally excluded — admin-only pages
 };
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
@@ -425,6 +428,10 @@ export default function CafeBloom() {
 
   // ── Toast notification (used by POSPage) ─────────────────────────
   const [toast, setToast] = useState("");
+  // ── Self Reset Password modal ────────────────────────────────────
+  const [showSelfReset, setShowSelfReset] = useState(false);
+  // ── Clear Data modal ─────────────────────────────────────────────
+  const [showClearData, setShowClearData] = useState(false);
   const notify = useCallback((msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 2800);
@@ -447,6 +454,8 @@ export default function CafeBloom() {
   const canAccess = useCallback((p) => {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
+    // users + theme pages are admin-only regardless of permissions
+    if (ADMIN_ONLY_PERMS && ADMIN_ONLY_PERMS.has(p)) return false;
     return !!currentUser.permissions?.[p];
   }, [currentUser]);
 
@@ -504,6 +513,31 @@ export default function CafeBloom() {
   return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }} className={"app-root" + (themeRaw.bgMain && themeRaw.bgMain > "#888" ? " light-mode" : "")}>
       <style>{CSS}</style>
+
+      {/* ── Self Reset Password Modal ── */}
+      {showSelfReset && (
+        <SelfResetPasswordModal
+          currentUser={currentUser}
+          onClose={() => setShowSelfReset(false)}
+          notify={notify}
+        />
+      )}
+
+      {/* ── Clear Data Modal ── */}
+      {showClearData && (
+        <ClearDataModal
+          branchId={activeBranchId}
+          isAdmin={currentUser?.role === "admin"}
+          onClose={() => setShowClearData(false)}
+          notify={notify}
+          onCleared={(bid) => {
+            // Reset local state for cleared branch
+            setOrdersRaw([]);
+            setLogsRaw([]);
+            reload();
+          }}
+        />
+      )}
 
       {/* ── Toast ── */}
       {toast && (
@@ -568,7 +602,10 @@ export default function CafeBloom() {
 
       {/* ── TopBar (sticky) ── */}
       <TopBar socketOnline={socketOnline} offline={offline} currentUser={currentUser} doLogout={doLogout}
-        onHamburger={() => setMenuOpen(p => !p)} menuOpen={menuOpen} />
+        onHamburger={() => setMenuOpen(p => !p)} menuOpen={menuOpen}
+        onSelfReset={() => setShowSelfReset(true)}
+        onClearData={() => setShowClearData(true)}
+        isAdmin={currentUser?.role === "admin"} />
 
       {/* ── Desktop Nav tabs ── */}
       <div className="nav-tab-bar desktop-nav" style={{ display:"flex", gap:0, overflowX:"auto", background:"var(--bg-header)", borderBottom:"2px solid var(--border-col)", padding:"0 8px" }}>
@@ -648,7 +685,7 @@ function LoginPage({ theme, loading, error, onLogin }) {
 // ═══════════════════════════════════════════════════════════════════
 //  TOPBAR COMPONENT
 // ═══════════════════════════════════════════════════════════════════
-function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen }) {
+function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin }) {
   const [shopName, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
   const [shopLogo, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
 
@@ -721,6 +758,22 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
         <span style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
 
       </div>
+      {/* 🔐 Reset own password */}
+      <button
+        onClick={onSelfReset}
+        title="ផ្លាស់ Password"
+        style={{ background:"transparent", border:"1px solid #2A2730", borderRadius:20, padding:"5px 10px", cursor:"pointer", fontSize:13, color:"#888" }}>
+        🔐
+      </button>
+      {/* 🗑️ Clear data — admin only */}
+      {isAdmin && (
+        <button
+          onClick={onClearData}
+          title="លុប Data លក់"
+          style={{ background:"transparent", border:"1px solid #3a1a1a", borderRadius:20, padding:"5px 10px", cursor:"pointer", fontSize:13, color:"#E74C3C" }}>
+          🗑️
+        </button>
+      )}
       <button className="btn-sm" onClick={doLogout} style={{ borderRadius:20 }}>ចេញ</button>
     </div>
   );
@@ -3504,6 +3557,199 @@ function ExpenseForm({ exp, onSave }) {
 // ═══════════════════════════════════════════════════════════════════
 //  USERS PAGE
 // ═══════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════
+//  CLEAR DATA MODAL  (admin only)
+// ═══════════════════════════════════════════════════════════════════
+function ClearDataModal({ branchId, isAdmin, onClose, notify, onCleared }) {
+  const [scope,   setScope]   = useState("current"); // current | all
+  const [confirm, setConfirm] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const CONFIRM_WORD = "លុប";
+  const ready = confirm === CONFIRM_WORD;
+
+  const doClear = async () => {
+    if (!ready || loading) return;
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("pos_token");
+      const headers = {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      };
+      const bid = scope === "all" ? "all" : branchId;
+      const r = await fetch(`${API}/api/clear-all-orders?scope=${bid}`, { method:"POST", headers });
+      const d = await r.json();
+      if (!r.ok) { notify("❌ " + (d.error || "Error"), "error"); setLoading(false); return; }
+      const cleared = d.cleared || [];
+      notify(`✅ លុប Data លក់ ${cleared.length} សាខា រួចហើយ!`);
+      onCleared(bid);
+      onClose();
+    } catch (e) {
+      notify("❌ មិនអាចភ្ជាប់ Server!", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} maxW={400}>
+      <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:44 }}>🗑️</div>
+          <div style={{ fontWeight:700, fontSize:17, marginTop:8, color:"#E74C3C" }}>លុប Data លក់</div>
+          <div style={{ fontSize:12, color:"#888", marginTop:6 }}>
+            ប្រតិបត្តិការនេះ <b style={{color:"#E74C3C"}}>មិនអាច Undo</b> បានទេ!<br/>
+            Orders + Logs ទាំងអស់នឹងត្រូវលុប។
+          </div>
+        </div>
+
+        {/* Scope selection */}
+        <div>
+          <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:8, fontWeight:600 }}>ជ្រើសសាខា:</div>
+          <div style={{ display:"flex", gap:8 }}>
+            {[["current","🏪 សាខាខ្ញុំ"],["all","🌐 ទាំងអស់"]].map(([v,lb]) => (
+              <button key={v} onClick={()=>{setScope(v);setConfirm("");}} style={{
+                flex:1, padding:"10px 0", borderRadius:10, cursor:"pointer", fontFamily:"inherit",
+                fontSize:13, fontWeight:700, border:"none",
+                background: scope===v ? (v==="all"?"linear-gradient(135deg,#7A1A1A,#E74C3C)":"linear-gradient(135deg,#B8732A,#E8A84B)") : "var(--bg-card)",
+                color: scope===v ? "#fff" : "var(--text-dim)",
+              }}>{lb}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Confirm input */}
+        <div style={{ background:"#1A0A0A", border:"1px solid #3a1a1a", borderRadius:10, padding:14 }}>
+          <div style={{ fontSize:12, color:"#E74C3C", marginBottom:8 }}>
+            ដើម្បីបញ្ជាក់ សូមវាយ <b>"{CONFIRM_WORD}"</b> ខាងក្រោម:
+          </div>
+          <input
+            className="inp"
+            placeholder={`វាយ "${CONFIRM_WORD}" ដើម្បីបញ្ជាក់...`}
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            style={{ width:"100%", borderColor: ready ? "#E74C3C" : undefined }}
+            autoFocus
+          />
+        </div>
+
+        <div style={{ display:"flex", gap:8 }}>
+          <button style={{ ...btnGhost, flex:1 }} onClick={onClose}>បោះបង់</button>
+          <button
+            style={{ ...btnRed, flex:1, opacity:(!ready||loading)?0.4:1 }}
+            disabled={!ready||loading}
+            onClick={doClear}>
+            {loading ? "កំពុងលុប..." : "🗑️ លុបឥឡូវ"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  SELF RESET PASSWORD MODAL  (any logged-in user)
+// ═══════════════════════════════════════════════════════════════════
+function SelfResetPasswordModal({ currentUser, onClose, notify }) {
+  const [oldPw,  setOldPw]  = useState("");
+  const [newPw,  setNewPw]  = useState("");
+  const [newPw2, setNewPw2] = useState("");
+  const [show,   setShow]   = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error,  setError]  = useState("");
+
+  const strong = newPw.length >= 6;
+  const match  = newPw && newPw === newPw2;
+
+  const doReset = async () => {
+    if (!oldPw || !newPw || !newPw2) { setError("សូមបំពេញគ្រប់ fields!"); return; }
+    if (!strong) { setError("Password ថ្មីត្រូវតែ ≥ 6 អក្សរ!"); return; }
+    if (!match)  { setError("Password ថ្មីមិនត្រូវគ្នា!"); return; }
+    setLoading(true); setError("");
+    try {
+      const token = localStorage.getItem("pos_token");
+      const r = await fetch(`${API}/api/change-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          ...(token ? { Authorization: "Bearer " + token } : {}),
+        },
+        body: JSON.stringify({ oldPassword: oldPw, newPassword: newPw }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setError(d.error || "មានបញ្ហា!"); setLoading(false); return; }
+      notify("✅ ផ្លាស់ Password រួចហើយ!");
+      onClose();
+    } catch (e) {
+      setError("មិនអាចភ្ជាប់ Server!");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose} maxW={380}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:40 }}>🔐</div>
+          <div style={{ fontWeight:700, fontSize:16, marginTop:8, color:"var(--accent)" }}>ផ្លាស់ Password</div>
+          <div style={{ fontSize:12, color:"#555", marginTop:4 }}>@{currentUser.username}</div>
+        </div>
+
+        {error && (
+          <div style={{ background:"#3a1a1a", color:"#ff8080", borderRadius:8, padding:"8px 12px", fontSize:12 }}>
+            ⚠️ {error}
+          </div>
+        )}
+
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>Password បច្ចុប្បន្ន *</div>
+          <div style={{ position:"relative" }}>
+            <input className="inp" type={show?"text":"password"} placeholder="Password ចាស់..."
+              value={oldPw} onChange={e=>{setOldPw(e.target.value);setError("");}}
+              style={{ width:"100%", paddingRight:36 }} />
+            <button type="button" onClick={()=>setShow(p=>!p)}
+              style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", fontSize:14, color:"#555" }}>
+              {show?"🙈":"👁️"}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>Password ថ្មី * (≥6 អក្សរ)</div>
+          <input className="inp" type={show?"text":"password"} placeholder="Password ថ្មី..."
+            value={newPw} onChange={e=>{setNewPw(e.target.value);setError("");}} style={{ width:"100%" }} />
+        </div>
+
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>បញ្ជាក់ Password ថ្មី *</div>
+          <input className="inp" type={show?"text":"password"} placeholder="វាយម្ដងទៀត..."
+            value={newPw2} onChange={e=>{setNewPw2(e.target.value);setError("");}} style={{ width:"100%" }} />
+        </div>
+
+        {newPw && (
+          <div style={{ fontSize:11, display:"flex", gap:10 }}>
+            <span style={{ color:strong?"#27AE60":"#E74C3C" }}>{strong?"✅":"❌"} ≥6 chars</span>
+            <span style={{ color:match?"#27AE60":"#E74C3C" }}>{match?"✅":"❌"} ត្រូវគ្នា</span>
+          </div>
+        )}
+
+        <div style={{ display:"flex", gap:8, marginTop:4 }}>
+          <button style={{ ...btnGhost, flex:1 }} onClick={onClose}>បោះបង់</button>
+          <button style={{ ...btnGold, flex:1, opacity:(!oldPw||!match||!strong||loading)?0.4:1 }}
+            disabled={!oldPw||!match||!strong||loading}
+            onClick={doReset}>
+            {loading ? "កំពុង..." : "🔐 ផ្លាស់ Password"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 function UsersPage({ users, setUsers, currentUser, notify }) {
   const [modal, setModal] = useState(null);
