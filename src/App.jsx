@@ -673,7 +673,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
             </div>
         }
         <span style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
-        <span className="topbar-role" style={{ fontSize:10, color:"var(--text-dim)" }}>({currentUser.role})</span>
+
       </div>
       <button className="btn-sm" onClick={doLogout} style={{ borderRadius:20 }}>ចេញ</button>
     </div>
@@ -1346,150 +1346,149 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify 
   const toggleProd = (id) => setProds(prev => prev.map(p => p.product_id === id ? { ...p, is_active: !p.is_active } : p));
 
   return (
-    <div>
-      {/* ── Delete confirm ── */}
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
       {delConf && <ConfirmDel name={delConf.name} onConfirm={delConf.fn} onCancel={() => setDelConf(null)} />}
 
-      {/* ── Header ── */}
-      <div style={{ marginBottom:16 }}>
-        <div style={{ fontWeight:700, fontSize:20 }}>🍽️ គ្រប់គ្រងម៉ឺនុយ</div>
-      </div>
+      {/* ── STICKY HEADER: title + subtabs ── */}
+      <div style={{ flexShrink:0, background:"var(--bg-main)", borderBottom:"1px solid var(--border-col)", padding:"16px 14px 0" }}>
+        <div style={{ fontWeight:700, fontSize:20, marginBottom:12 }}>🍽️ គ្រប់គ្រងម៉ឺនុយ</div>
+        <div style={{ display:"flex", gap:0 }}>
+          {[["products","🍽️ ផលិតផល"],["categories","📂 ប្រភេទ"],["options","⚙️ Options"]].map(([v,lb]) => (
+            <button key={v} onClick={() => setSubTab(v)} style={{
+              padding:"10px 18px", border:"none", background:"transparent", cursor:"pointer",
+              color: subTab===v ? "var(--accent)" : "#555",
+              fontFamily:"inherit", fontSize:13, fontWeight:600,
+              borderBottom: subTab===v ? "2px solid var(--accent)" : "2px solid transparent",
+              marginBottom:-1, transition:"all .15s",
+            }}>{lb}</button>
+          ))}
+        </div>
+      </div>{/* end sticky header */}
 
-      {/* ── Sub tabs ── */}
-      <div style={{ display:"flex", gap:0, borderBottom:"1px solid var(--border-col)", marginBottom:16 }}>
-        {[["products","🍽️ ផលិតផល"],["categories","📂 ប្រភេទ"],["options","⚙️ Options"]].map(([v,lb]) => (
-          <button key={v} onClick={() => setSubTab(v)} style={{
-            padding:"10px 18px", border:"none", background:"transparent", cursor:"pointer",
-            color: subTab===v ? "var(--accent)" : "#555",
-            fontFamily:"inherit", fontSize:13, fontWeight:600,
-            borderBottom: subTab===v ? "2px solid var(--accent)" : "2px solid transparent",
-            marginBottom:-1, transition:"all .15s",
-          }}>{lb}</button>
-        ))}
-      </div>
+      {/* ── SCROLLABLE CONTENT ── */}
+      <div style={{ flex:1, overflowY:"auto", padding:"14px 14px 32px" }}>
 
-      {/* ── PRODUCTS TAB ── */}
-      {subTab === "products" && (
-        <div>
-          {/* Toolbar */}
-          <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
-            <input className="inp" style={{ flex:1, minWidth:160 }} placeholder="🔍 ស្វែងរក..." value={search} onChange={e=>setSearch(e.target.value)} />
-            <select className="inp" style={{ minWidth:140 }} value={filterC} onChange={e=>setFilterC(Number(e.target.value))}>
-              <option value={0}>ប្រភេទទាំងអស់</option>
-              {cats.map(c => <option key={c.category_id} value={c.category_id}>{c.emoji} {c.category_name}</option>)}
-            </select>
-            <button style={{ ...btnGold, padding:"9px 18px", width:"auto" }}
-              onClick={()=>setEditProd({ product_name:"", base_price:0, category_id:cats[0]?.category_id, emoji:"☕", is_active:true })}>
-              ➕ បន្ថែម
-            </button>
-          </div>
-          {/* Product grid */}
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:10 }}>
-            {filteredP.map(p => {
-              const cat = cats.find(c => c.category_id === p.category_id);
-              return (
-                <div key={p.product_id} style={{
-                  background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12,
-                  padding:"12px 14px", display:"flex", gap:12, alignItems:"center",
-                  opacity: p.is_active===false ? 0.55 : 1, transition:"opacity .2s",
-                }}>
-                  {p.image_url
-                    ? <img src={p.image_url} alt="" style={{ width:48, height:48, borderRadius:8, objectFit:"cover", flexShrink:0 }} />
-                    : <div style={{ width:48, height:48, borderRadius:8, background:"rgba(255,255,255,.05)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, flexShrink:0 }}>{p.emoji}</div>
-                  }
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontWeight:700, fontSize:13, marginBottom:4 }}>{p.product_name}</div>
-                    <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
-                      <span style={{ fontSize:11, background:"rgba(184,115,42,.15)", color:"#E8A84B", padding:"2px 8px", borderRadius:20 }}>
-                        {cat?.emoji} {cat?.category_name}
-                      </span>
-                      <span style={{ color:"#E8A84B", fontWeight:700, fontSize:13 }}>{fmt(p.base_price)}</span>
-                      <button onClick={()=>toggleProd(p.product_id)} style={{
-                        padding:"2px 10px", borderRadius:20, border:"none", cursor:"pointer",
-                        fontFamily:"inherit", fontSize:11, fontWeight:600,
-                        background: p.is_active!==false ? "#1A4A1A22" : "#2A2A2A",
-                        color: p.is_active!==false ? "#27AE60" : "#666",
-                      }}>{p.is_active!==false ? "✓ លក់" : "✗ បិទ"}</button>
+        {/* ── PRODUCTS TAB ── */}
+        {subTab === "products" && (
+          <div>
+            <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap", alignItems:"center" }}>
+              <input className="inp" style={{ flex:1, minWidth:160 }} placeholder="🔍 ស្វែងរក..." value={search} onChange={e=>setSearch(e.target.value)} />
+              <select className="inp" style={{ minWidth:140 }} value={filterC} onChange={e=>setFilterC(Number(e.target.value))}>
+                <option value={0}>ប្រភេទទាំងអស់</option>
+                {cats.map(c => <option key={c.category_id} value={c.category_id}>{c.emoji} {c.category_name}</option>)}
+              </select>
+              <button style={{ ...btnGold, padding:"9px 18px", width:"auto" }}
+                onClick={()=>setEditProd({ product_name:"", base_price:0, category_id:cats[0]?.category_id, emoji:"☕", is_active:true })}>
+                ➕ បន្ថែម
+              </button>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:10 }}>
+              {filteredP.map(p => {
+                const cat = cats.find(c => c.category_id === p.category_id);
+                return (
+                  <div key={p.product_id} style={{
+                    background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12,
+                    padding:"12px 14px", display:"flex", gap:12, alignItems:"center",
+                    opacity: p.is_active===false ? 0.55 : 1, transition:"opacity .2s",
+                  }}>
+                    {p.image_url
+                      ? <img src={p.image_url} alt="" style={{ width:48, height:48, borderRadius:8, objectFit:"cover", flexShrink:0 }} />
+                      : <div style={{ width:48, height:48, borderRadius:8, background:"rgba(255,255,255,.05)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:24, flexShrink:0 }}>{p.emoji}</div>
+                    }
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:700, fontSize:13, marginBottom:4 }}>{p.product_name}</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
+                        <span style={{ fontSize:11, background:"rgba(184,115,42,.15)", color:"#E8A84B", padding:"2px 8px", borderRadius:20 }}>
+                          {cat?.emoji} {cat?.category_name}
+                        </span>
+                        <span style={{ color:"#E8A84B", fontWeight:700, fontSize:13 }}>{fmt(p.base_price)}</span>
+                        <button onClick={()=>toggleProd(p.product_id)} style={{
+                          padding:"2px 10px", borderRadius:20, border:"none", cursor:"pointer",
+                          fontFamily:"inherit", fontSize:11, fontWeight:600,
+                          background: p.is_active!==false ? "#1A4A1A22" : "#2A2A2A",
+                          color: p.is_active!==false ? "#27AE60" : "#666",
+                        }}>{p.is_active!==false ? "✓ លក់" : "✗ បិទ"}</button>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                      <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", cursor:"pointer", fontSize:13 }}
+                        onClick={()=>toggleProd(p.product_id)}>{p.is_active!==false?"⏸":"▶"}</button>
+                      <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", color:"#E8A84B", cursor:"pointer", fontSize:13 }}
+                        onClick={()=>setEditProd(p)}>✏️</button>
+                      <button style={{ width:30, height:30, borderRadius:7, border:"1px solid #5B1A1A", background:"transparent", color:"#E74C3C", cursor:"pointer", fontSize:13 }}
+                        onClick={()=>setDelConf({ name:p.product_name, fn:()=>delProd(p.product_id) })}>🗑</button>
                     </div>
                   </div>
-                  <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                    <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", cursor:"pointer", fontSize:13 }}
-                      onClick={()=>toggleProd(p.product_id)}>{p.is_active!==false?"⏸":"▶"}</button>
-                    <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", color:"#E8A84B", cursor:"pointer", fontSize:13 }}
-                      onClick={()=>setEditProd(p)}>✏️</button>
-                    <button style={{ width:30, height:30, borderRadius:7, border:"1px solid #5B1A1A", background:"transparent", color:"#E74C3C", cursor:"pointer", fontSize:13 }}
-                      onClick={()=>setDelConf({ name:p.product_name, fn:()=>delProd(p.product_id) })}>🗑</button>
+                );
+              })}
+              {filteredP.length===0 && <div style={{ gridColumn:"1/-1", textAlign:"center", color:"#444", paddingTop:30 }}>គ្មានមុខម្ហូប</div>}
+            </div>
+            {editProd && (
+              <Modal title={editProd.product_id?"កែ​ផលិតផល":"ផលិតផល​ថ្មី"} onClose={()=>setEditProd(null)}>
+                <ProdForm prod={editProd} cats={cats} onSave={saveProd} />
+              </Modal>
+            )}
+          </div>
+        )}
+
+        {/* ── CATEGORIES TAB ── */}
+        {subTab === "categories" && (
+          <div>
+            <button style={{ ...btnGold, padding:"9px 18px", width:"auto", marginBottom:14 }}
+              onClick={()=>setEditCat({ category_name:"", emoji:"☕" })}>➕ បន្ថែម​ប្រភេទ</button>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:14 }}>
+              {cats.map(c => (
+                <div key={c.category_id} style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:18 }}>
+                  <div style={{ fontSize:32 }}>{c.emoji}</div>
+                  <div style={{ fontWeight:700, fontSize:15, margin:"8px 0 4px" }}>{c.category_name}</div>
+                  <div style={{ fontSize:11, color:"#555", marginBottom:12 }}>
+                    {prods.filter(p=>p.category_id===c.category_id).length} ​ផលិតផល
+                  </div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <button style={{ flex:1, padding:"6px", borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", color:"#E8A84B", cursor:"pointer", fontFamily:"inherit", fontSize:12 }}
+                      onClick={()=>setEditCat(c)}>✏️ កែ</button>
+                    <button style={{ flex:1, padding:"6px", borderRadius:7, border:"1px solid #5B1A1A", background:"transparent", color:"#E74C3C", cursor:"pointer", fontFamily:"inherit", fontSize:12 }}
+                      onClick={()=>setDelConf({ name:c.category_name, fn:()=>delCat(c.category_id) })}>🗑 លុប</button>
                   </div>
                 </div>
-              );
-            })}
-            {filteredP.length===0 && <div style={{ gridColumn:"1/-1", textAlign:"center", color:"#444", paddingTop:30 }}>គ្មានមុខម្ហូប</div>}
+              ))}
+            </div>
+            {editCat && (
+              <Modal title={editCat.category_id?"កែ​ប្រភេទ":"ប្រភេទ​ថ្មី"} onClose={()=>setEditCat(null)}>
+                <CatForm cat={editCat} onSave={saveCat} />
+              </Modal>
+            )}
           </div>
-          {editProd && (
-            <Modal title={editProd.product_id?"កែ​ផលិតផល":"ផលិតផល​ថ្មី"} onClose={()=>setEditProd(null)}>
-              <ProdForm prod={editProd} cats={cats} onSave={saveProd} />
-            </Modal>
-          )}
-        </div>
-      )}
+        )}
 
-      {/* ── CATEGORIES TAB ── */}
-      {subTab === "categories" && (
-        <div>
-          <button style={{ ...btnGold, padding:"9px 18px", width:"auto", marginBottom:14 }}
-            onClick={()=>setEditCat({ category_name:"", emoji:"☕" })}>➕ បន្ថែម​ប្រភេទ</button>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:14 }}>
-            {cats.map(c => (
-              <div key={c.category_id} style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:18 }}>
-                <div style={{ fontSize:32 }}>{c.emoji}</div>
-                <div style={{ fontWeight:700, fontSize:15, margin:"8px 0 4px" }}>{c.category_name}</div>
-                <div style={{ fontSize:11, color:"#555", marginBottom:12 }}>
-                  {prods.filter(p=>p.category_id===c.category_id).length} ​ផលិតផល
-                </div>
-                <div style={{ display:"flex", gap:6 }}>
-                  <button style={{ flex:1, padding:"6px", borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", color:"#E8A84B", cursor:"pointer", fontFamily:"inherit", fontSize:12 }}
-                    onClick={()=>setEditCat(c)}>✏️ កែ</button>
-                  <button style={{ flex:1, padding:"6px", borderRadius:7, border:"1px solid #5B1A1A", background:"transparent", color:"#E74C3C", cursor:"pointer", fontFamily:"inherit", fontSize:12 }}
-                    onClick={()=>setDelConf({ name:c.category_name, fn:()=>delCat(c.category_id) })}>🗑 លុប</button>
-                </div>
-              </div>
-            ))}
-          </div>
-          {editCat && (
-            <Modal title={editCat.category_id?"កែ​ប្រភេទ":"ប្រភេទ​ថ្មី"} onClose={()=>setEditCat(null)}>
-              <CatForm cat={editCat} onSave={saveCat} />
-            </Modal>
-          )}
-        </div>
-      )}
-
-      {/* ── OPTIONS TAB ── */}
-      {subTab === "options" && (
-        <div>
-          <button style={{ ...btnGold, padding:"9px 18px", width:"auto", marginBottom:14 }}
-            onClick={()=>setEditOpt({ option_name:"", option_group:"size", additional_price:0, product_id:null })}>➕ បន្ថែម Option</button>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {options.map(o => (
-              <div key={o.option_id} style={{ display:"flex", alignItems:"center", gap:10, background:"var(--bg-card)", borderRadius:10, padding:"10px 14px", border:"1px solid var(--border-col)" }}>
-                <div style={{ flex:1 }}>
-                  <div style={{ fontWeight:600 }}>{o.option_name} <span style={{ fontSize:11, color:"var(--text-dim)" }}>[{o.option_group}]</span></div>
-                  <div style={{ fontSize:12, color:"var(--text-dim)" }}>
-                    {o.product_id ? "Product: " + (prods.find(p=>p.product_id===o.product_id)?.product_name||o.product_id) : "ទាំងអស់"}
-                    {o.additional_price ? " +"+fmt(o.additional_price) : ""}
+        {/* ── OPTIONS TAB ── */}
+        {subTab === "options" && (
+          <div>
+            <button style={{ ...btnGold, padding:"9px 18px", width:"auto", marginBottom:14 }}
+              onClick={()=>setEditOpt({ option_name:"", option_group:"size", additional_price:0, product_id:null })}>➕ បន្ថែម Option</button>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {options.map(o => (
+                <div key={o.option_id} style={{ display:"flex", alignItems:"center", gap:10, background:"var(--bg-card)", borderRadius:10, padding:"10px 14px", border:"1px solid var(--border-col)" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:600 }}>{o.option_name} <span style={{ fontSize:11, color:"var(--text-dim)" }}>[{o.option_group}]</span></div>
+                    <div style={{ fontSize:12, color:"var(--text-dim)" }}>
+                      {o.product_id ? "Product: " + (prods.find(p=>p.product_id===o.product_id)?.product_name||o.product_id) : "ទាំងអស់"}
+                      {o.additional_price ? " +"+fmt(o.additional_price) : ""}
+                    </div>
                   </div>
+                  <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", color:"#E8A84B", cursor:"pointer" }} onClick={()=>setEditOpt(o)}>✏️</button>
+                  <button style={{ width:30, height:30, borderRadius:7, border:"1px solid #5B1A1A", background:"transparent", color:"#E74C3C", cursor:"pointer" }} onClick={()=>delOpt(o.option_id)}>🗑</button>
                 </div>
-                <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", color:"#E8A84B", cursor:"pointer" }} onClick={()=>setEditOpt(o)}>✏️</button>
-                <button style={{ width:30, height:30, borderRadius:7, border:"1px solid #5B1A1A", background:"transparent", color:"#E74C3C", cursor:"pointer" }} onClick={()=>delOpt(o.option_id)}>🗑</button>
-              </div>
-            ))}
+              ))}
+            </div>
+            {editOpt && (
+              <Modal title={editOpt.option_id?"កែ Option":"Option ថ្មី"} onClose={()=>setEditOpt(null)}>
+                <OptForm opt={editOpt} prods={prods} onSave={saveOpt} />
+              </Modal>
+            )}
           </div>
-          {editOpt && (
-            <Modal title={editOpt.option_id?"កែ Option":"Option ថ្មី"} onClose={()=>setEditOpt(null)}>
-              <OptForm opt={editOpt} prods={prods} onSave={saveOpt} />
-            </Modal>
-          )}
-        </div>
-      )}
+        )}
+      </div>{/* end scrollable */}
     </div>
   );
 }
@@ -1497,6 +1496,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify 
 // ═══════════════════════════════════════════════════════════════════
 //  INVENTORY PAGE
 // ═══════════════════════════════════════════════════════════════════
+
 
 function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs }) {
   const [subTab, setSubTab] = useState("stock");
