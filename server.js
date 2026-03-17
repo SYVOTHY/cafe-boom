@@ -109,6 +109,29 @@ async function initDB() {
       ["users", JSON.stringify(DEFAULT_SHARED.users)]
     );
 
+    // ── One-time migration: backfill branch_id into orders missing it ──
+    try {
+      const { rows: branchRows } = await client.query("SELECT branch_id FROM branches");
+      for (const { branch_id } of branchRows) {
+        const { rows: dataRows } = await client.query(
+          "SELECT value FROM branch_data WHERE branch_id=$1 AND key='orders'", [branch_id]
+        );
+        if (!dataRows.length) continue;
+        const orders = dataRows[0].value;
+        if (!Array.isArray(orders)) continue;
+        const needsFix = orders.some(o => o && !o.branch_id);
+        if (!needsFix) continue;
+        const fixed = orders.map(o => o && !o.branch_id ? { ...o, branch_id } : o);
+        await client.query(
+          "UPDATE branch_data SET value=$1 WHERE branch_id=$2 AND key='orders'",
+          [JSON.stringify(fixed), branch_id]
+        );
+        console.log(`[Migration] Backfilled branch_id into ${fixed.filter(o=>o).length} orders for ${branch_id}`);
+      }
+    } catch (migErr) {
+      console.warn("[Migration] branch_id backfill warning:", migErr.message);
+    }
+
     console.log("✅ PostgreSQL tables ready");
   } finally {
     client.release();
@@ -245,7 +268,14 @@ async function loadBranch(bid) {
     "SELECT key, value FROM branch_data WHERE branch_id=$1", [bid]
   );
   const db = { branch_id: bid };
-  for (const r of rows) db[r.key] = r.value;
+  for (const r of rows) {
+    // Inject branch_id into orders/logs that are missing it (legacy data migration)
+    if ((r.key === "orders" || r.key === "logs") && Array.isArray(r.value)) {
+      db[r.key] = r.value.map(o => o && !o.branch_id ? { ...o, branch_id: bid } : o);
+    } else {
+      db[r.key] = r.value;
+    }
+  }
 
   // Fill defaults
   const def = {
@@ -477,7 +507,7 @@ async function handler(req, res) {
     const all = [];
     for (const b of branches) {
       const bd = await loadBranch(b.branch_id);
-      normalizeRows(bd.orders||[]).forEach(o => all.push({ ...o, branch_id:b.branch_id, branch_name:b.branch_name }));
+      normalizeRows(bd.orders||[]).forEach(o => all.push({ ...o, branch_id: o.branch_id || b.branch_id, branch_name:b.branch_name }));
     }
     all.sort((a,b) => new Date(b.order_id) - new Date(a.order_id));
     send(res, 200, all);
