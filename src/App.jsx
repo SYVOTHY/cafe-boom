@@ -386,6 +386,19 @@ export default function CafeBloom() {
   }, []);
 
   // ── Permission check ────────────────────────────────────────────
+  // ── Sync currentUser when users array changes (e.g. edit own name/avatar) ──
+  useEffect(() => {
+    if (!currentUser || !usersRaw?.length) return;
+    const updated = usersRaw.find(u => u.user_id === currentUser.user_id);
+    if (updated && (
+      updated.name !== currentUser.name ||
+      updated.avatar !== currentUser.avatar ||
+      updated.role !== currentUser.role
+    )) {
+      setCurrentUser(prev => ({ ...prev, ...updated }));
+    }
+  }, [usersRaw]);
+
   const canAccess = useCallback((p) => {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
