@@ -1596,29 +1596,30 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                   const thresh = Number(i.threshold);
                   const pct = thresh > 0 ? Math.round((stock/thresh)*100) : 100;
                   const isLow = stock <= thresh;
-                  return `<tr style="background:${isLow?"#3a0a0a":"#0a1a0a"}">
-                    <td style="padding:8px 12px;border-bottom:1px solid #333">${i.ingredient_name}</td>
-                    <td style="padding:8px 12px;border-bottom:1px solid #333;font-weight:700;color:${isLow?"#E74C3C":"#27AE60"}">${fmtStock(stock)}</td>
-                    <td style="padding:8px 12px;border-bottom:1px solid #333;color:#888">${fmtStock(thresh)}</td>
-                    <td style="padding:8px 12px;border-bottom:1px solid #333">${i.unit}</td>
-                    <td style="padding:8px 12px;border-bottom:1px solid #333;color:#E8A84B">${fmtN(usedTotal)}</td>
-                    <td style="padding:8px 12px;border-bottom:1px solid #333">
-                      <span style="padding:2px 8px;border-radius:12px;font-size:11px;background:${isLow?"#E74C3C22":"#27AE6022"};color:${isLow?"#E74C3C":"#27AE60"}">
+                  // Light print-friendly colors
+                  return `<tr style="background:${isLow?"#fff5f5":"#f5fff8"}">
+                    <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#111;font-weight:600">${i.ingredient_name}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;font-weight:700;color:${isLow?"#c0392b":"#27AE60"}">${fmtStock(stock)}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#555">${fmtStock(thresh)}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#333">${i.unit}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#B8732A;font-weight:700">${fmtN(usedTotal)}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0">
+                      <span style="padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700;background:${isLow?"#ffeaea":"#eaffea"};color:${isLow?"#c0392b":"#27AE60"};border:1px solid ${isLow?"#f5b7b1":"#a9dfbf"}">
                         ${isLow?"⚠️ ជិតអស់":"✓ ល្អ"}
                       </span>
                     </td>
-                    <td style="padding:8px 12px;border-bottom:1px solid #333">${pct}%</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;color:#555">${pct}%</td>
                   </tr>`;
                 }).join("");
                 const tableHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
-                  <thead><tr style="background:#1a1a1a">
-                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ឈ្មោះ​គ្រឿង</th>
-                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ស្តុក​នៅ</th>
-                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">អប្បបរមា</th>
-                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ឯកតា</th>
-                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ប្រើ​ចំណាយ</th>
-                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ស្ថានភាព</th>
-                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">%</th>
+                  <thead><tr style="background:#B8732A">
+                    <th style="padding:10px 12px;text-align:left;color:#fff;border-bottom:2px solid #8B5520">ឈ្មោះ​គ្រឿង</th>
+                    <th style="padding:10px 12px;text-align:left;color:#fff;border-bottom:2px solid #8B5520">ស្តុក​នៅ</th>
+                    <th style="padding:10px 12px;text-align:left;color:#fff;border-bottom:2px solid #8B5520">អប្បបរមា</th>
+                    <th style="padding:10px 12px;text-align:left;color:#fff;border-bottom:2px solid #8B5520">ឯកតា</th>
+                    <th style="padding:10px 12px;text-align:left;color:#fff;border-bottom:2px solid #8B5520">ប្រើ​ចំណាយ</th>
+                    <th style="padding:10px 12px;text-align:left;color:#fff;border-bottom:2px solid #8B5520">ស្ថានភាព</th>
+                    <th style="padding:10px 12px;text-align:left;color:#fff;border-bottom:2px solid #8B5520">%</th>
                   </tr></thead>
                   <tbody>${rows}</tbody>
                 </table>`;
@@ -2651,27 +2652,50 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
                 bars = Array.from({ length: 12 }, (_, i) => i).map(m => ({ label: MON_KH[m].slice(0, 3), val: byMon[m] || 0 }));
               }
               const maxVal = Math.max(...bars.map(b => b.val), 0.01);
+              const BAR_AREA = 140; // height for bars only (excluding x-labels)
               return (
-                <div style={{
-                  display: "flex", alignItems: "flex-end", gap: period === "month" ? 3 : 6,
-                  height: 120, overflowX: "auto", paddingBottom: 4
-                }}>
-                  {bars.map((b, i) => (
-                    <div key={i} style={{
-                      display: "flex", flexDirection: "column", alignItems: "center",
-                      gap: 3, minWidth: period === "month" ? 14 : 28, flex: period === "month" ? "0 0 14px" : "1"
-                    }}>
-                      <div style={{ fontSize: 9, color: b.val > 0 ? "#E8A84B" : "transparent", fontWeight: 700 }}>
-                        {b.val > 0 ? `$${b.val.toFixed(0)}` : ""}
-                      </div>
-                      <div style={{
-                        width: "100%", background: b.val > 0 ? "linear-gradient(0deg,#B8732A,#E8A84B)" : "#1A181C",
-                        borderRadius: "3px 3px 0 0", transition: "height .4s",
-                        height: `${Math.max(2, (b.val / maxVal) * 90)}px`
-                      }} />
-                      <div style={{ fontSize: 9, color: "#444", whiteSpace: "nowrap" }}>{b.label}</div>
-                    </div>
-                  ))}
+                <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+                  <div style={{
+                    display: "flex", alignItems: "flex-end", gap: period === "month" ? 3 : 6,
+                    height: BAR_AREA + 24,  /* bar area + x-label space */
+                  }}>
+                    {bars.map((b, i) => {
+                      const barH = Math.max(2, (b.val / maxVal) * BAR_AREA);
+                      const showLabelInside = barH > 26; // label inside if bar tall enough
+                      return (
+                        <div key={i} style={{
+                          display: "flex", flexDirection: "column", alignItems: "center",
+                          justifyContent: "flex-end",
+                          gap: 0, minWidth: period === "month" ? 14 : 28, flex: period === "month" ? "0 0 14px" : "1",
+                          height: "100%",
+                        }}>
+                          {/* Value label — above bar (only when bar is short) */}
+                          {!showLabelInside && (
+                            <div style={{ fontSize: 9, color: b.val > 0 ? "#E8A84B" : "transparent", fontWeight: 700, marginBottom: 2, lineHeight: 1 }}>
+                              {b.val > 0 ? `$${b.val.toFixed(0)}` : ""}
+                            </div>
+                          )}
+                          {/* Bar */}
+                          <div style={{
+                            width: "100%", position: "relative",
+                            background: b.val > 0 ? "linear-gradient(0deg,#B8732A,#E8A84B)" : "#1A181C",
+                            borderRadius: "3px 3px 0 0", transition: "height .4s",
+                            height: `${barH}px`,
+                            display: "flex", alignItems: "flex-start", justifyContent: "center",
+                          }}>
+                            {/* Value label inside bar (when bar is tall) */}
+                            {showLabelInside && b.val > 0 && (
+                              <div style={{ fontSize: 9, color: "#fff", fontWeight: 700, marginTop: 4, lineHeight: 1 }}>
+                                ${b.val.toFixed(0)}
+                              </div>
+                            )}
+                          </div>
+                          {/* X-axis label */}
+                          <div style={{ fontSize: 9, color: "#444", whiteSpace: "nowrap", marginTop: 3, height: 14 }}>{b.label}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })()}
