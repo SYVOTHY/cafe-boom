@@ -3264,20 +3264,34 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
   const [permModal, setPermModal] = useState(null); // user to edit perms
 
   const saveUser = (data) => {
-    if (!data.username.trim() || !data.password.trim() || !data.name.trim()) {
-      notify("⚠️ សូមបំពេញព័ត៌មានឱ្យបរិបូណ៌!", "error"); return;
+    const isNew = !data.user_id;
+    if (!data.username?.trim() || !data.name?.trim()) {
+      notify("⚠️ សូមបំពេញ ឈ្មោះ និង Username!", "error"); return;
     }
-    if (modal.mode === "add") {
+    if (isNew && !data.password?.trim()) {
+      notify("⚠️ User ថ្មី ត្រូវការ Password!", "error"); return;
+    }
+    if (isNew) {
       const dup = users.find(u => u.username === data.username.trim());
       if (dup) { notify("❌ Username នេះមានរួចហើយ!", "error"); return; }
       setUsers(p => [...p, {
-        ...data, user_id: Math.max(0, ...p.map(u => u.user_id)) + 1,
+        ...data,
+        user_id: Math.max(0, ...p.map(u => u.user_id)) + 1,
         username: data.username.trim(),
         permissions: data.role === "admin" ? {} : { ...DEFAULT_PERMS_TPL, ...(data.permissions || {}) }
       }]);
       notify("✅ បន្ថែម User រួចហើយ!");
     } else {
-      setUsers(p => p.map(u => u.user_id === data.user_id ? { ...data, username: data.username.trim() } : u));
+      setUsers(p => p.map(u => {
+        if (u.user_id !== data.user_id) return u;
+        return {
+          ...u,          // keep old fields (esp. password hash)
+          ...data,
+          username: data.username.trim(),
+          // If password field was left blank, keep old password
+          password: data.password?.trim() ? data.password.trim() : u.password,
+        };
+      }));
       notify("✅ កែប្រែ User រួចហើយ!");
     }
     setModal(null);
@@ -3428,7 +3442,15 @@ function UserForm({ data, user, onSave, onCancel, roles }) {
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ឈ្មោះ​ពេញ" value={v.name||""} onChange={e=>setV({...v,name:e.target.value})} />
       <input className="inp" placeholder="Username" value={v.username||""} onChange={e=>setV({...v,username:e.target.value})} />
-      {!v.user_id && <input className="inp" type="password" placeholder="Password" value={v.password||""} onChange={e=>setV({...v,password:e.target.value})} />}
+      <div>
+        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>
+          {v.user_id ? "Password ថ្មី (ទុកឱ្យទទេ = មិនប្ដូរ)" : "Password *"}
+        </div>
+        <input className="inp" type="password"
+          placeholder={v.user_id ? "ទុកទទេ = រក្សា password ចាស់" : "Password *"}
+          value={v.password||""}
+          onChange={e=>setV({...v,password:e.target.value})} />
+      </div>
       <select className="inp" value={v.role||"staff"} onChange={e=>setV({...v,role:e.target.value})}>
         {roles ? roles.map(r => <option key={r.v} value={r.v}>{r.icon} {r.label}</option>)
                : <><option value="staff">Staff</option><option value="admin">Admin</option></>}
