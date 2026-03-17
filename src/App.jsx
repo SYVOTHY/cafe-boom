@@ -423,22 +423,28 @@ export default function CafeBloom() {
     lowStock: (ingsRaw||[]).filter(i => (i.current_stock||0) <= (i.threshold||0)),
   };
 
-  const NAV = [
-    { id:"pos",       label:"ចំណុចលក់",     emoji:"🛒", page:true },
-    { id:"tables",    label:"តុ",           emoji:"🪑", page:true },
-    { id:"menu",      label:"ម៉ឺនុយ",       emoji:"📋", page:true },
-    { id:"inventory", label:"ស្តុក",        emoji:"📦", page:true },
-    { id:"orders",    label:"ប្រវត្តិ",     emoji:"📜", page:true },
-    { id:"report",    label:"របាយការណ៍",    emoji:"📊", page:true },
-    { id:"finance",   label:"ហិរញ្ញវត្ថុ", emoji:"💰", page:true },
-    { id:"users",     label:"អ្នកប្រើ",    emoji:"👥", page:true, adminOnly:true },
-    { id:"theme",     label:"រចនាប័ទ្ម",   emoji:"🎨", page:true, adminOnly:true },
-  ].filter(n => !n.adminOnly || currentUser.role === "admin");
+  const ALL_NAV = [
+    { id:"pos",       label:"ចំណុចលក់",     emoji:"🛒" },
+    { id:"tables",    label:"តុ",           emoji:"🪑" },
+    { id:"menu",      label:"ម៉ឺនុយ",       emoji:"📋" },
+    { id:"inventory", label:"ស្តុក",        emoji:"📦" },
+    { id:"orders",    label:"ប្រវត្តិ",     emoji:"📜" },
+    { id:"report",    label:"របាយការណ៍",    emoji:"📊" },
+    { id:"finance",   label:"ហិរញ្ញវត្ថុ", emoji:"💰" },
+    { id:"users",     label:"អ្នកប្រើ",    emoji:"👥", adminOnly:true },
+    { id:"theme",     label:"រចនាប័ទ្ម",   emoji:"🎨", adminOnly:true },
+  ];
+  // Filter nav by role + permissions
+  const NAV = ALL_NAV.filter(n => {
+    if (currentUser.role === "admin") return !n.adminOnly || true; // admin sees all
+    if (n.adminOnly) return false; // staff can't see admin-only
+    return canAccess(n.id); // check per-page permission
+  });
 
   const goPage = (id) => { setPage(id); setMenuOpen(false); };
 
   return (
-    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }}>
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }} className="app-root">
       <style>{CSS}</style>
 
       {/* ── Toast ── */}
@@ -612,7 +618,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
   const statusColor = socketOnline ? "#2ECC71" : offline ? "#E74C3C" : "#F39C12";
   const statusLabel = socketOnline ? "Online" : offline ? "Offline" : "Sync…";
   return (
-    <div style={{ background:"var(--bg-header)", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", padding:"6px 16px", gap:12, position:"sticky", top:0, zIndex:200 }}>
+    <div className="topbar-fixed" style={{ background:"var(--bg-header)", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", padding:"6px 16px", gap:12, position:"sticky", top:0, zIndex:200 }}>
       {/* Hamburger button — mobile only */}
       {onHamburger && (
         <button className="hamburger-btn" onClick={onHamburger}
@@ -639,12 +645,12 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
       </div>
       <div style={{ flex:1 }} />
       {/* Status dot */}
-      <div style={{ display:"flex", alignItems:"center", gap:5, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"4px 10px" }}>
+      <div className="topbar-status" style={{ display:"flex", alignItems:"center", gap:5, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"4px 10px" }}>
         <div style={{ width:7, height:7, borderRadius:"50%", background:statusColor, boxShadow:`0 0 6px ${statusColor}` }} />
         <span style={{ fontSize:11, fontWeight:700, color:statusColor }}>{statusLabel}</span>
       </div>
       {/* Clock */}
-      <div style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", fontVariantNumeric:"tabular-nums", minWidth:68, textAlign:"center" }}>{hhmm}</div>
+      <div className="topbar-clock" style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", fontVariantNumeric:"tabular-nums", minWidth:68, textAlign:"center" }}>{hhmm}</div>
       {/* User */}
       <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"5px 12px" }}>
         {currentUser.avatar
@@ -654,7 +660,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
             </div>
         }
         <span style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
-        <span style={{ fontSize:10, color:"var(--text-dim)" }}>({currentUser.role})</span>
+        <span className="topbar-role" style={{ fontSize:10, color:"var(--text-dim)" }}>({currentUser.role})</span>
       </div>
       <button className="btn-sm" onClick={doLogout} style={{ borderRadius:20 }}>ចេញ</button>
     </div>
@@ -3496,7 +3502,7 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
                 </div>
 
                 {/* Actions */}
-                <div style={{ display: "flex", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button onClick={() => toggleActive(u.user_id)}
                     style={{
                       flex: 1, ...btnSmall, fontSize: 11,
@@ -3511,7 +3517,9 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
                       title="កំណត់សិទ្ធ">🛡️</button>
                   )}
                   <button onClick={() => setModal({ mode: "edit", data: { ...u } })} style={{ ...btnSmall, fontSize: 12 }} title="កែប្រែ">✏️</button>
-                  <button onClick={() => setModal({ mode: "reset", data: u })} style={{ ...btnSmall, fontSize: 12, color:"#F39C12", borderColor:"#F39C1233" }} title="Reset Password">🔑</button>
+                  <button onClick={() => setModal({ mode: "reset", data: u })} style={{ ...btnSmall, fontSize: 11, color:"#F39C12", borderColor:"#F39C1233", display:"flex", alignItems:"center", gap:4 }} title="Reset Password">
+                    🔑 <span className="btn-label-mobile" style={{ fontSize:10 }}>Reset PW</span>
+                  </button>
                   <button onClick={() => setModal({ mode: "photo", data: u })} style={{ ...btnSmall, fontSize: 12, color:"#5BA3E0", borderColor:"#5BA3E033" }} title="Upload Photo">🖼️</button>
                   <button onClick={() => setDelConf({ name: u.name, fn: () => delUser(u.user_id) })}
                     style={{ ...btnSmall, color:"#E74C3C", borderColor:"#E74C3C33", fontSize: 12 }} title="លុប">🗑️</button>
@@ -4692,17 +4700,30 @@ const CSS = `
 
   /* Hamburger — hidden on desktop */
   .hamburger-btn { display: none !important; }
+  .topbar-role { display: inline; }
+  .topbar-name { display: inline; }
 
   @media (max-width: 768px) {
     /* Show hamburger, hide desktop nav */
     .hamburger-btn { display: flex !important; }
     .desktop-nav { display: none !important; }
-    /* Nav tab responsive */
-    .nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
+    /* TopBar: hide role badge + name to save space */
+    .topbar-role { display: none !important; }
+    /* Keep TopBar truly sticky on mobile */
+    .app-root { overflow: hidden; }
+    .topbar-fixed {
+      position: sticky !important;
+      top: 0 !important;
+      z-index: 200 !important;
+      -webkit-position: sticky !important;
+    }
   }
   @media (max-width: 640px) {
     .nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
     .nav-label { display: none; }
+    /* Compress TopBar on small screens */
+    .topbar-clock { display: none !important; }
+    .topbar-status { display: none !important; }
   }
   @media (max-width: 480px) {
     .prod-card { padding: 8px !important; }
