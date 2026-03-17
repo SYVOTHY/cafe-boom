@@ -462,7 +462,7 @@ export default function CafeBloom() {
   const goPage = (id) => { setPage(id); setMenuOpen(false); };
 
   return (
-    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }} className="app-root">
+    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }} className={"app-root" + (themeRaw.bgMain && themeRaw.bgMain > "#888" ? " light-mode" : "")}>
       <style>{CSS}</style>
 
       {/* ── Toast ── */}
@@ -854,7 +854,7 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
       {/* LEFT: Menu */}
       <div className="pos-menu" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: "var(--bg-main)" }}>
         {/* Search + Cats */}
-        <div style={{ padding: "12px 14px 8px", background: "var(--bg-card)", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ padding: "12px 14px 8px", background: "var(--bg-card)", borderBottom: "1px solid var(--border-col)" }}>
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ស្វែងរក..."
             style={{
               width: "100%", background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 10,
@@ -893,7 +893,7 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
                     display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48
                   }}>{p.emoji}</div>
                 }
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#E8E3DB", lineHeight: 1.3 }}>{p.product_name}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-main)", lineHeight: 1.3 }}>{p.product_name}</div>
                 <div style={{ fontSize: 13, color: "#E8A84B", fontWeight: 700 }}>{fmt(p.base_price)}</div>
                 <div style={{ fontSize: 10, background: "var(--bg-main)", color: "var(--text-dim)", padding: "2px 8px", borderRadius: 20 }}>{cat?.emoji} {cat?.category_name}</div>
               </button>
@@ -905,13 +905,13 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 
       {/* RIGHT: Cart */}
       <div className={`pos-cart${cartOpen ? " cart-open" : ""}`} style={{
-        background: "var(--bg-card)", borderLeft: "1px solid var(--border)",
+        background: "var(--bg-card)", borderLeft: "1px solid var(--border-col)",
         display: "flex", flexDirection: "column", overflow: "hidden"
       }}>
         {/* Mobile cart header with close btn */}
         <div style={{
           display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: "10px 12px 6px", borderBottom: "1px solid var(--border)"
+          padding: "10px 12px 6px", borderBottom: "1px solid var(--border-col)"
         }}>
           <span style={{ fontWeight: 700, fontSize: 13 }}>🛒 កម្ម៉ង់
             {cart.length > 0 && <span style={{
@@ -929,7 +929,7 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
               }}>✕</button>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", padding: "8px 12px", borderBottom: "1px solid #1A181B" }}>
+        <div style={{ display: "flex", gap: 5, flexWrap: "wrap", padding: "8px 12px", borderBottom: "1px solid var(--border-col)" }}>
           {tables.map(t => (
             <button key={t.table_id} onClick={() => setSelTable(selTable === t.table_id ? null : t.table_id)}
               style={{
@@ -950,13 +950,13 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
             </div>
           )}
           {cart.map(item => (
-            <div key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid #1A181B" }}>
+            <div key={item.key} style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 0", borderBottom: "1px solid var(--border-col)" }}>
               {item.image_url
                 ? <img src={item.image_url} alt={item.product_name} style={{ width: 32, height: 32, borderRadius: 7, objectFit: "cover", flexShrink: 0 }} />
                 : <div style={{ fontSize: 22, flexShrink: 0 }}>{item.emoji}</div>
               }
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#E8E3DB", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.product_name}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.product_name}</div>
                 <div style={{ fontSize: 10, color: "#555" }}>{item.opts.size} · {item.opts.sugar}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -1061,9 +1061,15 @@ function TablesPage({ tables, setTables, orders }) {
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:14 }}>
         {tables.map(t => {
           const isBusy = t.status === "busy";
-          // Find orders for this table
-          const tableOrders = (orders||[]).filter(o => String(o.table) === String(t.table_id) || o.table === t.table_id);
-          const tableTotal = tableOrders.reduce((s,o) => s + (o.total||0) + (o.tax||0), 0);
+          // Only show TODAY's orders for this table (not all history)
+          const todayStr = new Date().toISOString().slice(0, 10);
+          const tableOrders = (orders||[]).filter(o => {
+            const matchTable = String(o.table) === String(t.table_id) || o.table === t.table_id;
+            const orderDate = o.ts ? o.ts.slice(0, 10) : new Date(o.order_id).toISOString().slice(0, 10);
+            const isToday = orderDate === todayStr || o.ts?.includes(todayStr) || String(o.order_id).length === 13 && new Date(o.order_id).toISOString().slice(0,10) === todayStr;
+            return matchTable && isToday;
+          });
+          const tableTotal = isBusy ? tableOrders.reduce((s,o) => s + (o.total||0) + (o.tax||0), 0) : 0;
           return (
             <div key={t.table_id} style={{
               background:"var(--bg-card)",
@@ -1556,7 +1562,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
       )}
 
       {/* ── STICKY HEADER ── */}
-      <div style={{ flexShrink: 0, padding: "16px 14px 0", borderBottom: "1px solid #1A181C", background: "var(--bg-main)" }}>
+      <div style={{ flexShrink: 0, padding: "16px 14px 0", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
         <SectionHeader title="🧂 គ្រប់គ្រងស្តុក" sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} គ្រឿងផ្សំជិតអស់`} />
         <SubTabs tabs={[["stock", "🧂 Ingredients"], ["recipes", "📋 Recipe Mapping"], ["sql", "💾 SQL"], ["auditlog", "🗒️ Audit Log"]]} val={subTab} set={setSubTab} />
         {subTab === "stock" && (
@@ -1697,7 +1703,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
               const pct = Math.min(100, (stock / (thresh * 4 || 1)) * 100);
               return (
                 <div key={i.ingredient_id} style={{
-                  background: "#120F13", border: `1px solid ${col}33`,
+                  background: "var(--bg-card)", border: `1px solid ${col}33`,
                   borderRadius: 12, padding: "12px 14px"
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
@@ -1786,8 +1792,8 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>i.ingredient_id===r.ingredient_id); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
                 const hasMissing = pr.some(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id));
                 return (
-                  <div key={prod.product_id} style={{ background:"#120F13",border:`1px solid ${hasMissing?"#E74C3C33":canMake?"#27AE6033":"#F39C1233"}`,borderRadius:12,marginBottom:10,overflow:"hidden" }}>
-                    <div style={{ background:"#1A171C",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}
+                  <div key={prod.product_id} style={{ background:"var(--bg-card)",border:`1px solid ${hasMissing?"#E74C3C33":canMake?"#27AE6033":"#F39C1233"}`,borderRadius:12,marginBottom:10,overflow:"hidden" }}>
+                    <div style={{ background:"var(--bg-header)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}
                       onClick={()=>setCollapsed(p=>({...p,[prod.product_id]:!isCollapsed}))}>
                       <span style={{ fontSize:20 }}>{prod.emoji||"🍽️"}</span>
                       <span style={{ fontWeight:700,flex:1 }}>{prod.product_name}</span>
@@ -1872,7 +1878,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         })()}
 
         {subTab === "sql" && (
-          <div style={{ background: "#0E0C0F", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
+          <div style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
@@ -2108,7 +2114,7 @@ function OrdersPage({ orders, ings }) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
       {/* ── STICKY HEADER ── */}
-      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid #1A181C", background: "var(--bg-main)" }}>
+      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
         <SectionHeader title="📋 ប្រវត្តិការបញ្ជាទិញ" sub={`${filtered.length} / ${orders.length} ការបញ្ជាទិញ`} />
 
         {/* Filter tabs + date picker row */}
@@ -2154,7 +2160,7 @@ function OrdersPage({ orders, ings }) {
               ["📊", "មធ្យម/Order", fmt(filtered.length ? totalRev / filtered.length : 0), "#9B59B6"],
             ].map(([ic, lb, val, col]) => (
               <div key={lb} style={{
-                flex: 1, background: "#120F13", border: `1px solid ${col}22`,
+                flex: 1, background: "var(--bg-card)", border: `1px solid ${col}22`,
                 borderRadius: 10, padding: "8px 12px", minWidth: 0
               }}>
                 <div style={{ fontSize: 11, color: "#555", marginBottom: 2 }}>{ic} {lb}</div>
@@ -2498,7 +2504,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
 
       {/* ── STICKY HEADER ── */}
-      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid #1A181C", background: "var(--bg-main)" }}>
+      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
         <SectionHeader title="📊 របាយការណ៍លក់" sub={periodLabel} />
 
         {/* Multi-Branch Toggle */}
@@ -2622,7 +2628,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
             ["📊", "មធ្យម/Order", fmt(avgOrder), "#9B59B6"],
           ].map(([ic, lb, val, col]) => (
             <div key={lb} style={{
-              background: "#120F13", border: `1px solid ${col}33`, borderRadius: 14, padding: "14px 12px",
+              background: "var(--bg-card)", border: `1px solid ${col}33`, borderRadius: 14, padding: "14px 12px",
               display: "flex", flexDirection: "column", gap: 4
             }}>
               <div style={{ fontSize: 22 }}>{ic}</div>
@@ -2634,7 +2640,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
 
         {/* ── Chart: by hour/day/month ── */}
         {filtered.length > 0 && (
-          <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 18, marginBottom: 18 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 18, marginBottom: 18 }}>
             <div style={{ fontWeight: 700, marginBottom: 14, fontSize: 13 }}>
               {period === "day" ? "⏰ ចំណូលតាមម៉ោង" : period === "month" ? "📅 ចំណូលតាមថ្ងៃ" : "📆 ចំណូលតាមខែ"}
             </div>
@@ -2704,7 +2710,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
           {/* Top products */}
-          <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 16 }}>
             <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>🏆 មុខម្ហូបលក់ដាច់</div>
             {top.length === 0
               ? <div style={{ color: "#444", fontSize: 12 }}>មិនទាន់មានទិន្នន័យ</div>
@@ -2729,7 +2735,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
           </div>
 
           {/* Payment breakdown */}
-          <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16 }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 16 }}>
             <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>💳 វិធីទូទាត់</div>
             {filtered.length === 0
               ? <div style={{ color: "#444", fontSize: 12 }}>មិនទាន់មានទិន្នន័យ</div>
@@ -2755,14 +2761,14 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
 
           {/* Order list for day view */}
           {period === "day" && (
-            <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
               <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>🧾 តារាង Order ថ្ងៃនេះ ({filtered.length})</div>
               {filtered.length === 0
                 ? <div style={{ color: "#444", fontSize: 12 }}>គ្មានការលក់ថ្ងៃនេះ</div>
                 : filtered.slice().reverse().map(o => (
                   <div key={o.order_id} style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "8px 0", borderBottom: "1px solid #1A181B", gap: 8
+                    padding: "8px 0", borderBottom: "1px solid var(--border-col)", gap: 8
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 11, color: "#777", fontFamily: "'DM Mono',monospace" }}>
@@ -2782,7 +2788,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
 
           {/* Monthly breakdown table */}
           {period === "month" && filtered.length > 0 && (
-            <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
               <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>📋 សង្ខេបប្រចាំថ្ងៃ</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 1, fontSize: 11 }}>
                 {["ថ្ងៃ", "Orders", "Items", "ចំណូល"].map(h => (
@@ -2808,7 +2814,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
 
           {/* Yearly breakdown table */}
           {period === "year" && filtered.length > 0 && (
-            <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+            <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
               <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13 }}>📋 សង្ខេបប្រចាំខែ</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 1, fontSize: 11 }}>
                 {["ខែ", "Orders", "Items", "ចំណូល"].map(h => (
@@ -2846,7 +2852,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
             if (entries.length === 0) return null;
             const maxRev = entries[0][1].revenue || 1;
             return (
-              <div style={{ background:"#120F13", border:"1px solid #1E1B1F", borderRadius:14, padding:16, gridColumn:"1/-1" }}>
+              <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, gridColumn:"1/-1" }}>
                 <div style={{ fontWeight:700, marginBottom:14, fontSize:13, display:"flex", alignItems:"center", gap:8 }}>
                   👤 ការលក់តាម User
                   <span style={{ fontSize:11, color:"#555", fontWeight:400 }}>({entries.length} នាក់)</span>
@@ -2906,7 +2912,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
           })()}
 
           {/* Stock health + Usage */}
-          <div style={{ background: "#120F13", border: "1px solid #1E1B1F", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
 
             {/* ── Stock Status ── */}
             <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13, color: lowStock.length ? "#E74C3C" : "#aaa" }}>⚠️ ស្ថានភាពស្តុក</div>
@@ -2953,7 +2959,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin }) {
                       const pctUsed = stock > 0 ? Math.min(100, (used / (stock + used)) * 100) : 100;
                       const col = pctUsed > 70 ? "#E74C3C" : pctUsed > 40 ? "#F39C12" : "#5BA3E0";
                       return (
-                        <div key={i.ingredient_id} style={{ background: "#0E0C0F", border: "1px solid #1A181C", borderRadius: 10, padding: "10px 12px" }}>
+                        <div key={i.ingredient_id} style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 10, padding: "10px 12px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                             <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-main)" }}>{i.ingredient_name}</span>
                             <span style={{ fontSize: 12, color: col, fontFamily: "'DM Mono',monospace", fontWeight: 700 }}>
@@ -3207,7 +3213,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin }) {
               ["💸","ចំណាយ",  totalExp, "#E74C3C"],
               ["📈","ចំណេញ",  profit,   profitColor],
             ].map(([ic,lb,val,col]) => (
-              <div key={lb} style={{ background:"#120F13", border:"1px solid "+col+"33", borderRadius:14, padding:"14px 10px", textAlign:"center" }}>
+              <div key={lb} style={{ background:"var(--bg-card)", border:"1px solid "+col+"33", borderRadius:14, padding:"14px 10px", textAlign:"center" }}>
                 <div style={{ fontSize:24 }}>{ic}</div>
                 <div style={{ fontSize:18, fontWeight:700, color:col, marginTop:4 }}>{fmt(val)}</div>
                 <div style={{ fontSize:11, color:"#555", marginTop:2 }}>{lb}</div>
@@ -3217,7 +3223,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin }) {
 
           {/* Revenue vs Expense bar */}
           {(revenue > 0 || totalExp > 0) && (
-            <div style={{ background:"#120F13", border:"1px solid #1E1B1F", borderRadius:14, padding:16, marginBottom:16 }}>
+            <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
               <div style={{ fontSize:12, color:"#666", marginBottom:8, fontWeight:600 }}>ចំណូល vs ចំណាយ</div>
               <div style={{ height:14, background:"#1A181C", borderRadius:7, overflow:"hidden", display:"flex" }}>
                 {totalExp > 0 && (
@@ -3235,7 +3241,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin }) {
           )}
 
           {/* Expense Breakdown */}
-          <div style={{ background:"#120F13", border:"1px solid #1E1B1F", borderRadius:14, padding:16, marginBottom:16 }}>
+          <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
               <div style={{ fontWeight:700, fontSize:14 }}>📋 បញ្ជីចំណាយ</div>
               {isAdmin && (
@@ -3375,7 +3381,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin }) {
 
           {/* Monthly History */}
           {monthlyRecords.length > 0 && (
-            <div style={{ background:"#120F13", border:"1px solid #1E1B1F", borderRadius:14, padding:16 }}>
+            <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16 }}>
               <div style={{ fontWeight:700, fontSize:13, marginBottom:10 }}>📅 ប្រវត្តិប្រចាំខែ</div>
               <div style={{ overflowX:"auto" }}>
                 <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
@@ -3396,10 +3402,10 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin }) {
                       return (
                         <tr key={e.month} onClick={() => setSelMonth(e.month)}
                           style={{ cursor:"pointer", background: e.month===selMonth ? "#1A2A1A" : "transparent" }}>
-                          <td style={{ padding:"7px 10px", borderBottom:"1px solid #1A181C", color:"#aaa" }}>{MON_KH[parseInt(em)-1]} {ey}</td>
-                          <td style={{ padding:"7px 10px", borderBottom:"1px solid #1A181C", color:"#E8A84B", fontFamily:"'DM Mono',monospace" }}>{fmt(rev)}</td>
-                          <td style={{ padding:"7px 10px", borderBottom:"1px solid #1A181C", color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(exp)}</td>
-                          <td style={{ padding:"7px 10px", borderBottom:"1px solid #1A181C", fontWeight:700, fontFamily:"'DM Mono',monospace",
+                          <td style={{ padding:"7px 10px", borderBottom:"1px solid var(--border-col)", color:"#aaa" }}>{MON_KH[parseInt(em)-1]} {ey}</td>
+                          <td style={{ padding:"7px 10px", borderBottom:"1px solid var(--border-col)", color:"#E8A84B", fontFamily:"'DM Mono',monospace" }}>{fmt(rev)}</td>
+                          <td style={{ padding:"7px 10px", borderBottom:"1px solid var(--border-col)", color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(exp)}</td>
+                          <td style={{ padding:"7px 10px", borderBottom:"1px solid var(--border-col)", fontWeight:700, fontFamily:"'DM Mono',monospace",
                             color: pnl>=0 ? "#27AE60" : "#E74C3C" }}>{pnl>=0?"+":""}{fmt(pnl)}</td>
                         </tr>
                       );
@@ -3535,7 +3541,7 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
       )}
 
       {/* Sticky header */}
-      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid #1A181C", background: "var(--bg-main)" }}>
+      <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
         <SectionHeader title="👥 គ្រប់គ្រង Users" sub={`${users.length} users · ${users.filter(u => u.active).length} active`} />
         <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8 }}>
           <button onClick={() => setModal({ mode: "add", data: { username: "", password: "", name: "", role: "staff", active: true, permissions: { ...DEFAULT_PERMS_TPL } } })}
@@ -3554,7 +3560,7 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
             const allowedPages = Object.entries(perms).filter(([, v]) => v).map(([k]) => k);
             return (
               <div key={u.user_id} style={{
-                background: "#120F13",
+                background: "var(--bg-card)",
                 border: `1px solid ${u.active ? "#1E1B1F" : "#2A1A1A"}`, borderRadius: 14, padding: "14px 16px",
                 opacity: u.active ? 1 : 0.6
               }}>
@@ -4148,7 +4154,7 @@ function CustomerDisplay({ cart, cartTotal, cartTax, payMethod, selTable, onClos
     }}>
       {/* Header */}
       <div style={{
-        background: "var(--bg-header)", borderBottom: "1px solid var(--border)",
+        background: "var(--bg-header)", borderBottom: "1px solid var(--border-col)",
         padding: "16px 24px", display: "flex", justifyContent: "space-between", alignItems: "center"
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -4179,8 +4185,8 @@ function CustomerDisplay({ cart, cartTotal, cartTax, payMethod, selTable, onClos
           </div>
 
           <div style={{
-            background: "#120F13", borderRadius: 16, overflow: "hidden", marginBottom: 20,
-            border: "1px solid #1E1B1F"
+            background: "var(--bg-card)", borderRadius: 16, overflow: "hidden", marginBottom: 20,
+            border: "1px solid var(--border-col)"
           }}>
             {cart.map((item, idx) => (
               <div key={item.key} style={{
@@ -4190,7 +4196,7 @@ function CustomerDisplay({ cart, cartTotal, cartTax, payMethod, selTable, onClos
                 {item.image_url
                   ? <img src={item.image_url} alt="" style={{ width: 48, height: 48, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
                   : <div style={{
-                    width: 48, height: 48, borderRadius: 10, background: "#1E1B20",
+                    width: 48, height: 48, borderRadius: 10, background: "var(--bg-main)",
                     display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0
                   }}>{item.emoji}</div>
                 }
@@ -4210,8 +4216,8 @@ function CustomerDisplay({ cart, cartTotal, cartTax, payMethod, selTable, onClos
 
           {/* Totals */}
           <div style={{
-            background: "#120F13", borderRadius: 16, padding: "18px 20px",
-            border: "1px solid #1E1B1F", marginBottom: 24
+            background: "var(--bg-card)", borderRadius: 16, padding: "18px 20px",
+            border: "1px solid var(--border-col)", marginBottom: 24
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#666", marginBottom: 8 }}>
               <span>សរុប</span><span>{fmt(cartTotal)}</span>
@@ -4228,7 +4234,7 @@ function CustomerDisplay({ cart, cartTotal, cartTax, payMethod, selTable, onClos
 
           {/* Payment method badge */}
           <div style={{
-            background: "#120F13", borderRadius: 16, padding: "16px 20px",
+            background: "var(--bg-card)", borderRadius: 16, padding: "16px 20px",
             border: `1px solid ${m.color}44`, marginBottom: 24,
             display: "flex", alignItems: "center", gap: 12
           }}>
@@ -4577,7 +4583,7 @@ function SqlBlock({ code }) {
 
 function SubTabs({ tabs, val, set }) {
   return (
-    <div style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: "1px solid #1A181C", paddingBottom: 0 }}>
+    <div style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: "1px solid var(--border-col)", paddingBottom: 0 }}>
       {tabs.map(([v, lb]) => (
         <button key={v} onClick={() => set(v)} style={{
           padding: "9px 16px", border: "none", background: "transparent", cursor: "pointer",
@@ -4596,7 +4602,7 @@ function TableWrap({ headers, children }) {
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
-          <tr style={{ background: "#1A171C" }}>
+          <tr style={{ background: "var(--bg-header)" }}>
             {headers.map(h => (
               <th key={h} style={{
                 padding: "10px 14px", textAlign: "left", color: "#E8A84B",
@@ -4671,7 +4677,7 @@ function OptRow({ label, items, value, onChange, color, slider }) {
 function Td({ children, mono, dim, bold, gold, style = {} }) {
   return (
     <td style={{
-      padding: "10px 14px", borderBottom: "1px solid #1A181C",
+      padding: "10px 14px", borderBottom: "1px solid var(--border-col)",
       fontFamily: mono ? "'DM Mono',monospace" : "inherit",
       color: dim ? "#555" : gold ? "#E8A84B" : "inherit",
       fontWeight: bold ? 600 : "normal", ...style
@@ -4840,6 +4846,37 @@ const CSS = `
   @media print {
     .no-print { display: none !important; }
     body { background: #fff !important; color: #000 !important; }
+  }
+
+  /* ── Light Mode Global Overrides ── */
+  /* When bg-main is light, override hardcoded dark element colors */
+  .light-mode .inp {
+    background: #fff !important;
+    border-color: #DDD8D0 !important;
+    color: #1A1510 !important;
+  }
+  .light-mode .btn-sm {
+    background: #fff !important;
+    border-color: #DDD8D0 !important;
+    color: #555 !important;
+  }
+  /* Cards with hardcoded dark backgrounds */
+  .light-mode [style*="#120F13"],
+  .light-mode [style*="120F13"] {
+    background: #fff !important;
+  }
+  /* Nav tab bar */
+  .light-mode .nav-tab-bar {
+    border-bottom-color: #DDD8D0 !important;
+  }
+  /* POS cart */
+  .light-mode .pos-cart {
+    background: #FFFFFF !important;
+    border-left-color: #DDD8D0 !important;
+  }
+  /* Product cards text */
+  .light-mode .prod-card {
+    color: #1A1510 !important;
   }
 
   /* ── POS Layout (from old version) ── */
