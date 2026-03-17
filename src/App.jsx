@@ -758,23 +758,25 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
         <span style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
 
       </div>
-      {/* 🔐 Reset own password */}
+      {/* 🔐 Reset own password — always visible, inside topbar */}
       <button
         onClick={onSelfReset}
         title="ផ្លាស់ Password"
-        style={{ background:"transparent", border:"1px solid #2A2730", borderRadius:20, padding:"5px 10px", cursor:"pointer", fontSize:13, color:"#888" }}>
-        🔐
+        style={{ background:"rgba(255,255,255,.06)", border:"1px solid #2A2730", borderRadius:20,
+          padding:"5px 12px", cursor:"pointer", fontSize:12, color:"#aaa", display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
+        🔐 <span style={{fontSize:11}}>Password</span>
       </button>
       {/* 🗑️ Clear data — admin only */}
       {isAdmin && (
         <button
           onClick={onClearData}
           title="លុប Data លក់"
-          style={{ background:"transparent", border:"1px solid #3a1a1a", borderRadius:20, padding:"5px 10px", cursor:"pointer", fontSize:13, color:"#E74C3C" }}>
-          🗑️
+          style={{ background:"rgba(231,76,60,.08)", border:"1px solid #3a1a1a", borderRadius:20,
+            padding:"5px 12px", cursor:"pointer", fontSize:12, color:"#E74C3C", display:"flex", alignItems:"center", gap:5, flexShrink:0 }}>
+          🗑️ <span style={{fontSize:11}}>Clear</span>
         </button>
       )}
-      <button className="btn-sm" onClick={doLogout} style={{ borderRadius:20 }}>ចេញ</button>
+      <button className="btn-sm" onClick={doLogout} style={{ borderRadius:20, flexShrink:0 }}>ចេញ</button>
     </div>
   );
 }
@@ -3121,15 +3123,50 @@ const CAT_EMOJIS = ["💰","⚡","🏛️","🏠","🧴","📦","🚗","💊","�
 
 function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId }) {
   const MON_KH = ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
-  const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0,7));
-  const [editMode, setEditMode] = useState(false);  // edit amounts
-  const [catMode,  setCatMode]  = useState(false);  // manage categories
-  const [draft,    setDraft]    = useState({});
-  const [newCat,   setNewCat]   = useState({ label:"", color:"#E8A84B", emoji:"📦" });
-  const [editCatId, setEditCatId] = useState(null);
+  const [selMonth,   setSelMonth]   = useState(() => new Date().toISOString().slice(0,7));
+  const [editMode,   setEditMode]   = useState(false);
+  const [catMode,    setCatMode]    = useState(false);
+  const [draft,      setDraft]      = useState({});
+  const [newCat,     setNewCat]     = useState({ label:"", color:"#E8A84B", emoji:"📦" });
+  const [editCatId,  setEditCatId]  = useState(null);
+  // Admin: branch selector + all-orders cache
+  const [selBranch,  setSelBranch]  = useState("current"); // "current" | branch_id
+  const [branches,   setBranches]   = useState([]);
+  const [allOrders,  setAllOrders]  = useState(null); // null = not loaded yet
+  const [loadingAll, setLoadingAll] = useState(false);
 
-  const [y, m]     = selMonth.split("-");
+  // Load branches + all-orders when admin switches away from "current"
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (branches.length === 0) {
+      const token = localStorage.getItem("pos_token");
+      const hdr = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
+      fetch(`${API}/api/branches`, { headers:hdr })
+        .then(r=>r.json()).then(d=>setBranches(Array.isArray(d)?d:[])).catch(()=>{});
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin || selBranch === "current") return;
+    if (allOrders !== null) return; // already loaded
+    setLoadingAll(true);
+    const token = localStorage.getItem("pos_token");
+    const hdr = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
+    fetch(`${API}/api/all-orders`, { headers:hdr })
+      .then(r=>r.json()).then(d=>{ setAllOrders(Array.isArray(d)?d:[]); setLoadingAll(false); })
+      .catch(()=>setLoadingAll(false));
+  }, [isAdmin, selBranch, allOrders]);
+
+  const [y, m] = selMonth.split("-");
   const monthLabel = MON_KH[parseInt(m)-1] + " " + y;
+
+  // Resolve which orders to use for revenue
+  const sourceOrders = (() => {
+    if (!isAdmin || selBranch === "current") return orders || [];
+    if (allOrders === null) return [];
+    if (selBranch === "all") return allOrders;
+    return allOrders.filter(o => o.branch_id === selBranch);
+  })();
 
   // Load expense_cats from array meta entry
   const expCats = (() => {
@@ -3138,10 +3175,10 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
     return (meta && meta._cats && meta._cats.length > 0) ? meta._cats : DEFAULT_EXPENSE_CATS;
   })();
 
-  const monthOrders = (orders||[]).filter(o => {
+  const monthOrders = sourceOrders.filter(o => {
     try { return new Date(o.order_id).toISOString().slice(0,7) === selMonth; } catch { return false; }
   });
-  const revenue  = monthOrders.reduce((s,o) => s + o.total + o.tax, 0);
+  const revenue = monthOrders.reduce((s,o) => s + o.total + o.tax, 0);
 
   // expenses is array of monthly records + _cats meta
   const monthlyRecords = Array.isArray(expenses) ? expenses.filter(e => e && e.month) : [];
@@ -3151,7 +3188,8 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
   const profit   = revenue - totalExp;
   const profitColor = profit > 0 ? "#27AE60" : profit < 0 ? "#E74C3C" : "#888";
 
-  const orderMonths = [...new Set((orders||[]).map(o => {
+  // orderMonths uses sourceOrders so dropdown reflects selected branch
+  const orderMonths = [...new Set((sourceOrders||[]).map(o => {
     try { return new Date(o.order_id).toISOString().slice(0,7); } catch { return null; }
   }).filter(Boolean))].sort().reverse();
   if (!orderMonths.includes(selMonth)) orderMonths.unshift(selMonth);
@@ -3238,7 +3276,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
     }).join("");
     const histRows = monthlyRecords.slice(0,12).map(e => {
       const parts = e.month.split("-"); const ey=parts[0]; const em=parts[1];
-      const rev2 = (orders||[]).filter(o => { try { return new Date(o.order_id).toISOString().slice(0,7)===e.month; } catch { return false; } }).reduce((s,o) => s+o.total+o.tax, 0);
+      const rev2 = (sourceOrders||[]).filter(o => { try { return new Date(o.order_id).toISOString().slice(0,7)===e.month; } catch { return false; } }).reduce((s,o) => s+o.total+o.tax, 0);
       const exp2 = expCats.reduce((s,c) => s+Number((e.items||{})[c.id]||0), 0);
       const pnl2 = rev2-exp2;
       return "<tr"+(e.month===selMonth?" style='background:#fff7f0'":'')+">"
@@ -3290,10 +3328,45 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
     <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
 
       {/* Sticky Header */}
-      <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid #E8A84B44", background:"#E8A84B44" }}>
-        <div style={{ fontWeight:700, fontSize:18, marginBottom:8 }}>💼 ហិរញ្ញវត្ថុប្រចាំខែ</div>
+      <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid #E8A84B44", background:"linear-gradient(135deg,#1a1208,#120f05)" }}>
+        <div style={{ fontWeight:700, fontSize:18, marginBottom:10, color:"var(--accent)" }}>💼 ហិរញ្ញវត្ថុប្រចាំខែ</div>
+
+        {/* Row 1: Branch selector (admin only) */}
+        {isAdmin && (
+          <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
+            <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>🏪 សាខា:</span>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              <button onClick={()=>{ setSelBranch("current"); setEditMode(false); setCatMode(false); }}
+                style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
+                  fontSize:12, fontWeight:700,
+                  background: selBranch==="current" ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
+                  color: selBranch==="current" ? "#fff" : "#666" }}>
+                🏪 សាខាខ្ញុំ
+              </button>
+              {branches.filter(b=>b.active).map(b => (
+                <button key={b.branch_id}
+                  onClick={()=>{ setSelBranch(b.branch_id); setEditMode(false); setCatMode(false); }}
+                  style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    fontSize:12, fontWeight:700,
+                    background: selBranch===b.branch_id ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
+                    color: selBranch===b.branch_id ? "#fff" : "#666" }}>
+                  {b.branch_name}
+                </button>
+              ))}
+              <button onClick={()=>{ setSelBranch("all"); setEditMode(false); setCatMode(false); }}
+                style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
+                  fontSize:12, fontWeight:700,
+                  background: selBranch==="all" ? "linear-gradient(135deg,#1A3A5A,#5BA3E0)" : "var(--bg-card)",
+                  color: selBranch==="all" ? "#fff" : "#666" }}>
+                🌐 ទាំងអស់
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Row 2: Month selector + print */}
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:12, color:"#ffffff" }}>📆 ខែ:</span>
+          <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📆 ខែ:</span>
           <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
             style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
             {orderMonths.map(mo => {
@@ -3301,7 +3374,14 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
               return <option key={mo} value={mo}>{MON_KH[parseInt(om)-1]} {oy}</option>;
             })}
           </select>
-          <button onClick={doPrint} style={{ ...btnSmall, color:"#ffffff", borderColor:"#E8A84B44", fontSize:12, padding:"6px 14px" }}>
+          {/* Branch label badge */}
+          {isAdmin && selBranch !== "current" && (
+            <span style={{ fontSize:11, padding:"3px 10px", borderRadius:12, background:"#E8A84B22", color:"var(--accent)", fontWeight:700, border:"1px solid #E8A84B33" }}>
+              {selBranch === "all" ? "🌐 ទាំងអស់" : (branches.find(b=>b.branch_id===selBranch)?.branch_name || selBranch)}
+            </span>
+          )}
+          {loadingAll && <span style={{ fontSize:11, color:"#888" }}>⏳ កំពុងទាញ...</span>}
+          <button onClick={doPrint} style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B44", fontSize:12, padding:"6px 14px", marginLeft:"auto" }}>
             🖨️ Print / PDF
           </button>
         </div>
