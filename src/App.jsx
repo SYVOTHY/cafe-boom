@@ -391,6 +391,14 @@ export default function CafeBloom() {
     r.setProperty("--text-main",  t.textMain);
     r.setProperty("--text-dim",   t.textDim);
     r.setProperty("--border-col", t.borderCol);
+    // Derived tokens — button text on accent bg, input bg
+    r.setProperty("--border",     t.borderCol);
+    r.setProperty("--bg-input",   t.bgCard);
+    // Auto text-on-accent: light accent → dark text, dark accent → white text
+    const accentHex = (t.accent||"#E8A84B").replace("#","");
+    const ar=parseInt(accentHex.slice(0,2),16), ag=parseInt(accentHex.slice(2,4),16), ab=parseInt(accentHex.slice(4,6),16);
+    const accentLum = (0.299*ar + 0.587*ag + 0.114*ab) / 255;
+    r.setProperty("--accent-text", accentLum > 0.6 ? "#1A1510" : "#FFFFFF");
     document.body.style.background = t.bgMain;
     document.body.style.color      = t.textMain;
   }, [themeRaw]);
@@ -776,18 +784,19 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
       {/* Clock */}
       <div className="topbar-clock" style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", fontVariantNumeric:"tabular-nums", minWidth:68, textAlign:"center" }}>{hhmm}</div>
       {/* User */}
-      <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"5px 12px" }}>
+      <div className="topbar-user-pill" style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"5px 12px" }}>
         {currentUser.avatar
           ? <img src={currentUser.avatar} alt={currentUser.name} style={{ width:26, height:26, borderRadius:"50%", objectFit:"cover" }} />
           : <div style={{ width:26, height:26, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:"#1a0f00" }}>
               {currentUser.name?.[0]?.toUpperCase() || "U"}
             </div>
         }
-        <span style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
+        <span className="topbar-username" style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
 
       </div>
       {/* 🔐 Reset own password — always visible, inside topbar */}
       <button
+        className="topbar-hide-mobile"
         onClick={onSelfReset}
         title="ផ្លាស់ Password"
         style={{ background:"rgba(255,255,255,.06)", border:"1px solid #2A2730", borderRadius:20,
@@ -797,6 +806,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
       {/* 🗑️ Clear data — admin only */}
       {isAdmin && (
         <button
+          className="topbar-hide-mobile"
           onClick={onClearData}
           title="លុប Data លក់"
           style={{ background:"rgba(231,76,60,.08)", border:"1px solid #3a1a1a", borderRadius:20,
@@ -804,7 +814,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
           🗑️ <span style={{fontSize:11}}>Clear</span>
         </button>
       )}
-      <button className="btn-sm" onClick={doLogout} style={{ borderRadius:20, flexShrink:0 }}>ចេញ</button>
+      <button className="btn-sm topbar-hide-mobile" onClick={doLogout} style={{ borderRadius:20, flexShrink:0 }}>ចេញ</button>
     </div>
   );
 }
@@ -3717,14 +3727,34 @@ function ExpenseTxnModal({ data, expCats, branchId, branches, isAdmin, selMonth,
 //  THEME PAGE  (Admin only)
 // ═══════════════════════════════════════════════════════════════════
 const THEME_PRESETS = [
-  { name: "☕ Cafe Classic", bgMain: "#09080A", bgCard: "#120F13", bgHeader: "#0E0C0F", accent: "#E8A84B", accentDark: "#B8732A", textMain: "#EDE8E1", textDim: "#666666", borderCol: "#1E1B1F" },
-  { name: "🌙 Midnight Blue", bgMain: "#060B14", bgCard: "#0D1420", bgHeader: "#080E1A", accent: "#5BA3E0", accentDark: "#2A6FA8", textMain: "#E0EDFB", textDim: "#445566", borderCol: "#131E2E" },
-  { name: "🌲 Forest Green", bgMain: "#060D08", bgCard: "#0D160F", bgHeader: "#080F0A", accent: "#4CAF7D", accentDark: "#2E7D52", textMain: "#E0F0E5", textDim: "#3A5544", borderCol: "#111E14" },
-  { name: "🍷 Deep Wine", bgMain: "#0D060A", bgCard: "#180C12", bgHeader: "#10070D", accent: "#C0527A", accentDark: "#8B2A4A", textMain: "#F0E0E8", textDim: "#664455", borderCol: "#1E1018" },
-  { name: "🌅 Sunset Orange", bgMain: "#0D0806", bgCard: "#1A100A", bgHeader: "#120A06", accent: "#E87A3A", accentDark: "#B84A1A", textMain: "#FAE8DC", textDim: "#664433", borderCol: "#201208" },
-  { name: "🪐 Galaxy Purple", bgMain: "#08060D", bgCard: "#100D18", bgHeader: "#0A0810", accent: "#9B6FE8", accentDark: "#6A3FB8", textMain: "#EAE0FA", textDim: "#553377", borderCol: "#16101E" },
-  { name: "🌊 Ocean Teal", bgMain: "#050D0D", bgCard: "#0A1818", bgHeader: "#07100F", accent: "#3ABFBF", accentDark: "#1A8A8A", textMain: "#DCFAFA", textDim: "#336655", borderCol: "#0F1E1E" },
-  { name: "☀️ Light Mode", bgMain: "#F5F2EE", bgCard: "#FFFFFF", bgHeader: "#EDE8E1", accent: "#B8732A", accentDark: "#8B5510", textMain: "#1A1510", textDim: "#888880", borderCol: "#DDD8D0" },
+  // ── Original 8 ─────────────────────────────────────────────────
+  { name: "☕ Cafe Classic",    bgMain: "#09080A", bgCard: "#120F13", bgHeader: "#0E0C0F", accent: "#E8A84B", accentDark: "#B8732A", textMain: "#EDE8E1", textDim: "#666666", borderCol: "#1E1B1F" },
+  { name: "🌙 Midnight Blue",  bgMain: "#060B14", bgCard: "#0D1420", bgHeader: "#080E1A", accent: "#5BA3E0", accentDark: "#2A6FA8", textMain: "#E0EDFB", textDim: "#445566", borderCol: "#131E2E" },
+  { name: "🌲 Forest Green",   bgMain: "#060D08", bgCard: "#0D160F", bgHeader: "#080F0A", accent: "#4CAF7D", accentDark: "#2E7D52", textMain: "#E0F0E5", textDim: "#3A5544", borderCol: "#111E14" },
+  { name: "🍷 Deep Wine",      bgMain: "#0D060A", bgCard: "#180C12", bgHeader: "#10070D", accent: "#C0527A", accentDark: "#8B2A4A", textMain: "#F0E0E8", textDim: "#664455", borderCol: "#1E1018" },
+  { name: "🌅 Sunset Orange",  bgMain: "#0D0806", bgCard: "#1A100A", bgHeader: "#120A06", accent: "#E87A3A", accentDark: "#B84A1A", textMain: "#FAE8DC", textDim: "#664433", borderCol: "#201208" },
+  { name: "🪐 Galaxy Purple",  bgMain: "#08060D", bgCard: "#100D18", bgHeader: "#0A0810", accent: "#9B6FE8", accentDark: "#6A3FB8", textMain: "#EAE0FA", textDim: "#553377", borderCol: "#16101E" },
+  { name: "🌊 Ocean Teal",     bgMain: "#050D0D", bgCard: "#0A1818", bgHeader: "#07100F", accent: "#3ABFBF", accentDark: "#1A8A8A", textMain: "#DCFAFA", textDim: "#336655", borderCol: "#0F1E1E" },
+  { name: "☀️ Light Mode",    bgMain: "#F5F2EE", bgCard: "#FFFFFF", bgHeader: "#EDE8E1", accent: "#B8732A", accentDark: "#8B5510", textMain: "#1A1510", textDim: "#888880", borderCol: "#DDD8D0" },
+  // ── New 6 Beautiful Presets ─────────────────────────────────────
+  { name: "🌸 Cherry Blossom", bgMain: "#0D070B", bgCard: "#1A0D14", bgHeader: "#140A10",
+    accent: "#F472B6", accentDark: "#BE185D",
+    textMain: "#FDE7F3", textDim: "#7A4060", borderCol: "#2A1020" },
+  { name: "🔥 Ember Dark",     bgMain: "#0C0804", bgCard: "#1C1008", bgHeader: "#150C06",
+    accent: "#FB923C", accentDark: "#C2410C",
+    textMain: "#FEF3E8", textDim: "#7C4A20", borderCol: "#2E1A08" },
+  { name: "❄️ Arctic White",   bgMain: "#F0F4F8", bgCard: "#FFFFFF", bgHeader: "#E2EAF0",
+    accent: "#0EA5E9", accentDark: "#0369A1",
+    textMain: "#0F172A", textDim: "#64748B", borderCol: "#CBD5E1" },
+  { name: "🌿 Matcha Latte",   bgMain: "#F5F5F0", bgCard: "#FAFAF5", bgHeader: "#EEEEE8",
+    accent: "#65A30D", accentDark: "#3F6212",
+    textMain: "#1C1A14", textDim: "#78716C", borderCol: "#D6D3C4" },
+  { name: "🌃 Neon City",      bgMain: "#04040C", bgCard: "#080818", bgHeader: "#060610",
+    accent: "#22D3EE", accentDark: "#0891B2",
+    textMain: "#E0F7FF", textDim: "#1E4A5A", borderCol: "#0A1525" },
+  { name: "🍫 Dark Chocolate", bgMain: "#0A0705", bgCard: "#160F09", bgHeader: "#110C07",
+    accent: "#D97706", accentDark: "#92400E",
+    textMain: "#FDF4E7", textDim: "#6B5040", borderCol: "#241A0E" },
 ];
 
 function ExpenseForm({ exp, onSave }) {
@@ -4436,33 +4466,49 @@ function ThemePage({ theme, setTheme, notify }) {
 
       {/* PRESETS */}
       {tab === "presets" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 14 }}>
           {THEME_PRESETS.map(p => {
             const active = isActive(p);
-            const t = { ...p }; delete t.name;
             return (
               <div key={p.name} onClick={() => applyPreset(p)}
                 style={{
-                  background: p.bgCard, border: `2px solid ${active ? p.accent : p.borderCol}`,
-                  borderRadius: 14, padding: 16, cursor: "pointer",
-                  boxShadow: active ? `0 0 0 2px ${p.accent}66` : "none",
-                  transition: "all .2s"
+                  background: p.bgCard,
+                  border: `2px solid ${active ? p.accent : p.borderCol}`,
+                  borderRadius: 16, overflow: "hidden", cursor: "pointer",
+                  boxShadow: active ? `0 0 0 3px ${p.accent}55, 0 8px 24px ${p.accent}22` : "0 2px 8px rgba(0,0,0,.3)",
+                  transition: "all .2s", transform: active ? "scale(1.02)" : "scale(1)"
                 }}>
-                {/* Mini preview */}
-                <div style={{ background: p.bgMain, borderRadius: 8, padding: 10, marginBottom: 10 }}>
-                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <div style={{ height: 6, flex: 2, background: p.accent, borderRadius: 3 }} />
-                    <div style={{ height: 6, flex: 1, background: p.borderCol, borderRadius: 3 }} />
+                {/* ── Mock UI Preview ── */}
+                <div style={{ background: p.bgMain, padding: "10px 10px 8px" }}>
+                  {/* Topbar mock */}
+                  <div style={{ display:"flex", alignItems:"center", gap:5, background:p.bgHeader, borderRadius:6, padding:"5px 8px", marginBottom:6 }}>
+                    <div style={{ width:14, height:14, borderRadius:"50%", background:`linear-gradient(135deg,${p.accent},${p.accentDark})` }} />
+                    <div style={{ flex:1, height:4, background:p.accent, borderRadius:2, opacity:.7 }} />
+                    <div style={{ width:20, height:4, background:p.textDim, borderRadius:2, opacity:.5 }} />
+                    <div style={{ width:10, height:10, borderRadius:"50%", background:p.accent, opacity:.8 }} />
                   </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    {[p.accent, p.accentDark, p.textDim].map((c, i) => (
-                      <div key={i} style={{ flex: 1, height: 24, borderRadius: 6, background: c, opacity: .8 }} />
+                  {/* Product cards mock */}
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:4 }}>
+                    {[0,1,2,3,4,5].map(i => (
+                      <div key={i} style={{ background:p.bgCard, borderRadius:5, padding:"5px 4px", border:`1px solid ${p.borderCol}` }}>
+                        <div style={{ height:18, background:p.bgHeader, borderRadius:3, marginBottom:3 }} />
+                        <div style={{ height:3, background:p.accent, borderRadius:2, width:"70%", marginBottom:2 }} />
+                        <div style={{ height:3, background:p.textDim, borderRadius:2, width:"50%", opacity:.5 }} />
+                      </div>
                     ))}
                   </div>
+                  {/* Button mock */}
+                  <div style={{ marginTop:6, height:16, borderRadius:6, background:`linear-gradient(135deg,${p.accentDark},${p.accent})`, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                    <div style={{ height:4, width:40, background:"rgba(255,255,255,.5)", borderRadius:2 }} />
+                  </div>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: p.textMain }}>{p.name}</span>
-                  {active && <span style={{ fontSize: 16 }}>✅</span>}
+                {/* ── Name row ── */}
+                <div style={{ padding:"10px 12px", display:"flex", justifyContent:"space-between", alignItems:"center", borderTop:`1px solid ${p.borderCol}` }}>
+                  <span style={{ fontSize:12, fontWeight:700, color:p.textMain }}>{p.name}</span>
+                  {active
+                    ? <span style={{ fontSize:12, fontWeight:700, color:p.accent }}>✅ ប្រើ</span>
+                    : <span style={{ fontSize:11, color:p.textDim, padding:"2px 8px", border:`1px solid ${p.borderCol}`, borderRadius:10 }}>ជ្រើស</span>
+                  }
                 </div>
               </div>
             );
@@ -5305,7 +5351,6 @@ const CSS = `
     /* Show hamburger, hide desktop nav */
     .hamburger-btn { display: flex !important; }
     .desktop-nav { display: none !important; }
-    /* TopBar: hide role badge + name to save space */
     .topbar-role { display: none !important; }
     /* Keep TopBar truly sticky on mobile */
     .app-root { overflow: hidden; }
@@ -5314,6 +5359,16 @@ const CSS = `
       top: 0 !important;
       z-index: 200 !important;
       -webkit-position: sticky !important;
+    }
+    /* Hide name text inside user pill — keep only avatar */
+    .topbar-username { display: none !important; }
+    /* Hide password, clear, logout buttons — use hamburger instead */
+    .topbar-hide-mobile { display: none !important; }
+    /* User pill: compact — avatar only */
+    .topbar-user-pill {
+      padding: 4px !important;
+      gap: 0 !important;
+      background: transparent !important;
     }
   }
   @media (max-width: 640px) {
