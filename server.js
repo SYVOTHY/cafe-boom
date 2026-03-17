@@ -625,6 +625,28 @@ async function handler(req, res) {
     return;
   }
 
+  // ── CLEAR ALL ORDERS (admin only) ────────────────────────────────
+  if (req.method === "POST" && url === "/api/clear-all-orders") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin") {
+      send(res, 403, { error:"Admin only" }); return;
+    }
+    const scope = (new URL("http://x"+req.url).searchParams.get("scope")) || "all";
+    const branches = (await loadBranches()).filter(b => b.active);
+    const cleared = [];
+    for (const b of branches) {
+      if (scope !== "all" && scope !== b.branch_id) continue;
+      await saveBranchKey(b.branch_id, "orders", []);
+      await saveBranchKey(b.branch_id, "logs",   []);
+      broadcastBranchUpdate(b.branch_id, "orders", []);
+      broadcastBranchUpdate(b.branch_id, "logs",   []);
+      cleared.push(b.branch_id);
+    }
+    console.log(`[ADMIN] Cleared orders for: ${cleared.join(", ")}`);
+    send(res, 200, { ok:true, cleared });
+    return;
+  }
+
   // ── THERMAL PRINTER ─────────────────────────────────────────────
   if (req.method === "POST" && url.startsWith("/api/print")) {
     try {
