@@ -582,19 +582,47 @@ export default function CafeBloom() {
                 </button>
               ))}
             </div>
-            {/* User info at bottom */}
-            <div style={{ padding:"12px 16px", borderTop:"1px solid var(--border-col)", display:"flex", alignItems:"center", gap:10 }}>
-              {currentUser.avatar
-                ? <img src={currentUser.avatar} alt="" style={{ width:32, height:32, borderRadius:"50%", objectFit:"cover" }} />
-                : <div style={{ width:32, height:32, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700, color:"#1a0f00" }}>
-                    {currentUser.name?.[0]?.toUpperCase()||"U"}
-                  </div>
-              }
-              <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{currentUser.name}</div>
-                <div style={{ fontSize:11, color:"#555" }}>{currentUser.role}</div>
+            {/* User info + actions at bottom */}
+            <div style={{ padding:"12px 16px", borderTop:"1px solid var(--border-col)" }}>
+              {/* User row */}
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
+                {currentUser.avatar
+                  ? <img src={currentUser.avatar} alt="" style={{ width:36, height:36, borderRadius:"50%", objectFit:"cover" }} />
+                  : <div style={{ width:36, height:36, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:16, fontWeight:700, color:"#1a0f00", flexShrink:0 }}>
+                      {currentUser.name?.[0]?.toUpperCase()||"U"}
+                    </div>
+                }
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{currentUser.name}</div>
+                  <div style={{ fontSize:11, color:"#888" }}>@{currentUser.username} · {currentUser.role}</div>
+                </div>
               </div>
-              <button style={{ ...btnGhost, padding:"5px 10px", fontSize:12 }} onClick={doLogout}>ចេញ</button>
+              {/* Action buttons */}
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                <button
+                  onClick={() => { setMenuOpen(false); setShowSelfReset(true); }}
+                  style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
+                    border:"1px solid #2A2730", borderRadius:10, background:"rgba(255,255,255,.04)",
+                    color:"#aaa", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>
+                  🔐 <span>ផ្លាស់ Password</span>
+                </button>
+                {currentUser.role === "admin" && (
+                  <button
+                    onClick={() => { setMenuOpen(false); setShowClearData(true); }}
+                    style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
+                      border:"1px solid #3a1a1a", borderRadius:10, background:"rgba(231,76,60,.06)",
+                      color:"#E74C3C", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>
+                    🗑️ <span>លុប Data លក់</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => { setMenuOpen(false); doLogout(); }}
+                  style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
+                    border:"1px solid #2A2730", borderRadius:10, background:"transparent",
+                    color:"#666", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>
+                  🚪 <span>ចេញ (Logout)</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -3180,13 +3208,58 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
   });
   const revenue = monthOrders.reduce((s,o) => s + o.total + o.tax, 0);
 
-  // expenses is array of monthly records + _cats meta
+  // ── Expense transactions (new system) ─────────────────────────────
+  // Each entry: { id, date, cat_id, desc, amount, branch_id, created_by }
+  const expTxns = Array.isArray(expenses)
+    ? expenses.filter(e => e && e._txn)
+    : [];
+  // Legacy monthly records (old system) — keep for backward compat
   const monthlyRecords = Array.isArray(expenses) ? expenses.filter(e => e && e.month) : [];
-  const monthExp = monthlyRecords.find(e => e.month === selMonth) || { month:selMonth, items:{} };
-  const expItems = monthExp.items || {};
-  const totalExp = expCats.reduce((s,c) => s + (Number(expItems[c.id])||0), 0);
+
+  // Filter transactions for current view (month + branch)
+  const viewBranchId = (!isAdmin || selBranch === "current") ? branchId : (selBranch === "all" ? null : selBranch);
+  const monthTxns = expTxns.filter(t => {
+    const inMonth = t.date && t.date.slice(0,7) === selMonth;
+    const inBranch = viewBranchId === null ? true : (t.branch_id === viewBranchId);
+    return inMonth && inBranch;
+  });
+
+  // Legacy fallback: old monthly items format
+  const monthExp  = monthlyRecords.find(e => e.month === selMonth) || { month:selMonth, items:{} };
+  const expItems  = monthExp.items || {};
+  const legacyExp = expCats.reduce((s,c) => s + (Number(expItems[c.id])||0), 0);
+
+  const totalExp = monthTxns.reduce((s,t) => s + (Number(t.amount)||0), 0) + legacyExp;
   const profit   = revenue - totalExp;
   const profitColor = profit > 0 ? "#27AE60" : profit < 0 ? "#E74C3C" : "#888";
+
+  // ── Add / Edit / Delete expense transaction ────────────────────────
+  const [txnModal, setTxnModal] = useState(null); // null | {mode:"add"|"edit", data:{}}
+  const [txnConfirmDel, setTxnConfirmDel] = useState(null);
+
+  const saveTxn = (data) => {
+    const meta  = Array.isArray(expenses) ? expenses.find(e => e && e._meta) : null;
+    const legacy = Array.isArray(expenses) ? expenses.filter(e => e && (e.month || (!e._meta && !e._txn))) : [];
+    const txns  = expTxns.filter(t => t.id !== data.id);
+    const entry = { ...data, _txn:true, branch_id: data.branch_id || branchId };
+    txns.push(entry);
+    const next = [...legacy, ...txns];
+    if (meta) next.push(meta);
+    setExpenses(next);
+    setTxnModal(null);
+    notify("✅ " + (data._isNew ? "បន្ថែម" : "កែប្រែ") + "ចំណាយ រួចហើយ!");
+  };
+
+  const deleteTxn = (id) => {
+    const meta   = Array.isArray(expenses) ? expenses.find(e => e && e._meta) : null;
+    const legacy = Array.isArray(expenses) ? expenses.filter(e => e && (e.month || (!e._meta && !e._txn))) : [];
+    const txns   = expTxns.filter(t => t.id !== id);
+    const next   = [...legacy, ...txns];
+    if (meta) next.push(meta);
+    setExpenses(next);
+    setTxnConfirmDel(null);
+    notify("🗑️ លុបចំណាយ រួចហើយ!");
+  };
 
   // orderMonths uses sourceOrders so dropdown reflects selected branch
   const orderMonths = [...new Set((sourceOrders||[]).map(o => {
@@ -3425,181 +3498,125 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
             </div>
           )}
 
-          {/* Expense Breakdown */}
-          <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-              <div style={{ fontWeight:700, fontSize:14 }}>📋 បញ្ជីចំណាយ</div>
-              {isAdmin && (
-                <div style={{ display:"flex", gap:6 }}>
-                  {!editMode && !catMode && (
-                    <>
-                      <button onClick={() => setCatMode(true)}
-                        style={{ ...btnSmall, color:"#5BA3E0", borderColor:"#5BA3E044", fontSize:12 }}>⚙️ គ្រប់គ្រង</button>
-                      <button onClick={startEdit}
-                        style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B44", fontSize:12 }}>✏️ កែប្រែ</button>
-                    </>
-                  )}
+          {/* ── Confirm Delete Txn ── */}
+          {txnConfirmDel && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:400, display:"flex", alignItems:"center", justifyContent:"center" }}>
+              <div style={{ background:"var(--bg-card)", border:"1px solid #3a1a1a", borderRadius:16, padding:24, maxWidth:340, width:"90%", textAlign:"center" }}>
+                <div style={{ fontSize:36, marginBottom:8 }}>🗑️</div>
+                <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>លុបចំណាយ?</div>
+                <div style={{ fontSize:13, color:"#888", marginBottom:18 }}>{txnConfirmDel.desc} — {fmt(txnConfirmDel.amount)}</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button style={{ ...btnGhost, flex:1 }} onClick={() => setTxnConfirmDel(null)}>បោះបង់</button>
+                  <button style={{ ...btnRed, flex:1 }} onClick={() => deleteTxn(txnConfirmDel.id)}>🗑️ លុប</button>
                 </div>
-              )}
-            </div>
-
-            {/* ── CAT MANAGEMENT MODE ── */}
-            {catMode && (
-              <div>
-                <div style={{ fontSize:12, color:"#888", marginBottom:12 }}>⚙️ គ្រប់គ្រងប្រភេទចំណាយ</div>
-
-                {/* Existing cats */}
-                {expCats.map(c => (
-                  <div key={c.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, padding:"8px 10px", background:"#0E0C0F", borderRadius:8, border:"1px solid #1A181C" }}>
-                    {editCatId === c.id ? (
-                      <>
-                        <select value={editCatDraft.emoji} onChange={e => setEditCatDraft(p=>({...p,emoji:e.target.value}))}
-                          style={{ ...inSt2, width:60 }}>
-                          {CAT_EMOJIS.map(em => <option key={em} value={em}>{em}</option>)}
-                        </select>
-                        <input value={editCatDraft.label} onChange={e => setEditCatDraft(p=>({...p,label:e.target.value}))}
-                          style={{ ...inSt2, flex:1 }} placeholder="ឈ្មោះ..." />
-                        <select value={editCatDraft.color} onChange={e => setEditCatDraft(p=>({...p,color:e.target.value}))}
-                          style={{ ...inSt2, width:50, background:editCatDraft.color, color:"#fff", border:"none" }}>
-                          {CAT_COLORS.map(cl => <option key={cl} value={cl} style={{background:cl}}>■</option>)}
-                        </select>
-                        <button onClick={saveEditCat} style={{ ...btnSmall, color:"#27AE60", borderColor:"#27AE6044", fontSize:11 }}>✓</button>
-                        <button onClick={() => setEditCatId(null)} style={{ ...btnSmall, fontSize:11 }}>✕</button>
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ width:8, height:8, borderRadius:"50%", background:c.color, flexShrink:0 }} />
-                        <span style={{ flex:1, fontSize:13, color:"#EDE8E1" }}>{c.label}</span>
-                        <button onClick={() => startEditCat(c)}
-                          style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B33", fontSize:11, padding:"3px 10px" }}>✏️</button>
-                        <button onClick={() => delCat(c.id)}
-                          style={{ ...btnSmall, color:"#E74C3C", borderColor:"#E74C3C33", fontSize:11, padding:"3px 10px" }}>🗑️</button>
-                      </>
-                    )}
-                  </div>
-                ))}
-
-                {/* Add new cat */}
-                <div style={{ marginTop:14, padding:"12px", background:"#0E0C0F", borderRadius:10, border:"1px dashed #2A2730" }}>
-                  <div style={{ fontSize:12, color:"#888", marginBottom:8 }}>➕ បន្ថែមមុខចំណាយថ្មី</div>
-                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
-                    <select value={newCat.emoji} onChange={e => setNewCat(p=>({...p,emoji:e.target.value}))}
-                      style={{ ...inSt2, width:60 }}>
-                      {CAT_EMOJIS.map(em => <option key={em} value={em}>{em}</option>)}
-                    </select>
-                    <input value={newCat.label} onChange={e => setNewCat(p=>({...p,label:e.target.value}))}
-                      onKeyDown={e => e.key==="Enter" && addCat()}
-                      style={{ ...inSt2, flex:1, minWidth:120 }} placeholder="ឈ្មោះចំណាយ..." />
-                    <select value={newCat.color} onChange={e => setNewCat(p=>({...p,color:e.target.value}))}
-                      style={{ ...inSt2, width:50, background:newCat.color, color:"#fff", border:"none" }}>
-                      {CAT_COLORS.map(cl => <option key={cl} value={cl} style={{background:cl}}>■</option>)}
-                    </select>
-                    <button onClick={addCat} style={{ ...btnGold, padding:"7px 16px", fontSize:12 }}>+ បន្ថែម</button>
-                  </div>
-                </div>
-
-                <div style={{ display:"flex", justifyContent:"flex-end", marginTop:12 }}>
-                  <button onClick={() => { setCatMode(false); setEditCatId(null); }}
-                    style={{ ...btnGhost }}>✓ រួចរាល់</button>
-                </div>
-              </div>
-            )}
-
-            {/* ── EDIT AMOUNTS MODE ── */}
-            {!catMode && editMode && (
-              <div>
-                {expCats.map(c => (
-                  <div key={c.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
-                    <div style={{ width:170, fontSize:13, color:c.color, fontWeight:600, flexShrink:0 }}>{c.label}</div>
-                    <div style={{ position:"relative", flex:1 }}>
-                      <span style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"#888", fontSize:13 }}>$</span>
-                      <input type="number" min="0" step="0.01" value={draft[c.id]||""}
-                        onChange={e => setDraft(p => ({ ...p, [c.id]:e.target.value }))}
-                        placeholder="0.00"
-                        style={{ ...inputSt, width:"100%", paddingLeft:24, fontSize:13 }} />
-                    </div>
-                  </div>
-                ))}
-                <div style={{ display:"flex", gap:8, marginTop:14 }}>
-                  <button onClick={() => setEditMode(false)} style={{ ...btnGhost, flex:1 }}>បោះបង់</button>
-                  <button onClick={saveEdit}                 style={{ ...btnGold,  flex:1 }}>💾 រក្សាទុក</button>
-                </div>
-              </div>
-            )}
-
-            {/* ── VIEW MODE ── */}
-            {!catMode && !editMode && (
-              <div>
-                {expCats.map(c => {
-                  const val = Number(expItems[c.id])||0;
-                  const pct = totalExp > 0 ? (val/totalExp)*100 : 0;
-                  return (
-                    <div key={c.id} style={{ marginBottom:10 }}>
-                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:3 }}>
-                        <span style={{ fontSize:13, color: val>0 ? c.color : "#444" }}>{c.label}</span>
-                        <span style={{ fontSize:13, fontWeight:700, color: val>0 ? "#EDE8E1" : "#444",
-                          fontFamily:"'DM Mono',monospace" }}>{val>0 ? fmt(val) : "—"}</span>
-                      </div>
-                      {val > 0 && (
-                        <div style={{ height:3, background:"#1A181C", borderRadius:2 }}>
-                          <div style={{ height:"100%", width:pct+"%", background:c.color, borderRadius:2 }} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {totalExp === 0 && (
-                  <div style={{ textAlign:"center", color:"#444", padding:"16px 0", fontSize:13 }}>
-                    មិនទាន់បញ្ចូលចំណាយខែនេះ
-                    {isAdmin && <div style={{ marginTop:6, fontSize:12 }}>ចុច ✏️ កែប្រែ ដើម្បីបន្ថែម</div>}
-                  </div>
-                )}
-                {totalExp > 0 && (
-                  <div style={{ borderTop:"1px solid #1E1B1F", marginTop:10, paddingTop:10, display:"flex", justifyContent:"space-between" }}>
-                    <span style={{ fontWeight:700, fontSize:13 }}>💸 ចំណាយសរុប</span>
-                    <span style={{ fontWeight:700, fontSize:14, color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(totalExp)}</span>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Monthly History */}
-          {monthlyRecords.length > 0 && (
-            <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16 }}>
-              <div style={{ fontWeight:700, fontSize:13, marginBottom:10 }}>📅 ប្រវត្តិប្រចាំខែ</div>
-              <div style={{ overflowX:"auto" }}>
-                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-                  <thead>
-                    <tr style={{ background:"#1A181C" }}>
-                      {["ខែ","ចំណូល","ចំណាយ","ចំណេញ"].map(h => (
-                        <th key={h} style={{ padding:"7px 10px", textAlign:"left", color:"#E8A84B", fontWeight:600, borderBottom:"1px solid #252230" }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {monthlyRecords.slice(0,12).map(e => {
-                      const [ey,em] = e.month.split("-");
-                      const rev = (orders||[]).filter(o => { try { return new Date(o.order_id).toISOString().slice(0,7)===e.month; } catch { return false; } })
-                                             .reduce((s,o) => s+o.total+o.tax, 0);
-                      const exp = expCats.reduce((s,c) => s+Number((e.items||{})[c.id]||0), 0);
-                      const pnl = rev - exp;
-                      return (
-                        <tr key={e.month} onClick={() => setSelMonth(e.month)}
-                          style={{ cursor:"pointer", background: e.month===selMonth ? "#1A2A1A" : "transparent" }}>
-                          <td style={{ padding:"7px 10px", borderBottom:"1px solid var(--border-col)", color:"#aaa" }}>{MON_KH[parseInt(em)-1]} {ey}</td>
-                          <td style={{ padding:"7px 10px", borderBottom:"1px solid var(--border-col)", color:"#E8A84B", fontFamily:"'DM Mono',monospace" }}>{fmt(rev)}</td>
-                          <td style={{ padding:"7px 10px", borderBottom:"1px solid var(--border-col)", color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(exp)}</td>
-                          <td style={{ padding:"7px 10px", borderBottom:"1px solid var(--border-col)", fontWeight:700, fontFamily:"'DM Mono',monospace",
-                            color: pnl>=0 ? "#27AE60" : "#E74C3C" }}>{pnl>=0?"+":""}{fmt(pnl)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
               </div>
             </div>
           )}
+
+          {/* ── Add/Edit Txn Modal ── */}
+          {txnModal && (
+            <ExpenseTxnModal
+              data={txnModal.data}
+              expCats={expCats}
+              branchId={branchId}
+              branches={branches}
+              isAdmin={isAdmin}
+              selMonth={selMonth}
+              onSave={saveTxn}
+              onClose={() => setTxnModal(null)}
+            />
+          )}
+
+          {/* ── Expense Transactions ── */}
+          <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:14 }}>💸 ចំណាយប្រចាំខែ</div>
+                <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{monthTxns.length} រាយការណ៍ · សរុប {fmt(totalExp)}</div>
+              </div>
+              <button
+                onClick={() => setTxnModal({ data: { id:"txn_"+Date.now(), date:selMonth+"-"+new Date().toISOString().slice(8,10), cat_id: expCats[0]?.id||"other", desc:"", amount:"", branch_id:branchId, _isNew:true } })}
+                style={{ ...btnGold, padding:"8px 16px", fontSize:12 }}>
+                ➕ បន្ថែមចំណាយ
+              </button>
+            </div>
+
+            {monthTxns.length === 0 ? (
+              <div style={{ textAlign:"center", padding:"24px 0", color:"#444", fontSize:13 }}>
+                <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
+                មិនទាន់មានចំណាយសម្រាប់ខែនេះ
+              </div>
+            ) : (
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {monthTxns.sort((a,b) => (b.date||"").localeCompare(a.date||"")).map(t => {
+                  const cat = expCats.find(c => c.id === t.cat_id);
+                  const bName = branches.find(b => b.branch_id === t.branch_id)?.branch_name || t.branch_id || branchId;
+                  return (
+                    <div key={t.id} style={{
+                      display:"flex", alignItems:"center", gap:10,
+                      padding:"10px 12px", borderRadius:10,
+                      background:"var(--bg-main)", border:"1px solid var(--border-col)"
+                    }}>
+                      {/* Cat color dot */}
+                      <div style={{ width:10, height:10, borderRadius:"50%", background:cat?.color||"#888", flexShrink:0 }} />
+                      {/* Info */}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                          {t.desc || cat?.label || "ចំណាយ"}
+                        </div>
+                        <div style={{ fontSize:11, color:"#666", marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
+                          <span>📅 {t.date}</span>
+                          {cat && <span style={{ color:cat.color }}>{cat.label}</span>}
+                          {isAdmin && t.branch_id && <span style={{ color:"#5BA3E0" }}>🏪 {bName}</span>}
+                          {t.created_by && <span style={{ color:"#555" }}>👤 {t.created_by}</span>}
+                        </div>
+                      </div>
+                      {/* Amount */}
+                      <div style={{ fontWeight:700, fontSize:14, color:"#E74C3C", fontFamily:"'DM Mono',monospace", flexShrink:0 }}>
+                        {fmt(t.amount)}
+                      </div>
+                      {/* Actions */}
+                      <div style={{ display:"flex", gap:4, flexShrink:0 }}>
+                        <button onClick={() => setTxnModal({ data:{ ...t } })}
+                          style={{ ...btnSmall, fontSize:12, padding:"4px 8px", color:"#E8A84B", borderColor:"#E8A84B33" }}>✏️</button>
+                        <button onClick={() => setTxnConfirmDel({ id:t.id, desc:t.desc||cat?.label||"ចំណាយ", amount:t.amount })}
+                          style={{ ...btnSmall, fontSize:12, padding:"4px 8px", color:"#E74C3C", borderColor:"#E74C3C33" }}>🗑️</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Summary by category */}
+            {monthTxns.length > 0 && (
+              <div style={{ marginTop:14, paddingTop:12, borderTop:"1px solid var(--border-col)" }}>
+                <div style={{ fontSize:12, color:"#666", marginBottom:8, fontWeight:600 }}>📊 សង្ខេបតាមប្រភេទ</div>
+                <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                  {expCats.map(c => {
+                    const catTotal = monthTxns.filter(t => t.cat_id === c.id).reduce((s,t) => s + Number(t.amount||0), 0);
+                    if (catTotal === 0) return null;
+                    const pct = totalExp > 0 ? Math.round((catTotal/totalExp)*100) : 0;
+                    return (
+                      <div key={c.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                        <div style={{ width:8, height:8, borderRadius:"50%", background:c.color, flexShrink:0 }} />
+                        <div style={{ flex:1, fontSize:12, color:"#aaa" }}>{c.label}</div>
+                        <div style={{ fontSize:12, fontWeight:700, color:"#E74C3C", fontFamily:"'DM Mono',monospace", minWidth:60, textAlign:"right" }}>{fmt(catTotal)}</div>
+                        <div style={{ fontSize:10, color:"#555", minWidth:32, textAlign:"right" }}>{pct}%</div>
+                        <div style={{ width:60, height:4, background:"#1A181C", borderRadius:2, overflow:"hidden" }}>
+                          <div style={{ width:pct+"%", height:"100%", background:c.color, borderRadius:2 }} />
+                        </div>
+                      </div>
+                    );
+                  }).filter(Boolean)}
+                  <div style={{ display:"flex", justifyContent:"space-between", paddingTop:8, marginTop:4, borderTop:"1px solid var(--border-col)" }}>
+                    <span style={{ fontSize:12, fontWeight:700, color:"#aaa" }}>💸 សរុបចំណាយ</span>
+                    <span style={{ fontSize:13, fontWeight:700, color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(totalExp)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
         </div>
       </div>
@@ -3607,6 +3624,94 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
   );
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+//  EXPENSE TRANSACTION MODAL
+// ═══════════════════════════════════════════════════════════════════
+function ExpenseTxnModal({ data, expCats, branchId, branches, isAdmin, selMonth, onSave, onClose }) {
+  const today = new Date().toISOString().slice(0,10);
+  const [v, setV] = useState({
+    id:       data.id       || "txn_"+Date.now(),
+    date:     data.date     || today,
+    cat_id:   data.cat_id   || expCats[0]?.id || "other",
+    desc:     data.desc     || "",
+    amount:   data.amount   || "",
+    branch_id: data.branch_id || branchId,
+    created_by: data.created_by || "",
+    _isNew:   data._isNew   || false,
+  });
+  const s = (k, val) => setV(p => ({ ...p, [k]: val }));
+  const isValid = v.date && v.amount && Number(v.amount) > 0;
+
+  return (
+    <Modal onClose={onClose} maxW={420}>
+      <div style={{ fontWeight:700, fontSize:16, marginBottom:18, color:"var(--accent)" }}>
+        {v._isNew ? "➕ បន្ថែមចំណាយ" : "✏️ កែប្រែចំណាយ"}
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+
+        {/* Date */}
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>📅 ថ្ងៃ *</div>
+          <input type="date" className="inp" value={v.date} onChange={e=>s("date",e.target.value)}
+            style={{ width:"100%" }} />
+        </div>
+
+        {/* Category */}
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>🏷️ ប្រភេទចំណាយ *</div>
+          <select className="inp" value={v.cat_id} onChange={e=>s("cat_id",e.target.value)}
+            style={{ width:"100%", ...{background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:9, padding:"9px 13px", color:"var(--text-main)", fontFamily:"inherit", fontSize:13} }}>
+            {expCats.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </div>
+
+        {/* Description */}
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>📝 ការរៀបរាប់</div>
+          <input className="inp" placeholder="ឈ្មោះចំណាយ (ការជួលកន្លែង, ប្រាក់ខែ...)"
+            value={v.desc} onChange={e=>s("desc",e.target.value)} style={{ width:"100%" }} />
+        </div>
+
+        {/* Amount */}
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>💵 ចំនួនទឹកប្រាក់ ($) *</div>
+          <input className="inp" type="number" step="0.01" min="0" placeholder="0.00"
+            value={v.amount} onChange={e=>s("amount",e.target.value)} style={{ width:"100%" }} />
+        </div>
+
+        {/* Branch — admin can assign to any branch */}
+        {isAdmin && branches.length > 0 && (
+          <div>
+            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>🏪 សាខា</div>
+            <select className="inp" value={v.branch_id} onChange={e=>s("branch_id",e.target.value)}
+              style={{ width:"100%", background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:9, padding:"9px 13px", color:"var(--text-main)", fontFamily:"inherit", fontSize:13 }}>
+              {branches.filter(b=>b.active).map(b => (
+                <option key={b.branch_id} value={b.branch_id}>{b.branch_name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Created by */}
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>👤 បញ្ចូលដោយ</div>
+          <input className="inp" placeholder="ឈ្មោះអ្នកបញ្ចូល..."
+            value={v.created_by} onChange={e=>s("created_by",e.target.value)} style={{ width:"100%" }} />
+        </div>
+
+        <div style={{ display:"flex", gap:8, marginTop:4 }}>
+          <button style={{ ...btnGhost, flex:1 }} onClick={onClose}>បោះបង់</button>
+          <button style={{ ...btnGold, flex:1, opacity:isValid?1:0.4 }}
+            disabled={!isValid}
+            onClick={()=>onSave({ ...v, amount:Number(v.amount), _txn:true })}>
+            💾 រក្សាទុក
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  THEME PAGE  (Admin only)
