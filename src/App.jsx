@@ -276,6 +276,7 @@ export default function CafeBloom() {
 
   // ── Navigation ──────────────────────────────────────────────────
   const [page, setPage] = useState("pos");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // ── DB State (raw from server) ──────────────────────────────────
   const [catsRaw,     setCatsRaw]     = useState([]);
@@ -434,6 +435,8 @@ export default function CafeBloom() {
     { id:"theme",     label:"រចនាប័ទ្ម",   emoji:"🎨", page:true, adminOnly:true },
   ].filter(n => !n.adminOnly || currentUser.role === "admin");
 
+  const goPage = (id) => { setPage(id); setMenuOpen(false); };
+
   return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }}>
       <style>{CSS}</style>
@@ -444,15 +447,71 @@ export default function CafeBloom() {
           {toast.msg}
         </div>
       )}
-      {/* ── TopBar ── */}
-      <TopBar socketOnline={socketOnline} offline={offline} currentUser={currentUser} doLogout={doLogout} />
 
-      {/* ── Nav tabs ── */}
-      <div className="nav-tab-bar" style={{ display:"flex", gap:0, overflowX:"auto", background:"var(--bg-header)", borderBottom:"2px solid var(--border-col)", padding:"0 8px" }}>
+      {/* ── Mobile Sidebar Overlay ── */}
+      {menuOpen && (
+        <div style={{ position:"fixed", inset:0, zIndex:300 }}>
+          {/* Backdrop */}
+          <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.6)", backdropFilter:"blur(2px)" }}
+            onClick={() => setMenuOpen(false)} />
+          {/* Sidebar drawer */}
+          <div style={{
+            position:"absolute", top:0, left:0, bottom:0, width:260,
+            background:"var(--bg-header)", borderRight:"1px solid var(--border-col)",
+            display:"flex", flexDirection:"column", zIndex:1,
+            animation:"slideInLeft .22s ease"
+          }}>
+            {/* Sidebar header */}
+            <div style={{ padding:"16px 14px 12px", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ flex:1, fontWeight:700, fontSize:15, color:"var(--accent)" }}>Menu</div>
+              <button onClick={()=>setMenuOpen(false)} style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", fontSize:20, lineHeight:1 }}>✕</button>
+            </div>
+            {/* Nav items */}
+            <div style={{ flex:1, overflowY:"auto", padding:"8px 0" }}>
+              {NAV.map(n => (
+                <button key={n.id}
+                  onClick={() => goPage(n.id)}
+                  style={{
+                    width:"100%", display:"flex", alignItems:"center", gap:12,
+                    padding:"12px 16px", border:"none", background: page===n.id ? "rgba(232,168,75,.12)" : "transparent",
+                    color: page===n.id ? "var(--accent)" : "var(--text-main)",
+                    fontFamily:"inherit", fontSize:14, fontWeight: page===n.id ? 700 : 400,
+                    cursor:"pointer", borderLeft: page===n.id ? "3px solid var(--accent)" : "3px solid transparent",
+                    transition:"all .15s"
+                  }}>
+                  <span style={{ fontSize:18 }}>{n.emoji}</span>
+                  <span>{n.label}</span>
+                </button>
+              ))}
+            </div>
+            {/* User info at bottom */}
+            <div style={{ padding:"12px 16px", borderTop:"1px solid var(--border-col)", display:"flex", alignItems:"center", gap:10 }}>
+              {currentUser.avatar
+                ? <img src={currentUser.avatar} alt="" style={{ width:32, height:32, borderRadius:"50%", objectFit:"cover" }} />
+                : <div style={{ width:32, height:32, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700, color:"#1a0f00" }}>
+                    {currentUser.name?.[0]?.toUpperCase()||"U"}
+                  </div>
+              }
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{currentUser.name}</div>
+                <div style={{ fontSize:11, color:"#555" }}>{currentUser.role}</div>
+              </div>
+              <button style={{ ...btnGhost, padding:"5px 10px", fontSize:12 }} onClick={doLogout}>ចេញ</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TopBar (sticky) ── */}
+      <TopBar socketOnline={socketOnline} offline={offline} currentUser={currentUser} doLogout={doLogout}
+        onHamburger={() => setMenuOpen(p => !p)} menuOpen={menuOpen} />
+
+      {/* ── Desktop Nav tabs ── */}
+      <div className="nav-tab-bar desktop-nav" style={{ display:"flex", gap:0, overflowX:"auto", background:"var(--bg-header)", borderBottom:"2px solid var(--border-col)", padding:"0 8px" }}>
         {NAV.map(n => (
           <button key={n.id}
             className={"nav-tab" + (page === n.id ? " active" : "")}
-            onClick={() => setPage(n.id)}
+            onClick={() => goPage(n.id)}
           >
             <span style={{ fontSize:15 }}>{n.emoji}</span>
             <span className="nav-label">{n.label}</span>
@@ -524,7 +583,7 @@ function LoginPage({ theme, loading, error, onLogin }) {
 // ═══════════════════════════════════════════════════════════════════
 //  TOPBAR COMPONENT
 // ═══════════════════════════════════════════════════════════════════
-function TopBar({ socketOnline, offline, currentUser, doLogout }) {
+function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen }) {
   const [shopName, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
   const [shopLogo, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
 
@@ -553,7 +612,20 @@ function TopBar({ socketOnline, offline, currentUser, doLogout }) {
   const statusColor = socketOnline ? "#2ECC71" : offline ? "#E74C3C" : "#F39C12";
   const statusLabel = socketOnline ? "Online" : offline ? "Offline" : "Sync…";
   return (
-    <div style={{ background:"var(--bg-header)", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", padding:"6px 16px", gap:12, position:"sticky", top:0, zIndex:100 }}>
+    <div style={{ background:"var(--bg-header)", borderBottom:"1px solid var(--border-col)", display:"flex", alignItems:"center", padding:"6px 16px", gap:12, position:"sticky", top:0, zIndex:200 }}>
+      {/* Hamburger button — mobile only */}
+      {onHamburger && (
+        <button className="hamburger-btn" onClick={onHamburger}
+          style={{ background:"transparent", border:"1px solid var(--border-col)", borderRadius:8,
+            width:36, height:36, display:"none", alignItems:"center", justifyContent:"center",
+            flexDirection:"column", gap:4, cursor:"pointer", padding:6, flexShrink:0 }}>
+          <span style={{ display:"block", width:18, height:2, background: menuOpen?"var(--accent)":"var(--text-main)", transition:"all .2s",
+            transform: menuOpen ? "rotate(45deg) translate(4px,4px)" : "none" }} />
+          <span style={{ display:"block", width:18, height:2, background: menuOpen?"transparent":"var(--text-main)", transition:"all .2s" }} />
+          <span style={{ display:"block", width:18, height:2, background: menuOpen?"var(--accent)":"var(--text-main)", transition:"all .2s",
+            transform: menuOpen ? "rotate(-45deg) translate(4px,-4px)" : "none" }} />
+        </button>
+      )}
       {/* Logo */}
       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
         {shopLogo
@@ -575,9 +647,12 @@ function TopBar({ socketOnline, offline, currentUser, doLogout }) {
       <div style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", fontVariantNumeric:"tabular-nums", minWidth:68, textAlign:"center" }}>{hhmm}</div>
       {/* User */}
       <div style={{ display:"flex", alignItems:"center", gap:8, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"5px 12px" }}>
-        <div style={{ width:26, height:26, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:"#1a0f00" }}>
-          {currentUser.name?.[0]?.toUpperCase() || "U"}
-        </div>
+        {currentUser.avatar
+          ? <img src={currentUser.avatar} alt={currentUser.name} style={{ width:26, height:26, borderRadius:"50%", objectFit:"cover" }} />
+          : <div style={{ width:26, height:26, borderRadius:"50%", background:"linear-gradient(135deg,var(--accent),var(--accent-dk))", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700, color:"#1a0f00" }}>
+              {currentUser.name?.[0]?.toUpperCase() || "U"}
+            </div>
+        }
         <span style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
         <span style={{ fontSize:10, color:"var(--text-dim)" }}>({currentUser.role})</span>
       </div>
@@ -3322,10 +3397,22 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
 
       {modal && (
         <Modal onClose={() => setModal(null)} maxW={440}>
-          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 18, color: "#E8A84B" }}>
-            {modal.mode === "add" ? "➕ បន្ថែម User ថ្មី" : "✏️ កែប្រែ User"}
-          </div>
-          <UserForm data={modal.data} onSave={saveUser} onCancel={() => setModal(null)} roles={ROLES} />
+          {modal.mode === "add" && <>
+            <div style={{ fontWeight:700, fontSize:16, marginBottom:18, color:"#E8A84B" }}>➕ បន្ថែម User ថ្មី</div>
+            <UserForm data={modal.data} onSave={saveUser} onCancel={() => setModal(null)} roles={ROLES} />
+          </>}
+          {modal.mode === "edit" && <>
+            <div style={{ fontWeight:700, fontSize:16, marginBottom:18, color:"#E8A84B" }}>✏️ កែប្រែ User</div>
+            <UserForm data={modal.data} onSave={saveUser} onCancel={() => setModal(null)} roles={ROLES} />
+          </>}
+          {modal.mode === "reset" && <ResetPasswordForm user={modal.data} onSave={(uid, pw) => {
+            setUsers(p => p.map(u => u.user_id === uid ? { ...u, password: pw } : u));
+            notify("✅ Reset Password រួចហើយ!"); setModal(null);
+          }} onCancel={() => setModal(null)} />}
+          {modal.mode === "photo" && <UploadPhotoForm user={modal.data} onSave={(uid, avatar) => {
+            setUsers(p => p.map(u => u.user_id === uid ? { ...u, avatar } : u));
+            notify("✅ Upload Photo រួចហើយ!"); setModal(null);
+          }} onCancel={() => setModal(null)} />}
         </Modal>
       )}
 
@@ -3360,12 +3447,15 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
                 {/* Top row */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{
-                      width: 42, height: 42, borderRadius: 12,
-                      background: `linear-gradient(135deg,${u.role === "admin" ? "#8B5520,#E8A84B" : "#1A3A5A,#5BA3E0"})`,
-                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20
-                    }}>
-                      {u.role === "admin" ? "👑" : "👤"}
+                    <div style={{ position:"relative", width:42, height:42 }}>
+                      {u.avatar
+                        ? <img src={u.avatar} alt={u.name} style={{ width:42, height:42, borderRadius:12, objectFit:"cover" }} />
+                        : <div style={{
+                            width:42, height:42, borderRadius:12,
+                            background:`linear-gradient(135deg,${u.role==="admin"?"#8B5520,#E8A84B":"#1A3A5A,#5BA3E0"})`,
+                            display:"flex", alignItems:"center", justifyContent:"center", fontSize:20
+                          }}>{u.role === "admin" ? "👑" : "👤"}</div>
+                      }
                     </div>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
@@ -3420,9 +3510,11 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
                       style={{ ...btnSmall, fontSize: 12, color: "#5BA3E0", borderColor: "#5BA3E033" }}
                       title="កំណត់សិទ្ធ">🛡️</button>
                   )}
-                  <button onClick={() => setModal({ mode: "edit", data: { ...u } })} style={{ ...btnSmall, fontSize: 12 }}>✏️</button>
+                  <button onClick={() => setModal({ mode: "edit", data: { ...u } })} style={{ ...btnSmall, fontSize: 12 }} title="កែប្រែ">✏️</button>
+                  <button onClick={() => setModal({ mode: "reset", data: u })} style={{ ...btnSmall, fontSize: 12, color:"#F39C12", borderColor:"#F39C1233" }} title="Reset Password">🔑</button>
+                  <button onClick={() => setModal({ mode: "photo", data: u })} style={{ ...btnSmall, fontSize: 12, color:"#5BA3E0", borderColor:"#5BA3E033" }} title="Upload Photo">🖼️</button>
                   <button onClick={() => setDelConf({ name: u.name, fn: () => delUser(u.user_id) })}
-                    style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33", fontSize: 12 }}>🗑️</button>
+                    style={{ ...btnSmall, color:"#E74C3C", borderColor:"#E74C3C33", fontSize: 12 }} title="លុប">🗑️</button>
                 </div>
               </div>
             );
@@ -3432,6 +3524,127 @@ function UsersPage({ users, setUsers, currentUser, notify }) {
     </div>
   );
 }
+
+// ── Reset Password Form ────────────────────────────────────────
+function ResetPasswordForm({ user, onSave, onCancel }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [show, setShow] = useState(false);
+  const match = pw && pw === pw2;
+  const strong = pw.length >= 6;
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      <div style={{ textAlign:"center", marginBottom:4 }}>
+        <div style={{ fontSize:36 }}>🔑</div>
+        <div style={{ fontWeight:700, fontSize:15, marginTop:8 }}>Reset Password</div>
+        <div style={{ fontSize:12, color:"#555", marginTop:4 }}>@{user.username}</div>
+      </div>
+      <div>
+        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>Password ថ្មី *</div>
+        <div style={{ position:"relative" }}>
+          <input className="inp" type={show?"text":"password"} placeholder="Password ថ្មី (min 6 characters)"
+            value={pw} onChange={e=>setPw(e.target.value)}
+            style={{ width:"100%", paddingRight:36 }} />
+          <button type="button" onClick={()=>setShow(p=>!p)}
+            style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)", background:"transparent", border:"none", cursor:"pointer", fontSize:14, color:"#555" }}>
+            {show?"🙈":"👁️"}
+          </button>
+        </div>
+      </div>
+      <div>
+        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>បញ្ជាក់ Password *</div>
+        <input className="inp" type={show?"text":"password"} placeholder="វាយម្ដងទៀត..."
+          value={pw2} onChange={e=>setPw2(e.target.value)} />
+      </div>
+      {pw && (
+        <div style={{ fontSize:11, display:"flex", gap:8 }}>
+          <span style={{ color: strong?"#27AE60":"#E74C3C" }}>{strong?"✅ >=6 chars":"❌ >=6 chars"}</span>
+          <span style={{ color: match?"#27AE60":"#E74C3C" }}>{match?"✅ ត្រូវគ្នា":"❌ មិនត្រូវ"}</span>
+        </div>
+      )}
+      <div style={{ display:"flex", gap:8, marginTop:4 }}>
+        <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>
+        <button style={{ ...btnGold, flex:1, opacity: (!match||!strong)?0.4:1 }}
+          disabled={!match||!strong}
+          onClick={()=>onSave(user.user_id, pw)}>🔑 Reset</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Upload Photo Form ─────────────────────────────────────────
+function UploadPhotoForm({ user, onSave, onCancel }) {
+  const [preview, setPreview] = useState(user.avatar || "");
+  const [loading, setLoading] = useState(false);
+  const fileRef = useRef(null);
+
+  function handleFile(file) {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { alert("រូបភាពធំពេក! Max 2MB"); return; }
+    setLoading(true);
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const MAX = 200;
+        let w = img.width, h = img.height;
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else { w = Math.round(w * MAX / h); h = MAX; }
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        setPreview(canvas.toDataURL("image/jpeg", 0.85));
+        setLoading(false);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12, alignItems:"center" }}>
+      <div style={{ fontWeight:700, fontSize:15, marginBottom:4 }}>🖼️ Upload Photo</div>
+      <div style={{ fontSize:12, color:"#555" }}>@{user.username}</div>
+
+      {/* Avatar preview */}
+      <div
+        style={{ width:100, height:100, borderRadius:20, overflow:"hidden", cursor:"pointer",
+          border:"2px dashed var(--border-col)", display:"flex", alignItems:"center", justifyContent:"center",
+          background:"var(--bg-card)", position:"relative" }}
+        onClick={()=>fileRef.current?.click()}
+        onDragOver={e=>{e.preventDefault();}}
+        onDrop={e=>{e.preventDefault();handleFile(e.dataTransfer.files[0]);}}>
+        {loading
+          ? <div className="spinner" style={{width:28,height:28}} />
+          : preview
+            ? <img src={preview} alt="" style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+            : <div style={{ textAlign:"center" }}>
+                <div style={{ fontSize:32 }}>📷</div>
+                <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:4 }}>ចុចឬ Drag</div>
+              </div>
+        }
+        <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }}
+          onChange={e=>handleFile(e.target.files[0])} />
+      </div>
+
+      <div style={{ fontSize:11, color:"#555", textAlign:"center" }}>
+        JPG / PNG · Max 2MB · ស្វ័យប្រវត្តិ resize 200px
+      </div>
+
+      {preview && preview !== user.avatar && (
+        <button style={{ ...btnSmall, color:"#E74C3C", fontSize:11 }}
+          onClick={()=>setPreview("")}>🗑 លុប​រូបភាព</button>
+      )}
+
+      <div style={{ display:"flex", gap:8, width:"100%", marginTop:4 }}>
+        <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>
+        <button style={{ ...btnGold, flex:1 }}
+          onClick={()=>onSave(user.user_id, preview)}>💾 រក្សាទុក</button>
+      </div>
+    </div>
+  );
+}
+
 
 // Permission editor modal
 function UserForm({ data, user, onSave, onCancel, roles }) {
@@ -4469,9 +4682,24 @@ const CSS = `
   }
 
   /* ── Responsive ── */
-  /* POS page active — no padding, full height */
   .page-pos-active { padding: 0 !important; }
 
+  /* Slide in animation for sidebar */
+  @keyframes slideInLeft {
+    from { transform: translateX(-100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* Hamburger — hidden on desktop */
+  .hamburger-btn { display: none !important; }
+
+  @media (max-width: 768px) {
+    /* Show hamburger, hide desktop nav */
+    .hamburger-btn { display: flex !important; }
+    .desktop-nav { display: none !important; }
+    /* Nav tab responsive */
+    .nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
+  }
   @media (max-width: 640px) {
     .nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
     .nav-label { display: none; }
