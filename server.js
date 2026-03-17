@@ -414,8 +414,17 @@ function send(res, status, data) {
 }
 
 function getBranch(req) {
-  try { return new URL("http://x" + req.url).searchParams.get("branch") || "branch_1"; }
-  catch { return "branch_1"; }
+  try { return new URL("http://x" + req.url).searchParams.get("branch") || null; }
+  catch { return null; }
+}
+
+// Resolve branch: prefer URL param, then user session branch, then "branch_1"
+function resolveBranch(req) {
+  const urlBranch = getBranch(req);
+  if (urlBranch) return urlBranch;
+  const session = getSession(req);
+  if (session && session.branch_id && session.branch_id !== "all") return session.branch_id;
+  return "branch_1";
 }
 
 async function handler(req, res) {
@@ -432,7 +441,7 @@ async function handler(req, res) {
 
   // ── Full DB for branch ──────────────────────────────────────────
   if (req.method === "GET" && url === "/api/db") {
-    const bid    = getBranch(req);
+    const bid    = resolveBranch(req);   // uses session branch if no ?branch= param
     const shared = await loadShared();
     const branch = await loadBranch(bid);
     const safeShared = {
@@ -457,8 +466,13 @@ async function handler(req, res) {
     return;
   }
 
-  // ── All orders (admin multi-branch report) ──────────────────────
+  // ── All orders (admin multi-branch report) — ADMIN ONLY ─────────
   if (req.method === "GET" && url === "/api/all-orders") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin") {
+      send(res, 403, { error: "Admin only" });
+      return;
+    }
     const branches = (await loadBranches()).filter(b => b.active);
     const all = [];
     for (const b of branches) {
@@ -546,7 +560,7 @@ async function handler(req, res) {
   // ── SAVE TABLE ──────────────────────────────────────────────────
   if (req.method === "POST" && url.startsWith("/api/db/")) {
     const table = url.replace("/api/db/", "");
-    const bid   = getBranch(req);
+    const bid   = resolveBranch(req);   // uses session branch if no ?branch= param
     const body  = await readBody(req);
 
     if (SHARED_TABLES.has(table)) {
@@ -571,7 +585,7 @@ async function handler(req, res) {
 
   // ── RESET DAILY ─────────────────────────────────────────────────
   if (req.method === "POST" && url.startsWith("/api/reset-daily")) {
-    const bid = getBranch(req);
+    const bid = resolveBranch(req);
     await saveBranchKey(bid, "orders", []);
     await saveBranchKey(bid, "logs",   []);
     broadcastBranchUpdate(bid, "orders", []);
