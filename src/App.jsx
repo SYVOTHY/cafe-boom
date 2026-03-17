@@ -307,7 +307,12 @@ export default function CafeBloom() {
     if (db.orders)      setOrdersRaw(db.orders);
     if (db.logs)        setLogsRaw(db.logs);
     if (db.users)       setUsersRaw(db.users);
-    if (db.theme)       setThemeRaw({ ...DEFAULT_THEME, ...db.theme });
+    if (db.theme) {
+      setThemeRaw({ ...DEFAULT_THEME, ...db.theme });
+      // Sync shopName+shopLogo from DB to localStorage so all devices show same brand
+      if (db.theme.shopName) localStorage.setItem("cb_shop_name", db.theme.shopName);
+      if (db.theme.shopLogo !== undefined) localStorage.setItem("cb_shop_logo", db.theme.shopLogo || "");
+    }
     if (db.expenses)    setExpensesRaw(db.expenses);
     setOffline(false);
   }, [db]);
@@ -572,8 +577,9 @@ function LoginPage({ theme, loading, error, onLogin }) {
   const [u, setU] = useState("");
   const [p, setP] = useState("");
   const t = theme;
-  const shopName = localStorage.getItem("cb_shop_name") || "Café Boom";
-  const shopLogo = localStorage.getItem("cb_shop_logo") || "";
+  // Prefer theme DB values (shared across devices), fallback to localStorage
+  const shopName = t?.shopName || localStorage.getItem("cb_shop_name") || "Café Boom";
+  const shopLogo = t?.shopLogo || localStorage.getItem("cb_shop_logo") || "";
   return (
     <div style={{ minHeight:"100vh", background:t.bgMain, display:"flex", alignItems:"center", justifyContent:"center" }}>
       <style>{CSS}</style>
@@ -1554,8 +1560,73 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         <SectionHeader title="🧂 គ្រប់គ្រងស្តុក" sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} គ្រឿងផ្សំជិតអស់`} />
         <SubTabs tabs={[["stock", "🧂 Ingredients"], ["recipes", "📋 Recipe Mapping"], ["sql", "💾 SQL"], ["auditlog", "🗒️ Audit Log"]]} val={subTab} set={setSubTab} />
         {subTab === "stock" && (
-          <div style={{ padding: "10px 0 10px", display: "flex", justifyContent: "flex-end" }}>
-            <button onClick={() => setModal({ mode: "add", entity: "ing", data: { ingredient_id: null, ingredient_name: "", current_stock: 0, unit: "g", threshold: 100 } })} style={btnGold}>➕ បន្ថែម</button>
+          <div style={{ padding: "10px 0 10px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button onClick={() => setModal({ mode: "add", entity: "ing", data: { ingredient_id: null, ingredient_name: "", current_stock: 0, unit: "g", threshold: 100 } })} style={{ ...btnGold, padding:"9px 16px", width:"auto" }}>➕ បន្ថែម</button>
+            <div style={{ flex:1 }} />
+            {/* Export buttons */}
+            <button style={{ ...btnSmall, color:"#27AE60", borderColor:"#27AE6044", fontSize:12, padding:"7px 14px" }}
+              onClick={() => {
+                const rows = ings.map(i => {
+                  // Calculate total used from logs
+                  const usedTotal = (logs||[]).filter(l => l.ingredient === i.ingredient_name)
+                    .reduce((s, l) => s + (Number(l.deducted)||0), 0);
+                  const pct = i.threshold > 0 ? Math.round((Number(i.current_stock)/Number(i.threshold))*100) : 100;
+                  return {
+                    "ឈ្មោះ​គ្រឿង": i.ingredient_name,
+                    "ស្តុក​នៅ": Number(i.current_stock),
+                    "ស្តុក​អប្បបរមា": Number(i.threshold),
+                    "ឯកតា": i.unit,
+                    "ប្រើ​ចំណាយ​សរុប": fmtN(usedTotal),
+                    "ស្ថានភាព": Number(i.current_stock) <= Number(i.threshold) ? "⚠️ ជិតអស់" : "✓ ល្អ",
+                    "%": pct + "%",
+                  };
+                });
+                exportCSV(rows, `stock_report_${new Date().toISOString().slice(0,10)}.csv`);
+                notify("✅ Export CSV រួចហើយ!");
+              }}>
+              📊 Export CSV
+            </button>
+            <button style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B44", fontSize:12, padding:"7px 14px" }}
+              onClick={() => {
+                const date = new Date().toLocaleDateString("km-KH");
+                const rows = ings.map(i => {
+                  const usedTotal = (logs||[]).filter(l => l.ingredient === i.ingredient_name)
+                    .reduce((s, l) => s + (Number(l.deducted)||0), 0);
+                  const stock = Number(i.current_stock);
+                  const thresh = Number(i.threshold);
+                  const pct = thresh > 0 ? Math.round((stock/thresh)*100) : 100;
+                  const isLow = stock <= thresh;
+                  return `<tr style="background:${isLow?"#3a0a0a":"#0a1a0a"}">
+                    <td style="padding:8px 12px;border-bottom:1px solid #333">${i.ingredient_name}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #333;font-weight:700;color:${isLow?"#E74C3C":"#27AE60"}">${fmtStock(stock)}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #333;color:#888">${fmtStock(thresh)}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #333">${i.unit}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #333;color:#E8A84B">${fmtN(usedTotal)}</td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #333">
+                      <span style="padding:2px 8px;border-radius:12px;font-size:11px;background:${isLow?"#E74C3C22":"#27AE6022"};color:${isLow?"#E74C3C":"#27AE60"}">
+                        ${isLow?"⚠️ ជិតអស់":"✓ ល្អ"}
+                      </span>
+                    </td>
+                    <td style="padding:8px 12px;border-bottom:1px solid #333">${pct}%</td>
+                  </tr>`;
+                }).join("");
+                const tableHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px">
+                  <thead><tr style="background:#1a1a1a">
+                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ឈ្មោះ​គ្រឿង</th>
+                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ស្តុក​នៅ</th>
+                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">អប្បបរមា</th>
+                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ឯកតា</th>
+                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ប្រើ​ចំណាយ</th>
+                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">ស្ថានភាព</th>
+                    <th style="padding:10px 12px;text-align:left;color:#E8A84B;border-bottom:2px solid #E8A84B">%</th>
+                  </tr></thead>
+                  <tbody>${rows}</tbody>
+                </table>`;
+                exportPDF("📦 របាយការណ៍ស្តុក", date, tableHTML);
+                notify("✅ Print PDF រួចហើយ!");
+              }}>
+              🖨️ Print PDF
+            </button>
           </div>
         )}
         {subTab === "recipes" && (
@@ -3716,8 +3787,9 @@ function ThemePage({ theme, setTheme, notify }) {
     // Update global so header reacts immediately
     window.__SHOP_NAME__ = shopName;
     window.__SHOP_LOGO__ = logoPreview;
+    // CRITICAL: Save shopName+shopLogo into theme DB so ALL devices sync
+    setTheme(prev => ({ ...prev, shopName, shopLogo: logoPreview }));
     notify("✅ រក្សាទុក ឈ្មោះហាង + Logo រួចហើយ!");
-    // Force re-render header by dispatching event
     window.dispatchEvent(new Event("shopBrandUpdate"));
   };
 
