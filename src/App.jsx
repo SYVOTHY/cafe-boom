@@ -1300,23 +1300,58 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
         }}>
           {activeProds.map(p => {
             const cat = getCat(p.category_id);
+            // ── Stock status for this branch ──────────────────────────
+            const prodRecipes = (recipes||[]).filter(r => Number(r.product_id) === Number(p.product_id));
+            const stockStatus = (() => {
+              if (prodRecipes.length === 0) return "ok"; // no recipe = always available
+              for (const r of prodRecipes) {
+                const ing = ings.find(i => Number(i.ingredient_id) === Number(r.ingredient_id));
+                if (!ing) return "missing";
+                const stock = Number(ing.current_stock||0);
+                const need  = Number(r.quantity_required||0);
+                if (stock <= 0) return "out";
+                if (stock < need) return "out";
+                if (ing.threshold > 0 && stock <= ing.threshold) return "low";
+              }
+              return "ok";
+            })();
+            const stockColor = stockStatus==="out"?"#E74C3C":stockStatus==="low"?"#F39C12":stockStatus==="missing"?"#9B59B6":"transparent";
+            const stockLabel = stockStatus==="out"?"❌ អស់":stockStatus==="low"?"⚠️ ចិត":stockStatus==="missing"?null:null;
             return (
-              <button key={p.product_id} onClick={() => openCustomize(p)} className="hover-lift"
+              <button key={p.product_id}
+                onClick={() => stockStatus==="out" ? null : openCustomize(p)}
+                className="hover-lift"
                 style={{
-                  background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14,
-                  padding: "10px 8px", cursor: "pointer", textAlign: "center", fontFamily: "inherit",
-                  display: "flex", flexDirection: "column", alignItems: "center", gap: 5
+                  background: "var(--bg-card)",
+                  border: stockStatus==="out" ? "1px solid #E74C3C44" : stockStatus==="low" ? "1px solid #F39C1244" : "1px solid var(--border)",
+                  borderRadius: 14,
+                  padding: "10px 8px", cursor: stockStatus==="out" ? "not-allowed" : "pointer",
+                  textAlign: "center", fontFamily: "inherit",
+                  display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
+                  opacity: stockStatus==="out" ? 0.5 : 1,
+                  position: "relative"
                 }}>
+                {/* Stock badge overlay */}
+                {stockLabel && (
+                  <div style={{
+                    position:"absolute", top:6, right:6, zIndex:2,
+                    background: stockColor+"dd", color:"#fff",
+                    fontSize:9, fontWeight:700, padding:"2px 6px", borderRadius:8,
+                    boxShadow:"0 1px 4px rgba(0,0,0,.3)"
+                  }}>{stockLabel}</div>
+                )}
                 {/* Image or Emoji */}
                 {p.image_url
                   ? <img src={p.image_url} alt={p.product_name}
-                    style={{ width: "100%", height: 120, borderRadius: 10, objectFit: "cover", flexShrink: 0 }} />
+                    style={{ width: "100%", height: 120, borderRadius: 10, objectFit: "cover", flexShrink: 0,
+                      filter: stockStatus==="out" ? "grayscale(100%)" : "none" }} />
                   : <div style={{
                     width: "100%", height: 120, borderRadius: 10, background: "var(--bg-main)",
-                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48
+                    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 48,
+                    filter: stockStatus==="out" ? "grayscale(100%)" : "none"
                   }}>{p.emoji}</div>
                 }
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-main)", lineHeight: 1.3 }}>{p.product_name}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: stockStatus==="out"?"#666":"var(--text-main)", lineHeight: 1.3 }}>{p.product_name}</div>
                 <div style={{ fontSize: 13, color: "#E8A84B", fontWeight: 700 }}>{fmt(p.base_price)}</div>
                 <div style={{ fontSize: 10, background: "var(--bg-main)", color: "var(--text-dim)", padding: "2px 8px", borderRadius: 20 }}>{cat?.emoji} {cat?.category_name}</div>
               </button>
@@ -1735,7 +1770,7 @@ function OptForm({ opt, prods, onSave }) {
 // ═══════════════════════════════════════════════════════════════════
 //  MENU PAGE
 // ═══════════════════════════════════════════════════════════════════
-function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify }) {
+function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify, isAdmin, isGlobalAdmin, isBranchAdmin, branchId, ings }) {
   const [subTab, setSubTab] = useState("products");
   const [editProd, setEditProd] = useState(null);
   const [editCat,  setEditCat]  = useState(null);
@@ -1812,10 +1847,11 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify 
                 <option value={0}>ប្រភេទទាំងអស់</option>
                 {cats.map(c => <option key={c.category_id} value={c.category_id}>{c.emoji} {c.category_name}</option>)}
               </select>
-              <button style={{ ...btnGold, padding:"9px 18px", width:"auto" }}
+              {isAdmin && <button style={{ ...btnGold, padding:"9px 18px", width:"auto" }}
                 onClick={()=>setEditProd({ product_name:"", base_price:0, category_id:cats[0]?.category_id, emoji:"☕", is_active:true })}>
                 ➕ បន្ថែម
-              </button>
+              </button>}
+              {!isAdmin && <div style={{ fontSize:11, color:"#888", padding:"6px 10px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ មើលបានតែ</div>}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:10 }}>
               {filteredP.map(p => {
@@ -1846,12 +1882,12 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify 
                       </div>
                     </div>
                     <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                      <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", cursor:"pointer", fontSize:13 }}
-                        onClick={()=>toggleProd(p.product_id)}>{p.is_active!==false?"⏸":"▶"}</button>
-                      <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", color:"#E8A84B", cursor:"pointer", fontSize:13 }}
-                        onClick={()=>setEditProd(p)}>✏️</button>
-                      <button style={{ width:30, height:30, borderRadius:7, border:"1px solid #5B1A1A", background:"transparent", color:"#E74C3C", cursor:"pointer", fontSize:13 }}
-                        onClick={()=>setDelConf({ name:p.product_name, fn:()=>delProd(p.product_id) })}>🗑</button>
+                      {isAdmin && <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", cursor:"pointer", fontSize:13 }}
+                        onClick={()=>toggleProd(p.product_id)}>{p.is_active!==false?"⏸":"▶"}</button>}
+                      {isAdmin && <button style={{ width:30, height:30, borderRadius:7, border:"1px solid var(--border-col)", background:"transparent", color:"#E8A84B", cursor:"pointer", fontSize:13 }}
+                        onClick={()=>setEditProd(p)}>✏️</button>}
+                      {isAdmin && <button style={{ width:30, height:30, borderRadius:7, border:"1px solid #5B1A1A", background:"transparent", color:"#E74C3C", cursor:"pointer", fontSize:13 }}
+                        onClick={()=>setDelConf({ name:p.product_name, fn:()=>delProd(p.product_id) })}>🗑</button>}
                     </div>
                   </div>
                 );
