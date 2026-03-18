@@ -105,11 +105,39 @@ async function initDB() {
       }
     }
 
-    // Force-fix users: always update users to ensure hashes are correct
-    await client.query(
-      "INSERT INTO shared_data(key,value) VALUES($1,$2) ON CONFLICT(key) DO UPDATE SET value=$2",
-      ["users", JSON.stringify(DEFAULT_SHARED.users)]
-    );
+    // ── Smart user migration (NEVER overwrite existing users) ────────
+    // Only ensures default admin exists — all other users are preserved
+    try {
+      const { rows: uRows } = await client.query(
+        "SELECT value FROM shared_data WHERE key='users'"
+      );
+      if (uRows.length > 0) {
+        // Users exist in DB — only ensure default admin is present (by user_id=1)
+        const dbUsers = Array.isArray(uRows[0].value) ? uRows[0].value : [];
+        const defaultAdmin = DEFAULT_SHARED.users.find(u => u.username === "admin");
+        const hasAdmin = dbUsers.some(u => u.username === "admin");
+        if (!hasAdmin && defaultAdmin) {
+          // Admin was deleted — restore it
+          const merged = [...dbUsers, defaultAdmin];
+          await client.query(
+            "UPDATE shared_data SET value=$1 WHERE key='users'",
+            [JSON.stringify(merged)]
+          );
+          console.log("[Migration] Restored missing admin user");
+        } else {
+          console.log(`[Migration] Users OK — ${dbUsers.length} users preserved`);
+        }
+      } else {
+        // No users at all — seed defaults
+        await client.query(
+          "INSERT INTO shared_data(key,value) VALUES($1,$2) ON CONFLICT DO NOTHING",
+          ["users", JSON.stringify(DEFAULT_SHARED.users)]
+        );
+        console.log("[Migration] Seeded default users (first run)");
+      }
+    } catch (uErr) {
+      console.warn("[Migration] User migration warning:", uErr.message);
+    }
 
     // ── One-time migration: backfill branch_id into orders missing it ──
     try {
