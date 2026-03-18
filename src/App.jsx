@@ -507,10 +507,27 @@ export default function CafeBloom() {
     }
   }, [usersRaw]);
 
+  // ── Admin type detection ────────────────────────────────────────
+  // isGlobalAdmin : admin + branch_id="all" → sees/controls everything
+  // isBranchAdmin : admin + specific branch  → controls own branch only
+  // isStaff       : role="staff"             → limited permissions
+
   const canAccess = useCallback((p) => {
     if (!currentUser) return false;
-    if (currentUser.role === "admin") return true;
-    // users + theme pages are admin-only regardless of permissions
+    const bid = currentUser.branch_id;
+    const isGlobal = currentUser.role === "admin" && bid === "all";
+    const isBranch = currentUser.role === "admin" && bid && bid !== "all";
+
+    // Global admin: access everything
+    if (isGlobal) return true;
+
+    // Branch admin: can access most things EXCEPT theme (global-only)
+    if (isBranch) {
+      if (p === "theme") return false;   // theme = global admin only
+      return true;                        // everything else OK
+    }
+
+    // Staff: check permissions, block admin-only pages
     if (ADMIN_ONLY_PERMS && ADMIN_ONLY_PERMS.has(p)) return false;
     return !!currentUser.permissions?.[p];
   }, [currentUser]);
@@ -544,8 +561,14 @@ export default function CafeBloom() {
     doLogout, canAccess,
     notify,
     isAdmin: currentUser?.role === "admin",
+    isGlobalAdmin: currentUser?.role === "admin" && currentUser?.branch_id === "all",
+    isBranchAdmin: currentUser?.role === "admin" && currentUser?.branch_id && currentUser?.branch_id !== "all",
     lowStock: (ingsRaw||[]).filter(i => (i.current_stock||0) <= (i.threshold||0)),
   };
+
+  const _bid  = currentUser?.branch_id;
+  const _isGA = currentUser?.role === "admin" && _bid === "all";   // global admin
+  const _isBA = currentUser?.role === "admin" && _bid && _bid !== "all"; // branch admin
 
   const ALL_NAV = [
     { id:"pos",       label:"ចំណុចលក់",     emoji:"🛒" },
@@ -555,15 +578,18 @@ export default function CafeBloom() {
     { id:"orders",    label:"ប្រវត្តិ",     emoji:"📜" },
     { id:"report",    label:"របាយការណ៍",    emoji:"📊" },
     { id:"finance",   label:"ហិរញ្ញវត្ថុ", emoji:"💰" },
-    { id:"users",     label:"អ្នកប្រើ",    emoji:"👥", adminOnly:true },
-    { id:"theme",     label:"រចនាប័ទ្ម",   emoji:"🎨", adminOnly:true },
+    // users: global admin sees all users; branch admin sees own-branch users only
+    { id:"users",     label:"អ្នកប្រើ",    emoji:"👥", requireAdmin:true },
+    // theme: GLOBAL ADMIN ONLY
+    { id:"theme",     label:"រចនាប័ទ្ម",   emoji:"🎨", globalOnly:true },
   ];
-  // Filter nav by role + permissions
+
   const NAV = ALL_NAV.filter(n => {
-    if (currentUser.role === "admin") return !n.adminOnly || true; // admin sees all
-    if (n.adminOnly) return false;         // staff can't see admin-only
-    if (n.alwaysShow) return true;         // inventory: always visible (read-only for staff)
-    return canAccess(n.id);                // check per-page permission
+    if (n.globalOnly)   return _isGA;        // theme: global admin only
+    if (n.requireAdmin) return _isGA || _isBA; // users: any admin
+    if (n.alwaysShow)   return true;           // inventory: always (read-only for staff)
+    if (_isGA || _isBA) return true;           // admin sees everything else
+    return canAccess(n.id);                    // staff: check permissions
   });
 
   const goPage = (id) => { setPage(id); setMenuOpen(false); };
@@ -658,6 +684,7 @@ export default function CafeBloom() {
         <ClearDataModal
           branchId={activeBranchId}
           isAdmin={currentUser?.role === "admin"}
+          isBranchAdmin={currentUser?.role === "admin" && currentUser?.branch_id && currentUser?.branch_id !== "all"}
           onClose={() => setShowClearData(false)}
           notify={notify}
           onCleared={(bid) => {
@@ -2585,7 +2612,7 @@ function OrdersPage({ orders, ings }) {
 //  REPORT PAGE  — ថ្ងៃ / ខែ / ឆ្នាំ
 // ═══════════════════════════════════════════════════════════════════
 
-function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId, currentUser }) {
+function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalAdmin, isBranchAdmin, branchId, currentUser }) {
   const [period, setPeriod] = useState("day");   // day | month | year
   const [selDate, setSelDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -2597,9 +2624,10 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId,
   const [allStock,   setAllStock]   = useState(null);  // { branch_id: { branch_name, ingredients } }
   const [stockLoading, setStockLoading] = useState(false);
 
-  // Non-admin: block switching to "all" mode — always stays on branch
+  // Only global admin can switch to "all" mode
+  // Branch admin + staff: always stay on "branch"
   const setReportModeSafe = (mode) => {
-    if (!isAdmin && mode === "all") return;
+    if (!isGlobalAdmin && mode === "all") return;
     setReportMode(mode);
   };
 
@@ -2621,9 +2649,9 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId,
       .catch(() => setStockLoading(false));
   }, [reportMode, isAdmin]);
 
-  // Non-admin ALWAYS uses own branch orders only — cannot see other branches
-  // Admin in "all" mode: uses all-orders fetched from API
-  const sourceOrders = (isAdmin && reportMode === "all") ? allOrders : orders;
+  // Only global admin in "all" mode sees all branches
+  // Branch admin + staff: always own branch only
+  const sourceOrders = (isGlobalAdmin && reportMode === "all") ? allOrders : orders;
 
   // ── Filter orders by period ──────────────────────────────────────
   const filtered = sourceOrders.filter(o => {
@@ -2883,8 +2911,8 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId,
       <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
         <SectionHeader title="📊 របាយការណ៍លក់" sub={periodLabel} />
 
-        {/* Multi-Branch Toggle — admin only */}
-        {isAdmin && (
+        {/* Multi-Branch Toggle — GLOBAL ADMIN ONLY */}
+        {isGlobalAdmin && (
           <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 12, color: "var(--text-dim)" }}>📍 មើល:</span>
             {[["branch", "🏪 តូបខ្ញុំ"], ["all", "🌐 តូបទាំងអស់"]].map(([k, lb]) => (
@@ -3468,7 +3496,7 @@ const CAT_COLORS = ["#E74C3C","#F39C12","#9B59B6","#5BA3E0","#27AE60","#7F8C8D",
 const CAT_EMOJIS = ["💰","⚡","🏛️","🏠","🧴","📦","🚗","💊","🍱","📱","🔧","💡","🎁","📋","🏦"];
 
 
-function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId }) {
+function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalAdmin, isBranchAdmin, branchId }) {
   const MON_KH = ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
   const [selMonth,   setSelMonth]   = useState(() => new Date().toISOString().slice(0,7));
   const [editMode,   setEditMode]   = useState(false);
@@ -3484,7 +3512,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
 
   // Load branches + all-orders when admin switches away from "current"
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isGlobalAdmin) return;
     if (branches.length === 0) {
       const token = localStorage.getItem("pos_token");
       const hdr = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
@@ -3494,7 +3522,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
   }, [isAdmin]);
 
   useEffect(() => {
-    if (!isAdmin || selBranch === "current") return;
+    if (!isGlobalAdmin || selBranch === "current") return;
     if (allOrders !== null) return; // already loaded
     setLoadingAll(true);
     const token = localStorage.getItem("pos_token");
@@ -3508,8 +3536,9 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
   const monthLabel = MON_KH[parseInt(m)-1] + " " + y;
 
   // Resolve which orders to use for revenue
+  // Branch admin: always own branch only
   const sourceOrders = (() => {
-    if (!isAdmin || selBranch === "current") return orders || [];
+    if (!isGlobalAdmin || selBranch === "current") return orders || [];
     if (allOrders === null) return [];
     if (selBranch === "all") return allOrders;
     return allOrders.filter(o => o.branch_id === selBranch);
@@ -3723,8 +3752,8 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, branchId 
       <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid #E8A84B44", background:"linear-gradient(135deg,#1a1208,#120f05)" }}>
         <div style={{ fontWeight:700, fontSize:18, marginBottom:10, color:"var(--accent)" }}>💼 ហិរញ្ញវត្ថុប្រចាំខែ</div>
 
-        {/* Row 1: Branch selector (admin only) */}
-        {isAdmin && (
+        {/* Row 1: Branch selector — GLOBAL ADMIN ONLY */}
+        {isGlobalAdmin && (
           <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
             <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>🏪 សាខា:</span>
             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
@@ -4085,7 +4114,7 @@ function ExpenseForm({ exp, onSave }) {
 // ═══════════════════════════════════════════════════════════════════
 //  CLEAR DATA MODAL  (admin only)
 // ═══════════════════════════════════════════════════════════════════
-function ClearDataModal({ branchId, isAdmin, onClose, notify, onCleared }) {
+function ClearDataModal({ branchId, isAdmin, isBranchAdmin, onClose, notify, onCleared }) {
   const [scope,   setScope]   = useState("current"); // current | all
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -4134,7 +4163,7 @@ function ClearDataModal({ branchId, isAdmin, onClose, notify, onCleared }) {
         <div>
           <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:8, fontWeight:600 }}>ជ្រើសសាខា:</div>
           <div style={{ display:"flex", gap:8 }}>
-            {[["current","🏪 សាខាខ្ញុំ"],["all","🌐 ទាំងអស់"]].map(([v,lb]) => (
+            {[["current","🏪 សាខាខ្ញុំ"], ...(isAdmin && !isBranchAdmin ? [["all","🌐 ទាំងអស់"]] : [])].map(([v,lb]) => (
               <button key={v} onClick={()=>{setScope(v);setConfirm("");}} style={{
                 flex:1, padding:"10px 0", borderRadius:10, cursor:"pointer", fontFamily:"inherit",
                 fontSize:13, fontWeight:700, border:"none",
@@ -4275,10 +4304,24 @@ function SelfResetPasswordModal({ currentUser, onClose, notify }) {
   );
 }
 
-function UsersPage({ users, setUsers, currentUser, notify, branchList }) {
+function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalAdmin, isBranchAdmin, branchId }) {
   const [modal, setModal] = useState(null);
   const [delConf, setDelConf] = useState(null);
   const [permModal, setPermModal] = useState(null); // user to edit perms
+
+  // Branch admin sees only users from own branch (+ themselves)
+  const visibleUsers = (() => {
+    if (isGlobalAdmin) return users;  // global admin sees all
+    if (isBranchAdmin) {
+      // branch admin sees users whose branch matches, or no branch set
+      return users.filter(u =>
+        u.branch_id === branchId ||
+        u.user_id === currentUser.user_id ||
+        !u.branch_id
+      );
+    }
+    return users; // staff shouldn't be here, but show all as fallback
+  })();
 
   const saveUser = (data) => {
     const isNew = !data.user_id;
@@ -4364,16 +4407,25 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList }) {
 
       {/* Sticky header */}
       <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
-        <SectionHeader title="👥 គ្រប់គ្រង Users" sub={`${users.length} users · ${users.filter(u => u.active).length} active`} />
+        <SectionHeader title="👥 គ្រប់គ្រង Users"
+          sub={`${visibleUsers.length} users · ${visibleUsers.filter(u => u.active).length} active${isBranchAdmin ? " · " + branchId : ""}`} />
         <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8 }}>
-          <button onClick={() => setModal({ mode: "add", data: { username: "", password: "", name: "", role: "staff", active: true, permissions: { ...DEFAULT_PERMS_TPL } } })}
+          <button onClick={() => setModal({
+            mode: "add",
+            data: {
+              username: "", password: "", name: "", role: "staff", active: true,
+              permissions: { ...DEFAULT_PERMS_TPL },
+              // Branch admin: auto-assign new users to own branch
+              branch_id: isBranchAdmin ? branchId : "",
+            }
+          })}
             style={btnGold}>➕ បន្ថែម User</button>
         </div>
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 32px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 12 }}>
-          {users.map(u => {
+          {visibleUsers.map(u => {
             const roleInfo = ROLES.find(r => r.v === u.role);
             const isMe = u.user_id === currentUser.user_id;
             const perms = u.role === "admin"
@@ -4645,7 +4697,24 @@ function UserForm({ data, user, onSave, onCancel, roles, branchList }) {
 //  THEME PAGE
 // ═══════════════════════════════════════════════════════════════════
 
-function ThemePage({ theme, setTheme, notify }) {
+function ThemePage({ theme, setTheme, notify, isGlobalAdmin, currentUser }) {
+  // Block non-global-admin from accessing theme
+  if (!isGlobalAdmin) {
+    return (
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+        height:"100%", gap:16, color:"var(--text-dim)" }}>
+        <div style={{ fontSize:48 }}>🔒</div>
+        <div style={{ fontSize:18, fontWeight:700, color:"var(--text-main)" }}>គ្មានសិទ្ធ</div>
+        <div style={{ fontSize:13, color:"#888", textAlign:"center", maxWidth:320 }}>
+          ការកំណត់រចនាប័ទ្ម អាចធ្វើបានតែ Global Admin (branch: all) ប៉ុណ្ណោះ
+        </div>
+        <div style={{ fontSize:12, color:"var(--accent)", background:"var(--bg-card)",
+          border:"1px solid var(--border-col)", borderRadius:10, padding:"8px 16px" }}>
+          👤 {currentUser?.name} · 🏪 {currentUser?.branch_id}
+        </div>
+      </div>
+    );
+  }
   const [custom, setCustom] = useState({ ...theme });
   const [tab, setTab] = useState("presets"); // presets | custom | brand
   const [shopName, setShopName] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
