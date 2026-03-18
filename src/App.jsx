@@ -480,7 +480,7 @@ export default function CafeBloom() {
   });
 
   // Track last shown time to prevent repeated popups (session-based)
-  const stockAlertShownRef = React.useRef(0);
+  const stockAlertShownRef = useRef(0);
 
   useEffect(() => {
     if (!ingsRaw?.length) return;
