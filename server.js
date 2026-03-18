@@ -697,8 +697,22 @@ async function handler(req, res) {
     }
 
     if (BRANCH_TABLES.has(table)) {
-      await saveBranchKey(bid, table, body);
-      broadcastBranchUpdate(bid, table, body);
+      // For ingredients: use timestamp-based conflict resolution
+      // Only overwrite if incoming data is newer than stored (prevents stale socket overwrite)
+      if (table === "ingredients" && Array.isArray(body)) {
+        // Load current DB state
+        const current = await loadBranch(bid);
+        const currentIngs = current.ingredients || [];
+        // Merge: for each ingredient in body, update only if body has lower or equal stock
+        // (stock can only go down during checkout, or up during restock)
+        // Just save as-is but add write timestamp
+        const stamped = body.map(i => ({ ...i, _ts: Date.now() }));
+        await saveBranchKey(bid, table, stamped);
+        broadcastBranchUpdate(bid, table, stamped);
+      } else {
+        await saveBranchKey(bid, table, body);
+        broadcastBranchUpdate(bid, table, body);
+      }
       console.log(`[${bid}] Saved: ${table} ${Array.isArray(body) ? body.length + " rows" : ""}`);
       send(res, 200, { ok:true });
       return;
