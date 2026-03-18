@@ -626,6 +626,25 @@ async function handler(req, res) {
     return;
   }
 
+  // ── ALL STOCK (admin only) — ingredients per branch ─────────────
+  if (req.method === "GET" && url === "/api/all-stock") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin") {
+      send(res, 403, { error:"Admin only" }); return;
+    }
+    const branches = (await loadBranches()).filter(b => b.active);
+    const result = {};
+    for (const b of branches) {
+      const bd = await loadBranch(b.branch_id);
+      result[b.branch_id] = {
+        branch_name: b.branch_name,
+        ingredients: bd.ingredients || [],
+      };
+    }
+    send(res, 200, result);
+    return;
+  }
+
   // ── RESET DAILY ─────────────────────────────────────────────────
   if (req.method === "POST" && url.startsWith("/api/reset-daily")) {
     const bid = resolveBranch(req);
