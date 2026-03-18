@@ -455,6 +455,33 @@ export default function CafeBloom() {
     setCurrentUser(null);
   }, []);
 
+  // ── Low Stock Alert ─────────────────────────────────────────────
+  const [stockAlert, setStockAlert]   = useState(null);  // { items: [...] }
+  const [stockAlertDismissed, setStockAlertDismissed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("cb_stock_alert_dismissed")||"{}"); } catch { return {}; }
+  });
+
+  useEffect(() => {
+    if (!ingsRaw?.length) return;
+    const low = ingsRaw.filter(i => {
+      const stock = Number(i.current_stock||0);
+      const thresh = Number(i.threshold||0);
+      return thresh > 0 && stock <= thresh;
+    });
+    if (!low.length) { setStockAlert(null); return; }
+    // Check if already dismissed for this combination (use ingredient ids + stock as key)
+    const key = low.map(i => i.ingredient_id + ":" + i.current_stock).sort().join(",");
+    if (stockAlertDismissed[key]) return;
+    setStockAlert({ items: low, key });
+  }, [ingsRaw]);
+
+  const dismissStockAlert = (key) => {
+    const next = { ...stockAlertDismissed, [key]: Date.now() };
+    setStockAlertDismissed(next);
+    localStorage.setItem("cb_stock_alert_dismissed", JSON.stringify(next));
+    setStockAlert(null);
+  };
+
   // ── Toast notification (used by POSPage) ─────────────────────────
   const [toast, setToast] = useState("");
   // ── Self Reset Password modal ────────────────────────────────────
@@ -545,6 +572,78 @@ export default function CafeBloom() {
   return (
     <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }} className={"app-root" + (themeRaw.bgMain && themeRaw.bgMain > "#888" ? " light-mode" : "")}>
       <style>{CSS}</style>
+
+      {/* ── Low Stock Alert Modal ── */}
+      {stockAlert && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.75)", zIndex:600,
+          display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <div style={{
+            background:"var(--bg-card)", border:"2px solid #E74C3C55",
+            borderRadius:20, padding:24, maxWidth:420, width:"100%",
+            boxShadow:"0 0 40px #E74C3C22"
+          }}>
+            {/* Header */}
+            <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:18 }}>
+              <div style={{ fontSize:36, animation:"pulse 1.5s infinite" }}>⚠️</div>
+              <div>
+                <div style={{ fontWeight:700, fontSize:17, color:"#E74C3C" }}>ស្តុកជិតអស់!</div>
+                <div style={{ fontSize:12, color:"#888", marginTop:2 }}>
+                  គ្រឿងផ្សំ {stockAlert.items.length} មុខ ត្រូវបំពេញ
+                </div>
+              </div>
+            </div>
+
+            {/* Items list */}
+            <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:20, maxHeight:260, overflowY:"auto" }}>
+              {stockAlert.items.map(i => {
+                const stock  = Number(i.current_stock||0);
+                const thresh = Number(i.threshold||0);
+                const pct    = thresh > 0 ? Math.min(100, Math.round((stock/thresh)*100)) : 0;
+                const color  = pct <= 0 ? "#E74C3C" : pct <= 50 ? "#F39C12" : "#E8A84B";
+                return (
+                  <div key={i.ingredient_id} style={{
+                    background:"var(--bg-main)", border:`1px solid ${color}33`,
+                    borderRadius:12, padding:"10px 14px"
+                  }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                      <span style={{ fontWeight:600, fontSize:13 }}>{i.ingredient_name}</span>
+                      <span style={{ fontSize:12, fontWeight:700, color }}>
+                        {fmtStock(stock)} / {fmtStock(thresh)} {i.unit}
+                      </span>
+                    </div>
+                    {/* Progress bar */}
+                    <div style={{ height:6, background:"#1A181C", borderRadius:3, overflow:"hidden" }}>
+                      <div style={{
+                        height:"100%", borderRadius:3,
+                        width: pct + "%",
+                        background: pct <= 0 ? "#E74C3C" : pct <= 50 ? "linear-gradient(90deg,#E74C3C,#F39C12)" : "linear-gradient(90deg,#F39C12,#E8A84B)",
+                        transition:"width .4s"
+                      }} />
+                    </div>
+                    <div style={{ fontSize:10, color:"#888", marginTop:3 }}>
+                      {pct <= 0 ? "❌ អស់ហើយ!" : `⚠️ ${pct}% នៃ threshold`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Actions */}
+            <div style={{ display:"flex", gap:8 }}>
+              <button
+                onClick={() => dismissStockAlert(stockAlert.key)}
+                style={{ ...btnGhost, flex:1, fontSize:13 }}>
+                ✕ ដឹងហើយ
+              </button>
+              <button
+                onClick={() => { dismissStockAlert(stockAlert.key); setPage("inventory"); }}
+                style={{ ...btnGold, flex:1, fontSize:13 }}>
+                🧂 ចូលទៅស្តុក
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Self Reset Password Modal ── */}
       {showSelfReset && (
@@ -699,7 +798,9 @@ export default function CafeBloom() {
         activeBranchId={activeBranchId}
         branchList={branchList}
         onSwitchBranch={() => setShowBranchPicker(true)}
-        isGlobalAdmin={isGlobalAdmin} />
+        isGlobalAdmin={isGlobalAdmin}
+        lowStockCount={(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0).length}
+        onStockAlert={() => setStockAlert(prev => prev || { items:(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0), key:"manual" })} />
 
       {/* ── Desktop Nav tabs ── */}
       <div className="nav-tab-bar desktop-nav" style={{ display:"flex", gap:0, overflowX:"auto", background:"var(--bg-header)", borderBottom:"2px solid var(--border-col)", padding:"0 8px" }}>
@@ -779,7 +880,7 @@ function LoginPage({ theme, loading, error, onLogin }) {
 // ═══════════════════════════════════════════════════════════════════
 //  TOPBAR COMPONENT
 // ═══════════════════════════════════════════════════════════════════
-function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin }) {
+function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin, lowStockCount, onStockAlert }) {
   const [shopName, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
   const [shopLogo, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
 
@@ -839,6 +940,29 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
         <div style={{ width:7, height:7, borderRadius:"50%", background:statusColor, boxShadow:`0 0 6px ${statusColor}` }} />
         <span style={{ fontSize:11, fontWeight:700, color:statusColor }}>{statusLabel}</span>
       </div>
+      {/* Stock Alert Bell */}
+      {lowStockCount > 0 && (
+        <button onClick={onStockAlert} className="stock-bell topbar-hide-mobile"
+          title={`ស្តុកជិតអស់ ${lowStockCount} មុខ`}
+          style={{ position:"relative", background:"rgba(231,76,60,.12)", border:"1px solid #E74C3C44",
+            borderRadius:20, padding:"4px 10px", cursor:"pointer", display:"flex", alignItems:"center", gap:4, flexShrink:0 }}>
+          <span style={{ fontSize:14 }}>🔔</span>
+          <span style={{ fontSize:10, fontWeight:700, color:"#E74C3C" }}>{lowStockCount}</span>
+        </button>
+      )}
+      {/* Mobile bell (always show) */}
+      {lowStockCount > 0 && (
+        <button onClick={onStockAlert} className="stock-bell"
+          style={{ display:"none", position:"relative", background:"rgba(231,76,60,.12)", border:"none",
+            borderRadius:"50%", width:32, height:32, cursor:"pointer", alignItems:"center", justifyContent:"center",
+            flexShrink:0 }}
+          id="mobile-stock-bell">
+          <span style={{ fontSize:16 }}>🔔</span>
+          <span style={{ position:"absolute", top:-2, right:-2, background:"#E74C3C", color:"#fff",
+            fontSize:9, fontWeight:700, borderRadius:"50%", width:16, height:16,
+            display:"flex", alignItems:"center", justifyContent:"center", lineHeight:1 }}>{lowStockCount}</span>
+        </button>
+      )}
       {/* Clock */}
       <div className="topbar-clock" style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", fontVariantNumeric:"tabular-nums", minWidth:68, textAlign:"center" }}>{hhmm}</div>
       {/* Branch switcher — global admin only */}
@@ -1715,7 +1839,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify 
 // ═══════════════════════════════════════════════════════════════════
 
 
-function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs }) {
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin }) {
   const [subTab, setSubTab] = useState("stock");
   const [modal, setModal] = useState(null);
   const [delConf, setDelConf] = useState(null);
@@ -5430,6 +5554,18 @@ const CSS = `
     from { transform: translateX(-100%); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
   }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50%       { transform: scale(1.15); }
+  }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%     { transform: translateX(-4px); }
+    40%     { transform: translateX(4px); }
+    60%     { transform: translateX(-3px); }
+    80%     { transform: translateX(3px); }
+  }
+  .stock-bell { animation: shake 0.6s ease 0s 3; }
 
   /* Hamburger — hidden on desktop */
   .hamburger-btn { display: none !important; }
@@ -5451,6 +5587,8 @@ const CSS = `
     }
     /* Hide name text inside user pill — keep only avatar */
     .topbar-username { display: none !important; }
+    /* Show mobile stock bell */
+    #mobile-stock-bell { display: flex !important; }
     /* Hide password, clear, logout buttons — use hamburger instead */
     .topbar-hide-mobile { display: none !important; }
     /* User pill: compact — avatar only */
