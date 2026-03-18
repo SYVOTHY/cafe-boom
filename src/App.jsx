@@ -189,21 +189,19 @@ const PERM_LABELS = {
   pos:       { icon: "🛒", label: "ចំណុចលក់" },
   tables:    { icon: "🪑", label: "តុ" },
   menu:      { icon: "🍽️", label: "ម៉ឺនុយ" },
-  inventory: { icon: "🧂", label: "ស្តុក" },
   orders:    { icon: "📋", label: "ប្រវត្តិ" },
   report:    { icon: "📊", label: "របាយការណ៍" },
   finance:   { icon: "💼", label: "ហិរញ្ញវត្ថុ" },
-  // users + theme are admin-only — staff can never get these
+  // inventory, users, theme are admin-only — staff gets read-only view of inventory
 };
 
 // Permissions that only admin can have (never grant to staff)
-const ADMIN_ONLY_PERMS = new Set(["users", "theme"]);
+const ADMIN_ONLY_PERMS = new Set(["users", "theme", "inventory"]);
 
 const DEFAULT_PERMS_TPL = {
   pos: false, tables: false, menu: false,
-  inventory: false, orders: false, report: false,
-  finance: false,
-  // users + theme intentionally excluded — admin-only pages
+  orders: false, report: false, finance: false,
+  // inventory, users, theme — admin-only (staff gets read-only inventory view)
 };
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
@@ -553,7 +551,7 @@ export default function CafeBloom() {
     { id:"pos",       label:"ចំណុចលក់",     emoji:"🛒" },
     { id:"tables",    label:"តុ",           emoji:"🪑" },
     { id:"menu",      label:"ម៉ឺនុយ",       emoji:"📋" },
-    { id:"inventory", label:"ស្តុក",        emoji:"📦" },
+    { id:"inventory", label:"ស្តុក",        emoji:"📦", alwaysShow:true },
     { id:"orders",    label:"ប្រវត្តិ",     emoji:"📜" },
     { id:"report",    label:"របាយការណ៍",    emoji:"📊" },
     { id:"finance",   label:"ហិរញ្ញវត្ថុ", emoji:"💰" },
@@ -563,8 +561,9 @@ export default function CafeBloom() {
   // Filter nav by role + permissions
   const NAV = ALL_NAV.filter(n => {
     if (currentUser.role === "admin") return !n.adminOnly || true; // admin sees all
-    if (n.adminOnly) return false; // staff can't see admin-only
-    return canAccess(n.id); // check per-page permission
+    if (n.adminOnly) return false;         // staff can't see admin-only
+    if (n.alwaysShow) return true;         // inventory: always visible (read-only for staff)
+    return canAccess(n.id);                // check per-page permission
   });
 
   const goPage = (id) => { setPage(id); setMenuOpen(false); };
@@ -728,6 +727,23 @@ export default function CafeBloom() {
                   <div style={{ fontSize:11, color:"#888" }}>@{currentUser.username} · {currentUser.role}</div>
                 </div>
               </div>
+              {/* Branch switcher — global admin, mobile only */}
+              {isGlobalAdmin && branchList.length > 0 && (
+                <button
+                  onClick={() => { setMenuOpen(false); setShowBranchPicker(true); }}
+                  style={{ width:"100%", display:"flex", alignItems:"center", gap:10, padding:"10px 14px",
+                    border:"1px solid #5BA3E044", borderRadius:10, background:"rgba(91,163,224,.08)",
+                    color:"#5BA3E0", cursor:"pointer", fontFamily:"inherit", fontSize:13, marginBottom:6 }}>
+                  🏪
+                  <div style={{ flex:1, textAlign:"left" }}>
+                    <div style={{ fontSize:12, fontWeight:700 }}>ជ្រើសសាខា</div>
+                    <div style={{ fontSize:10, color:"#5BA3E0AA", marginTop:1 }}>
+                      {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || activeBranchId}
+                    </div>
+                  </div>
+                  <span style={{ fontSize:11 }}>▼</span>
+                </button>
+              )}
               {/* Action buttons */}
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 <button
@@ -965,12 +981,13 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
       )}
       {/* Clock */}
       <div className="topbar-clock" style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", fontVariantNumeric:"tabular-nums", minWidth:68, textAlign:"center" }}>{hhmm}</div>
-      {/* Branch switcher — global admin only */}
+      {/* Branch switcher — global admin only, HIDDEN on mobile (moved to hamburger) */}
       {isGlobalAdmin && branchList.length > 0 && (
-        <div style={{ display:"flex", alignItems:"center", gap:4, background:"rgba(91,163,224,.12)", border:"1px solid #5BA3E044", borderRadius:20, padding:"4px 10px", cursor:"pointer" }}
+        <div className="topbar-hide-mobile"
+          style={{ display:"flex", alignItems:"center", gap:4, background:"rgba(91,163,224,.12)", border:"1px solid #5BA3E044", borderRadius:20, padding:"4px 10px", cursor:"pointer" }}
           onClick={onSwitchBranch}>
           <span style={{ fontSize:10, color:"#5BA3E0" }}>🏪</span>
-          <span style={{ fontSize:11, fontWeight:700, color:"#5BA3E0" }} className="topbar-username">
+          <span style={{ fontSize:11, fontWeight:700, color:"#5BA3E0" }}>
             {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || activeBranchId}
           </span>
           <span style={{ fontSize:9, color:"#5BA3E0" }}>▼</span>
@@ -1839,7 +1856,9 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify 
 // ═══════════════════════════════════════════════════════════════════
 
 
-function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin }) {
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser }) {
+  // Staff: read-only view — cannot add/edit/delete/restock
+  const canEdit = isAdmin;
   const [subTab, setSubTab] = useState("stock");
   const [modal, setModal] = useState(null);
   const [delConf, setDelConf] = useState(null);
@@ -1892,11 +1911,19 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
 
       {/* ── STICKY HEADER ── */}
       <div style={{ flexShrink: 0, padding: "16px 14px 0", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
-        <SectionHeader title="🧂 គ្រប់គ្រងស្តុក" sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} គ្រឿងផ្សំជិតអស់`} />
-        <SubTabs tabs={[["stock", "🧂 Ingredients"], ["recipes", "📋 Recipe Mapping"], ["sql", "💾 SQL"], ["auditlog", "🗒️ Audit Log"]]} val={subTab} set={setSubTab} />
+        <SectionHeader
+          title="🧂 ស្តុកគ្រឿងផ្សំ"
+          sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} ជិតអស់${!canEdit ? " · 👁️ មើលបានតែ" : ""}`}
+        />
+        {/* Admin: full tabs; Staff: stock view only */}
+        {canEdit
+          ? <SubTabs tabs={[["stock", "🧂 Ingredients"], ["recipes", "📋 Recipe Mapping"], ["sql", "💾 SQL"], ["auditlog", "🗒️ Audit Log"]]} val={subTab} set={setSubTab} />
+          : <SubTabs tabs={[["stock", "🧂 ស្តុក"]]} val={subTab} set={setSubTab} />
+        }
         {subTab === "stock" && (
           <div style={{ padding: "10px 0 10px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <button onClick={() => setModal({ mode: "add", entity: "ing", data: { ingredient_id: null, ingredient_name: "", current_stock: 0, unit: "g", threshold: 100 } })} style={{ ...btnGold, padding:"9px 16px", width:"auto" }}>➕ បន្ថែម</button>
+            {canEdit && <button onClick={() => setModal({ mode: "add", entity: "ing", data: { ingredient_id: null, ingredient_name: "", current_stock: 0, unit: "g", threshold: 100 } })} style={{ ...btnGold, padding:"9px 16px", width:"auto" }}>➕ បន្ថែម</button>}
+            {!canEdit && <div style={{ fontSize:12, color:"#888", padding:"6px 12px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ មើលបានតែ — admin ទេដែរ edit</div>}
             <div style={{ flex:1 }} />
             {/* Export buttons */}
             <button style={{ ...btnSmall, color:"#27AE60", borderColor:"#27AE6044", fontSize:12, padding:"7px 14px" }}
@@ -2049,10 +2076,14 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                     <div style={{ height: "100%", width: `${pct}%`, background: col, borderRadius: 3 }} />
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => setRestock(i)} style={{ ...btnSmall, flex: 1, color: "#27AE60", borderColor: "#27AE6033", fontSize: 12 }}>📦 បំពេញ</button>
-                    <button onClick={() => setModal({ mode: "edit", entity: "ing", data: { ...i } })} style={{ ...btnSmall, flex: 1, fontSize: 12 }}>✏️ កែ</button>
-                    <button onClick={() => setDelConf({ name: i.ingredient_name, fn: () => { setIngs(p => p.filter(x => x.ingredient_id !== i.ingredient_id)); setRecipes(p => p.filter(r => r.ingredient_id !== i.ingredient_id)); notify("✓ លុប"); setDelConf(null); } })}
-                      style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33", padding: "5px 10px", fontSize: 12 }}>🗑️</button>
+                    {canEdit ? (<>
+                      <button onClick={() => setRestock(i)} style={{ ...btnSmall, flex: 1, color: "#27AE60", borderColor: "#27AE6033", fontSize: 12 }}>📦 បំពេញ</button>
+                      <button onClick={() => setModal({ mode: "edit", entity: "ing", data: { ...i } })} style={{ ...btnSmall, flex: 1, fontSize: 12 }}>✏️ កែ</button>
+                      <button onClick={() => setDelConf({ name: i.ingredient_name, fn: () => { setIngs(p => p.filter(x => x.ingredient_id !== i.ingredient_id)); setRecipes(p => p.filter(r => r.ingredient_id !== i.ingredient_id)); notify("✓ លុប"); setDelConf(null); } })}
+                        style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33", padding: "5px 10px", fontSize: 12 }}>🗑️</button>
+                    </>) : (
+                      <div style={{ fontSize:11, color:"#555", padding:"4px 8px" }}>👁️ មើលបានតែ</div>
+                    )}
                   </div>
                 </div>
               );
@@ -2560,9 +2591,11 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId,
   const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [selYear, setSelYear] = useState(() => String(new Date().getFullYear()));
   const [reportMode, setReportMode] = useState("branch"); // branch | all
-  const [allOrders, setAllOrders] = useState([]);
+  const [allOrders,  setAllOrders]  = useState([]);
   const [allLoading, setAllLoading] = useState(false);
-  const [branches, setBranches] = useState([]);
+  const [branches,   setBranches]   = useState([]);
+  const [allStock,   setAllStock]   = useState(null);  // { branch_id: { branch_name, ingredients } }
+  const [stockLoading, setStockLoading] = useState(false);
 
   // Non-admin: block switching to "all" mode — always stays on branch
   const setReportModeSafe = (mode) => {
@@ -2572,15 +2605,20 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId,
 
   useEffect(() => {
     if (reportMode !== "all" || !isAdmin) return;
-    setAllLoading(true);
     const token = localStorage.getItem("pos_token");
     const headers = { "Content-Type":"application/json", "ngrok-skip-browser-warning":"true", ...(token ? { Authorization:"Bearer "+token } : {}) };
+    setAllLoading(true);
     fetch(`${API}/api/all-orders`, { headers })
       .then(r => r.json()).then(data => { setAllOrders(Array.isArray(data) ? data : []); setAllLoading(false); })
       .catch(() => setAllLoading(false));
     fetch(`${API}/api/branches`, { headers })
       .then(r => r.json()).then(data => setBranches(Array.isArray(data) ? data : []))
-      .catch(() => { });
+      .catch(() => {});
+    // Fetch per-branch stock data
+    setStockLoading(true);
+    fetch(`${API}/api/all-stock`, { headers })
+      .then(r => r.json()).then(data => { setAllStock(data); setStockLoading(false); })
+      .catch(() => setStockLoading(false));
   }, [reportMode, isAdmin]);
 
   // Non-admin ALWAYS uses own branch orders only — cannot see other branches
@@ -3249,28 +3287,105 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId,
             );
           })()}
 
-          {/* Stock health + Usage */}
-          <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 16, gridColumn: "1/-1" }}>
+          {/* Stock health + Usage — Admin only */}
+          {isAdmin && (
+          <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, gridColumn:"1/-1" }}>
 
-            {/* ── Stock Status ── */}
-            <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 13, color: lowStock.length ? "#E74C3C" : "#aaa" }}>⚠️ ស្ថានភាពស្តុក</div>
-            {ings.map(i => {
-              const isLow = Number(i.current_stock) <= Number(i.threshold);
-              const pct = Math.min(100, (Number(i.current_stock) / (Number(i.threshold) * 4 || 1)) * 100);
-              const col = isLow ? "#E74C3C" : Number(i.current_stock) <= Number(i.threshold) * 1.5 ? "#F39C12" : "#27AE60";
-              return (
-                <div key={i.ingredient_id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
-                  <div style={{ width: 130, fontSize: 11, color: "#aaa", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i.ingredient_name}</div>
-                  <div style={{ flex: 1, height: 5, background: "#1A181C", borderRadius: 3 }}>
-                    <div style={{ height: "100%", width: pct+"%", background: col, borderRadius: 3 }} />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={{ fontWeight:700, fontSize:14 }}>
+                🧂 ស្ថានភាពស្តុក
+                {lowStock.length > 0 && (
+                  <span style={{ marginLeft:8, background:"#E74C3C22", color:"#E74C3C", fontSize:11,
+                    padding:"2px 8px", borderRadius:10, border:"1px solid #E74C3C33" }}>
+                    ⚠️ {lowStock.length} ជិតអស់
+                  </span>
+                )}
+              </div>
+              {reportMode === "all"
+                ? <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🌐 ទាំងអស់</span>
+                : <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🏪 {branchId}</span>
+              }
+            </div>
+
+            {/* ── Mode: branch (own branch only) ── */}
+            {reportMode !== "all" && (() => {
+              const StockBar = ({i}) => {
+                const stock = Number(i.current_stock), thresh = Number(i.threshold);
+                const isLow = thresh > 0 && stock <= thresh;
+                const isWarn = thresh > 0 && stock <= thresh * 1.5 && !isLow;
+                const pct = Math.min(100, (stock / (thresh * 4 || 1)) * 100);
+                const col = isLow ? "#E74C3C" : isWarn ? "#F39C12" : "#27AE60";
+                return (
+                  <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:7 }}>
+                    <div style={{ width:130, fontSize:11, color:isLow?"#E74C3C":"#aaa", flexShrink:0,
+                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontWeight:isLow?700:400 }}>
+                      {isLow&&"⚠️ "}{i.ingredient_name}
+                    </div>
+                    <div style={{ flex:1, height:6, background:"#1A181C", borderRadius:3, overflow:"hidden" }}>
+                      <div style={{ height:"100%", width:pct+"%", background:col, borderRadius:3, transition:"width .4s" }} />
+                    </div>
+                    <div style={{ fontSize:11, color:col, minWidth:80, textAlign:"right", fontFamily:"'DM Mono',monospace", fontWeight:isLow?700:400 }}>
+                      {fmtStock(stock)}/{fmtStock(thresh)} {i.unit}
+                    </div>
                   </div>
-                  <div style={{ fontSize: 11, color: col, minWidth: 70, textAlign: "right", fontFamily: "'DM Mono',monospace" }}>{fmtStock(Number(i.current_stock))}{i.unit}</div>
-                </div>
-              );
-            })}
+                );
+              };
+              return ings.length === 0
+                ? <div style={{ color:"#555", fontSize:12 }}>គ្មានស្តុក</div>
+                : ings.map(i => <StockBar key={i.ingredient_id} i={i} />);
+            })()}
+
+            {/* ── Mode: all (per-branch panels) ── */}
+            {reportMode === "all" && (
+              stockLoading
+                ? <div style={{ textAlign:"center", padding:20, color:"#888" }}>⏳ កំពុងទាញស្តុក...</div>
+                : allStock
+                  ? <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:12 }}>
+                      {Object.entries(allStock).map(([bid, bd]) => {
+                        const bIngs = bd.ingredients || [];
+                        const bLow  = bIngs.filter(i => Number(i.threshold)>0 && Number(i.current_stock)<=Number(i.threshold));
+                        return (
+                          <div key={bid} style={{ background:"var(--bg-main)", border:`1px solid ${bLow.length?"#E74C3C33":"#1A181C"}`, borderRadius:12, padding:14 }}>
+                            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                              <div style={{ fontWeight:700, fontSize:13 }}>🏪 {bd.branch_name}</div>
+                              {bLow.length > 0
+                                ? <span style={{ fontSize:11, color:"#E74C3C", background:"#E74C3C22", padding:"2px 8px", borderRadius:8, border:"1px solid #E74C3C33" }}>⚠️ {bLow.length} ជិតអស់</span>
+                                : <span style={{ fontSize:11, color:"#27AE60" }}>✅ ល្អ</span>
+                              }
+                            </div>
+                            {bIngs.length === 0
+                              ? <div style={{ color:"#555", fontSize:11 }}>គ្មានស្តុក</div>
+                              : bIngs.map(i => {
+                                const stock = Number(i.current_stock), thresh = Number(i.threshold);
+                                const isLow = thresh>0 && stock<=thresh;
+                                const isWarn = thresh>0 && stock<=thresh*1.5 && !isLow;
+                                const pct = Math.min(100,(stock/(thresh*4||1))*100);
+                                const col = isLow?"#E74C3C":isWarn?"#F39C12":"#27AE60";
+                                return (
+                                  <div key={i.ingredient_id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5 }}>
+                                    <div style={{ width:110, fontSize:10, color:isLow?"#E74C3C":"#888", flexShrink:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontWeight:isLow?700:400 }}>
+                                      {isLow&&"⚠ "}{i.ingredient_name}
+                                    </div>
+                                    <div style={{ flex:1, height:5, background:"#1A181C", borderRadius:3, overflow:"hidden" }}>
+                                      <div style={{ height:"100%", width:pct+"%", background:col, borderRadius:3 }} />
+                                    </div>
+                                    <div style={{ fontSize:10, color:col, minWidth:72, textAlign:"right", fontFamily:"'DM Mono',monospace" }}>
+                                      {fmtStock(stock)}/{fmtStock(thresh)}{i.unit}
+                                    </div>
+                                  </div>
+                                );
+                              })
+                            }
+                          </div>
+                        );
+                      })}
+                    </div>
+                  : <div style={{ color:"#555", fontSize:12 }}>ចុច Refresh ដើម្បីទាញស្តុក</div>
+            )}
 
             {/* ── Ingredient Usage (Day / Month) ── */}
             {(() => {
+              if (!isAdmin) return null; // staff cannot see usage
               // Calculate usage from filtered orders via recipes
               const usageMap = {}; // ingredient_id → qty used
               filtered.forEach(o => {
@@ -3319,6 +3434,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, branchId,
               );
             })()}
           </div>
+          )}
         </div>
 
         {/* Telegram button */}
