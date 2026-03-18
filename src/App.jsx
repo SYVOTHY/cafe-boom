@@ -3741,7 +3741,9 @@ const CAT_EMOJIS = ["💰","⚡","🏛️","🏠","🧴","📦","🚗","💊","�
 
 function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalAdmin, isBranchAdmin, branchId }) {
   const MON_KH = ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
+  const [selView,    setSelView]    = useState("month"); // "month" | "day"
   const [selMonth,   setSelMonth]   = useState(() => new Date().toISOString().slice(0,7));
+  const [selDay,     setSelDay]     = useState(() => new Date().toISOString().slice(0,10));
   const [editMode,   setEditMode]   = useState(false);
   const [catMode,    setCatMode]    = useState(false);
   const [draft,      setDraft]      = useState({});
@@ -3791,36 +3793,24 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const expCats = (() => {
     if (!Array.isArray(expenses)) return DEFAULT_EXPENSE_CATS;
     const meta = expenses.find(e => e && e._meta);
-    const saved = (meta && meta._cats && meta._cats.length > 0) ? meta._cats : [];
-    if (saved.length === 0) return DEFAULT_EXPENSE_CATS;
-    // Merge: keep saved order, append any DEFAULT cats whose id is not yet in saved
-    const savedIds = new Set(saved.map(c => c.id));
-    const merged = [...saved, ...DEFAULT_EXPENSE_CATS.filter(c => !savedIds.has(c.id))];
-    return merged;
+    return (meta && meta._cats && meta._cats.length > 0) ? meta._cats : DEFAULT_EXPENSE_CATS;
   })();
-
-  // Auto-save merged cats back to DB if any DEFAULT cats were missing from saved list
-  const expCatsSavedLen = Array.isArray(expenses) ? (expenses.find(e => e?._meta)?._cats?.length ?? -1) : -1;
-  useEffect(() => {
-    if (!Array.isArray(expenses)) return;
-    const meta = expenses.find(e => e && e._meta);
-    const saved = meta?._cats;
-    if (!saved || saved.length === 0) return;
-    const savedIds = new Set(saved.map(c => c.id));
-    const missing = DEFAULT_EXPENSE_CATS.filter(c => !savedIds.has(c.id));
-    if (missing.length === 0) return;
-    const merged = [...saved, ...missing];
-    const monthRecs = expenses.filter(e => e && !e._meta);
-    setExpenses([...monthRecs, { _meta: true, _cats: merged }]);
-  // run only when the saved cats list length changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expCatsSavedLen]);
 
   const monthOrders = sourceOrders.filter(o => {
     try { return new Date(o.order_id).toISOString().slice(0,7) === selMonth; } catch { return false; }
   });
   const revenue = monthOrders.reduce((s,o) => s + o.total + o.tax, 0);
 
+  // ── Daily data ─────────────────────────────────────────────────────
+  const dayOrders = sourceOrders.filter(o => {
+    try { return new Date(o.order_id).toISOString().slice(0,10) === selDay; } catch { return false; }
+  });
+  const dayRevenue = dayOrders.reduce((s,o) => s + o.total + o.tax, 0);
+
+  // All days that have orders (for day picker quick-nav)
+  const orderDays = [...new Set((sourceOrders||[]).map(o => {
+    try { return new Date(o.order_id).toISOString().slice(0,10); } catch { return null; }
+  }).filter(Boolean))].sort().reverse();
   // ── Expense transactions (new system) ─────────────────────────────
   // Each entry: { id, date, cat_id, desc, amount, branch_id, created_by }
   const expTxns = Array.isArray(expenses)
@@ -3845,6 +3835,28 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const totalExp = monthTxns.reduce((s,t) => s + (Number(t.amount)||0), 0) + legacyExp;
   const profit   = revenue - totalExp;
   const profitColor = profit > 0 ? "#27AE60" : profit < 0 ? "#E74C3C" : "#888";
+
+  // Daily expense + profit
+  const dayTxns    = expTxns.filter(t => {
+    const inDay    = t.date === selDay;
+    const inBranch = viewBranchId === null ? true : (t.branch_id === viewBranchId);
+    return inDay && inBranch;
+  });
+  const dayExp     = dayTxns.reduce((s,t) => s + (Number(t.amount)||0), 0);
+  const dayProfit  = dayRevenue - dayExp;
+  const dayProfitColor = dayProfit > 0 ? "#27AE60" : dayProfit < 0 ? "#E74C3C" : "#888";
+
+  // Per-hour breakdown for the selected day
+  const hourMap = {};
+  dayOrders.forEach(o => {
+    try {
+      const h = new Date(o.order_id).getHours();
+      if (!hourMap[h]) hourMap[h] = { orders:0, revenue:0 };
+      hourMap[h].orders++;
+      hourMap[h].revenue += o.total + o.tax;
+    } catch {}
+  });
+
 
   // ── Add / Edit / Delete expense transaction ────────────────────────
   const [txnModal, setTxnModal] = useState(null); // null | {mode:"add"|"edit", data:{}}
@@ -4077,7 +4089,20 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
 
       {/* Sticky Header */}
       <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid #E8A84B44", background:"linear-gradient(135deg,#1a1208,#120f05)" }}>
-        <div style={{ fontWeight:700, fontSize:18, marginBottom:10, color:"var(--accent)" }}>💼 ហិរញ្ញវត្ថុប្រចាំខែ</div>
+        <div style={{ fontWeight:700, fontSize:18, marginBottom:10, color:"var(--accent)" }}>💼 ហិរញ្ញវត្ថុ</div>
+
+        {/* View toggle: Month / Day */}
+        <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+          {[["month","📆 ប្រចាំខែ"],["day","📅 ប្រចាំថ្ងៃ"]].map(([v,lb]) => (
+            <button key={v} onClick={() => setSelView(v)}
+              style={{ padding:"6px 18px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
+                fontSize:13, fontWeight:700,
+                background: selView===v ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
+                color: selView===v ? "#fff" : "#666" }}>
+              {lb}
+            </button>
+          ))}
+        </div>
 
         {/* Row 1: Branch selector — GLOBAL ADMIN ONLY */}
         {isGlobalAdmin && (
@@ -4112,16 +4137,41 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
           </div>
         )}
 
-        {/* Row 2: Month selector + print */}
+        {/* Row 2: Date selector + print */}
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📆 ខែ:</span>
-          <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
-            style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
-            {orderMonths.map(mo => {
-              const [oy,om] = mo.split("-");
-              return <option key={mo} value={mo}>{MON_KH[parseInt(om)-1]} {oy}</option>;
-            })}
-          </select>
+          {selView === "month" ? (
+            <>
+              <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📆 ខែ:</span>
+              <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
+                style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
+                {orderMonths.map(mo => {
+                  const [oy,om] = mo.split("-");
+                  return <option key={mo} value={mo}>{MON_KH[parseInt(om)-1]} {oy}</option>;
+                })}
+              </select>
+            </>
+          ) : (
+            <>
+              <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📅 ថ្ងៃ:</span>
+              <input type="date" value={selDay}
+                onChange={e => setSelDay(e.target.value)}
+                style={{ ...inputSt, fontSize:13, padding:"6px 12px" }} />
+              {/* Quick-nav: prev/next day that has orders */}
+              {(() => {
+                const idx = orderDays.indexOf(selDay);
+                const prev = orderDays[idx + 1];
+                const next = orderDays[idx - 1];
+                return (
+                  <div style={{ display:"flex", gap:4 }}>
+                    <button onClick={() => prev && setSelDay(prev)} disabled={!prev}
+                      style={{ ...btnSmall, fontSize:12, opacity: prev ? 1 : 0.3 }}>◀</button>
+                    <button onClick={() => next && setSelDay(next)} disabled={!next}
+                      style={{ ...btnSmall, fontSize:12, opacity: next ? 1 : 0.3 }}>▶</button>
+                  </div>
+                );
+              })()}
+            </>
+          )}
           {/* Branch label badge */}
           {isAdmin && selBranch !== "current" && (
             <span style={{ fontSize:11, padding:"3px 10px", borderRadius:12, background:"#E8A84B22", color:"var(--accent)", fontWeight:700, border:"1px solid #E8A84B33" }}>
@@ -4139,7 +4189,164 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       <div style={{ flex:1, overflowY:"auto", padding:"16px" }}>
         <div style={{ maxWidth:720, margin:"0 auto" }}>
 
-          {/* KPI Cards */}
+        {/* ══════════ DAILY VIEW ══════════ */}
+        {selView === "day" && (() => {
+          const maxH = Math.max(...Object.values(hourMap).map(h => h.revenue), 1);
+          // top products of the day
+          const prodMap = {};
+          dayOrders.forEach(o => (o.items||[]).forEach(it => {
+            const k = it.product_name || it.name || "?";
+            if (!prodMap[k]) prodMap[k] = { qty:0, rev:0, emoji: it.emoji||"🍽️" };
+            prodMap[k].qty  += it.qty || 1;
+            prodMap[k].rev  += (it.price||0) * (it.qty||1);
+          }));
+          const topProds = Object.entries(prodMap).sort((a,b)=>b[1].rev-a[1].rev).slice(0,8);
+          return (
+            <>
+              {/* KPI row */}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:16 }}>
+                {[
+                  ["💰","ចំណូល",   dayRevenue,  "#E8A84B"],
+                  ["💸","ចំណាយ",   dayExp,      "#E74C3C"],
+                  ["📈","ចំណេញ",   dayProfit,   dayProfitColor],
+                ].map(([ic,lb,val,col]) => (
+                  <div key={lb} style={{ background:"var(--bg-card)", border:"1px solid "+col+"33", borderRadius:14, padding:"14px 10px", textAlign:"center" }}>
+                    <div style={{ fontSize:22 }}>{ic}</div>
+                    <div style={{ fontSize:18, fontWeight:700, color:col, marginTop:4 }}>{fmt(val)}</div>
+                    <div style={{ fontSize:11, color:"#555", marginTop:2 }}>{lb}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Orders count + avg */}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
+                {[
+                  ["🧾", "Orders",    dayOrders.length,                                                                "#5BA3E0"],
+                  ["🛒", "Items sold", dayOrders.reduce((s,o)=>(o.items||[]).reduce((ss,i)=>ss+(i.qty||1),0)+s,0),    "#27AE60"],
+                  ["📊", "Avg/order",  dayOrders.length ? dayRevenue/dayOrders.length : 0,                             "#9B6FE8"],
+                ].map(([ic,lb,val,col]) => (
+                  <div key={lb} style={{ background:"var(--bg-card)", border:"1px solid "+col+"22", borderRadius:12, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ fontSize:20 }}>{ic}</span>
+                    <div>
+                      <div style={{ fontSize:15, fontWeight:700, color:col }}>{typeof val === "number" && !Number.isInteger(val) ? fmt(val) : val}</div>
+                      <div style={{ fontSize:11, color:"#555" }}>{lb}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Hourly chart */}
+              {Object.keys(hourMap).length > 0 && (
+                <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#E8A84B", marginBottom:12 }}>⏰ ចំណូលតាមម៉ោង</div>
+                  <div style={{ display:"flex", alignItems:"flex-end", gap:4, height:80 }}>
+                    {Array.from({length:24},(_,h) => {
+                      const d = hourMap[h];
+                      if (!d && !Object.keys(hourMap).some(k => Math.abs(k-h)<=2)) return null;
+                      const pct = d ? (d.revenue/maxH)*100 : 0;
+                      return (
+                        <div key={h} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:2, minWidth:0 }}>
+                          <div style={{ width:"100%", height: pct+"%", minHeight: d?2:0,
+                            background: d ? "linear-gradient(0deg,#B8732A,#E8A84B)" : "transparent",
+                            borderRadius:"3px 3px 0 0", transition:"height .3s" }} />
+                          <div style={{ fontSize:9, color:"#444", lineHeight:1 }}>{h}h</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop:8, display:"flex", flexWrap:"wrap", gap:10 }}>
+                    {Object.entries(hourMap).sort((a,b)=>b[1].revenue-a[1].revenue).slice(0,3).map(([h,d]) => (
+                      <span key={h} style={{ fontSize:11, color:"#E8A84B", background:"#E8A84B11", padding:"2px 8px", borderRadius:8 }}>
+                        🕐 {h}:00 — {fmt(d.revenue)} ({d.orders} orders)
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Top products */}
+              {topProds.length > 0 && (
+                <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#E8A84B", marginBottom:10 }}>🏆 មុខទំនិញលក់ដាច់</div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                    {topProds.map(([name,d], i) => {
+                      const pct = dayRevenue > 0 ? Math.round((d.rev/dayRevenue)*100) : 0;
+                      return (
+                        <div key={name} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ fontSize:13, color:"#555", minWidth:18, textAlign:"right" }}>{i+1}</span>
+                          <span style={{ fontSize:16 }}>{d.emoji}</span>
+                          <div style={{ flex:1, minWidth:0 }}>
+                            <div style={{ fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{name}</div>
+                            <div style={{ height:4, background:"#1A181C", borderRadius:2, marginTop:3, overflow:"hidden" }}>
+                              <div style={{ width:pct+"%", height:"100%", background:"linear-gradient(90deg,#B8732A,#E8A84B)", borderRadius:2 }} />
+                            </div>
+                          </div>
+                          <span style={{ fontSize:12, color:"#888", minWidth:30, textAlign:"right" }}>×{d.qty}</span>
+                          <span style={{ fontSize:13, fontWeight:700, color:"#E8A84B", fontFamily:"'DM Mono',monospace", minWidth:52, textAlign:"right" }}>{fmt(d.rev)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Day expenses */}
+              <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#E74C3C" }}>💸 ចំណាយថ្ងៃនេះ</div>
+                  <button onClick={() => setTxnModal({ data: { id:"txn_"+Date.now(), date:selDay, cat_id: expCats[0]?.id||"other", desc:"", amount:"", branch_id:branchId, _isNew:true } })}
+                    style={{ ...btnGold, padding:"6px 12px", fontSize:11 }}>➕ បន្ថែម</button>
+                </div>
+                {dayTxns.length === 0
+                  ? <div style={{ textAlign:"center", padding:"16px 0", color:"#444", fontSize:12 }}>គ្មានចំណាយថ្ងៃ {selDay}</div>
+                  : <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                      {dayTxns.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(t => {
+                        const cat = expCats.find(c => c.id === t.cat_id);
+                        return (
+                          <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, background:"var(--bg-main)", border:"1px solid var(--border-col)" }}>
+                            <div style={{ width:8, height:8, borderRadius:"50%", background:cat?.color||"#888", flexShrink:0 }} />
+                            <div style={{ flex:1, fontSize:12 }}>{t.desc || cat?.label || "ចំណាយ"}</div>
+                            {cat && <span style={{ fontSize:11, color:cat.color }}>{cat.label}</span>}
+                            <span style={{ fontSize:13, fontWeight:700, color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(t.amount)}</span>
+                            <button onClick={() => setTxnModal({ data:{...t} })} style={{ ...btnSmall, fontSize:11, padding:"3px 6px", color:"#E8A84B" }}>✏️</button>
+                            <button onClick={() => setTxnConfirmDel({ id:t.id, desc:t.desc||cat?.label||"ចំណាយ", amount:t.amount })} style={{ ...btnSmall, fontSize:11, padding:"3px 6px", color:"#E74C3C" }}>🗑️</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                }
+              </div>
+
+              {/* Orders list */}
+              <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16 }}>
+                <div style={{ fontSize:13, fontWeight:700, color:"#5BA3E0", marginBottom:10 }}>🧾 Orders ({dayOrders.length})</div>
+                {dayOrders.length === 0
+                  ? <div style={{ textAlign:"center", padding:"16px 0", color:"#444", fontSize:12 }}>គ្មាន orders ថ្ងៃ {selDay}</div>
+                  : <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                      {[...dayOrders].sort((a,b)=>b.order_id-a.order_id).map(o => {
+                        const t = new Date(o.order_id);
+                        const time = `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
+                        return (
+                          <div key={o.order_id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, background:"var(--bg-main)", border:"1px solid var(--border-col)" }}>
+                            <span style={{ fontSize:11, color:"#555", minWidth:40 }}>🕐 {time}</span>
+                            <span style={{ fontSize:11, color:"#888", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                              {(o.items||[]).map(i=>`${i.emoji||""}${i.product_name||i.name||""}`).join(" · ")}
+                            </span>
+                            {o.table_name && <span style={{ fontSize:11, color:"#5BA3E0" }}>🪑 {o.table_name}</span>}
+                            <span style={{ fontSize:13, fontWeight:700, color:"#E8A84B", fontFamily:"'DM Mono',monospace" }}>{fmt(o.total+o.tax)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                }
+              </div>
+            </>
+          );
+        })()}
+
+        {/* ══════════ MONTHLY VIEW ══════════ */}
+        {selView === "month" && (<>
+
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:18 }}>
             {[
               ["💰","ចំណូល",  revenue,  "#E8A84B"],
@@ -4292,6 +4499,8 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
               </div>
             )}
           </div>
+
+        </>)}  {/* end monthly view */}
 
         </div>
       </div>
