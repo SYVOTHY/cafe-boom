@@ -1538,8 +1538,19 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 // ═══════════════════════════════════════════════════════════════════
 //  TABLES PAGE
 // ═══════════════════════════════════════════════════════════════════
-function TablesPage({ tables, setTables, orders }) {
+function TablesPage({ tables, setTables, orders, currentUser, isAdmin, isGlobalAdmin }) {
   const busy = tables.filter(t => t.status === "busy").length;
+  const canManage = isAdmin || isGlobalAdmin;
+
+  // ── add table modal state ──
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [addLabel,   setAddLabel]   = useState("");
+  const [addEmoji,   setAddEmoji]   = useState("🪑");
+  const [editTid,    setEditTid]    = useState(null); // table_id being renamed
+  const [editLabel,  setEditLabel]  = useState("");
+  const [delConfTid, setDelConfTid] = useState(null);
+
+  const TABLE_EMOJIS = ["🪑","🛋️","🏮","🌿","⭐","🎯","💎","🏠","🌸","🎪","🍽️","☕"];
 
   function toggleTable(tid) {
     setTables(prev => prev.map(t => t.table_id === tid
@@ -1548,23 +1559,151 @@ function TablesPage({ tables, setTables, orders }) {
     ));
   }
 
+  function addTable() {
+    const label = addLabel.trim();
+    if (!label) return;
+    // Check duplicate
+    if (tables.find(t => String(t.table_id) === label || String(t.label) === label)) {
+      return;
+    }
+    // Next numeric id — use label as id if it's a number, else use next int
+    const nextId = isNaN(label)
+      ? label
+      : Math.max(0, ...tables.map(t => isNaN(t.table_id) ? 0 : Number(t.table_id))) + 1;
+    const displayId = isNaN(label) ? label : nextId;
+    setTables(prev => [...prev, {
+      table_id: displayId,
+      label:    addEmoji + " " + label,
+      status:   "free",
+    }]);
+    setAddLabel(""); setAddEmoji("🪑"); setShowAdd(false);
+  }
+
+  function saveRename(tid) {
+    const label = editLabel.trim();
+    if (!label) { setEditTid(null); return; }
+    setTables(prev => prev.map(t => t.table_id === tid ? { ...t, label } : t));
+    setEditTid(null);
+  }
+
+  function deleteTable(tid) {
+    setTables(prev => prev.filter(t => t.table_id !== tid));
+    setDelConfTid(null);
+  }
+
+  const btnSm = {
+    background:"transparent", border:"1px solid #333", borderRadius:6,
+    color:"#888", cursor:"pointer", fontFamily:"inherit", fontSize:11,
+    padding:"3px 8px", transition:"all .15s",
+  };
+
   return (
     <div style={{ padding:"16px 14px 32px" }}>
+
       {/* Header */}
-      <div style={{ marginBottom:20 }}>
-        <div style={{ fontWeight:700, fontSize:20, display:"flex", alignItems:"center", gap:8 }}>
-          🪑 គ្រប់គ្រងតុ
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20, flexWrap:"wrap" }}>
+        <div style={{ flex:1 }}>
+          <div style={{ fontWeight:700, fontSize:20, display:"flex", alignItems:"center", gap:8 }}>
+            🪑 គ្រប់គ្រងតុ
+          </div>
+          <div style={{ fontSize:12, color:"#555", marginTop:4 }}>
+            {busy} / {tables.length} តុ កំពុងប្រើ
+          </div>
         </div>
-        <div style={{ fontSize:12, color:"#555", marginTop:4 }}>
-          {busy} / {tables.length} តុ កំពុងប្រើ
-        </div>
+        {canManage && (
+          <button onClick={() => setShowAdd(true)}
+            style={{
+              padding:"9px 20px", borderRadius:10, border:"none", cursor:"pointer",
+              fontFamily:"inherit", fontSize:13, fontWeight:700,
+              background:"linear-gradient(135deg,#B8732A,#E8A84B)", color:"#fff",
+            }}>
+            ➕ បន្ថែមតុ
+          </button>
+        )}
       </div>
+
+      {/* Add Table Modal */}
+      {showAdd && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"var(--bg-card)", border:"1px solid #E8A84B44", borderRadius:18, padding:28, width:340, maxWidth:"92vw" }}>
+            <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)", marginBottom:18 }}>➕ បន្ថែមតុថ្មី</div>
+
+            {/* Emoji picker */}
+            <div style={{ fontSize:12, color:"#888", marginBottom:6 }}>រូបភាព</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+              {TABLE_EMOJIS.map(e => (
+                <button key={e} onClick={() => setAddEmoji(e)}
+                  style={{ fontSize:20, padding:"4px 6px", borderRadius:8, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    background: addEmoji===e ? "#E8A84B33" : "transparent",
+                    outline: addEmoji===e ? "2px solid #E8A84B" : "none" }}>
+                  {e}
+                </button>
+              ))}
+            </div>
+
+            {/* Label input */}
+            <div style={{ fontSize:12, color:"#888", marginBottom:6 }}>ឈ្មោះ / លេខតុ *</div>
+            <input
+              className="inp"
+              placeholder="ឧ. 1 ឬ VIP ឬ Terrace A"
+              value={addLabel}
+              onChange={e => setAddLabel(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addTable()}
+              autoFocus
+              style={{ width:"100%", marginBottom:6, boxSizing:"border-box" }}
+            />
+            {tables.find(t => String(t.table_id) === addLabel.trim() || String(t.label) === addLabel.trim()) && (
+              <div style={{ fontSize:11, color:"#E74C3C", marginBottom:8 }}>⚠️ ឈ្មោះនេះមានរួចហើយ</div>
+            )}
+
+            {/* Preview */}
+            {addLabel.trim() && (
+              <div style={{ marginBottom:14, padding:"10px 14px", borderRadius:10, background:"var(--bg-main)", border:"1px solid #E8A84B33", fontSize:13, color:"var(--accent)" }}>
+                Preview: {addEmoji} {addLabel.trim()}
+              </div>
+            )}
+
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => { setShowAdd(false); setAddLabel(""); }}
+                style={{ flex:1, padding:"9px", borderRadius:10, border:"1px solid #333", background:"transparent", color:"#888", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>
+                បោះបង់
+              </button>
+              <button onClick={addTable} disabled={!addLabel.trim()}
+                style={{ flex:1, padding:"9px", borderRadius:10, border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700,
+                  background: addLabel.trim() ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "#333",
+                  color: addLabel.trim() ? "#fff" : "#555" }}>
+                ✅ បង្កើតតុ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirm */}
+      {delConfTid !== null && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"var(--bg-card)", borderRadius:16, padding:24, maxWidth:300, width:"90%", textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>🗑️</div>
+            <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>លុបតុ {delConfTid}?</div>
+            <div style={{ fontSize:12, color:"#888", marginBottom:18 }}>action នេះ មិនអាចត្រឡប់វិញបានទេ</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => setDelConfTid(null)}
+                style={{ flex:1, padding:"9px", borderRadius:10, border:"1px solid #333", background:"transparent", color:"#888", cursor:"pointer", fontFamily:"inherit" }}>
+                បោះបង់
+              </button>
+              <button onClick={() => deleteTable(delConfTid)}
+                style={{ flex:1, padding:"9px", borderRadius:10, border:"none", background:"#8B1A1A", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
+                🗑️ លុប
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Table grid */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:14 }}>
         {tables.map(t => {
           const isBusy = t.status === "busy";
-          // Only show TODAY's orders for this table (not all history)
           const todayStr = new Date().toISOString().slice(0, 10);
           const tableOrders = (orders||[]).filter(o => {
             const matchTable = String(o.table) === String(t.table_id) || o.table === t.table_id;
@@ -1573,18 +1712,58 @@ function TablesPage({ tables, setTables, orders }) {
             return matchTable && isToday;
           });
           const tableTotal = isBusy ? tableOrders.reduce((s,o) => s + (o.total||0) + (o.tax||0), 0) : 0;
+          const displayName = t.label || ("តុ " + t.table_id);
+          const isEditing = editTid === t.table_id;
+
           return (
             <div key={t.table_id} style={{
               background:"var(--bg-card)",
               border:`2px solid ${isBusy ? "#8B1A1A" : "#1A4A1A"}`,
-              borderRadius:16, padding:22, textAlign:"center",
+              borderRadius:16, padding:18, textAlign:"center",
               boxShadow: isBusy ? "0 0 20px #8B1A1A22" : "0 0 20px #1A4A1A22",
-              transition:"all .2s",
+              transition:"all .2s", position:"relative",
             }}>
-              <div style={{ fontSize:34 }}>🪑</div>
-              <div style={{ fontWeight:700, fontSize:18, marginTop:8, marginBottom:6 }}>
-                តុ {t.table_id}
-              </div>
+              {/* Admin: delete button top-right */}
+              {canManage && !isBusy && (
+                <button onClick={() => setDelConfTid(t.table_id)}
+                  title="លុបតុ"
+                  style={{ position:"absolute", top:8, right:8, background:"transparent", border:"none",
+                    color:"#444", cursor:"pointer", fontSize:14, lineHeight:1, padding:"2px 4px", borderRadius:4 }}>
+                  ✕
+                </button>
+              )}
+
+              <div style={{ fontSize:32 }}>{t.label?.match(/^\S+/)?.[0] || "🪑"}</div>
+
+              {/* Name — editable for admin */}
+              {isEditing ? (
+                <div style={{ marginTop:6, marginBottom:6 }}>
+                  <input
+                    className="inp"
+                    value={editLabel}
+                    onChange={e => setEditLabel(e.target.value)}
+                    onKeyDown={e => { if (e.key==="Enter") saveRename(t.table_id); if (e.key==="Escape") setEditTid(null); }}
+                    autoFocus
+                    style={{ width:"100%", fontSize:13, padding:"4px 8px", textAlign:"center", boxSizing:"border-box" }}
+                  />
+                  <div style={{ display:"flex", gap:4, marginTop:4 }}>
+                    <button onClick={() => saveRename(t.table_id)} style={{ ...btnSm, flex:1, color:"#27AE60", borderColor:"#27AE6044" }}>✓</button>
+                    <button onClick={() => setEditTid(null)}       style={{ ...btnSm, flex:1 }}>✕</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontWeight:700, fontSize:16, marginTop:6, marginBottom:4, display:"flex", alignItems:"center", justifyContent:"center", gap:4 }}>
+                  {displayName}
+                  {canManage && (
+                    <button onClick={() => { setEditTid(t.table_id); setEditLabel(displayName); }}
+                      title="ប្តូរឈ្មោះ"
+                      style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", fontSize:11, padding:"1px 3px" }}>
+                      ✏️
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div style={{
                 fontSize:12, padding:"4px 14px", borderRadius:20,
                 display:"inline-block", fontWeight:600,
@@ -1593,19 +1772,20 @@ function TablesPage({ tables, setTables, orders }) {
               }}>
                 {isBusy ? "🔴 មានអតិថិជន" : "🟢 ទំនេរ"}
               </div>
+
               {isBusy && tableTotal > 0 && (
                 <div style={{ fontSize:13, color:"#E8A84B", fontWeight:700, marginTop:6 }}>
                   ${tableTotal.toFixed(2)}
                 </div>
               )}
+
               <button
                 onClick={() => toggleTable(t.table_id)}
                 style={{
-                  marginTop:12, width:"100%", padding:"7px",
+                  marginTop:10, width:"100%", padding:"7px",
                   borderRadius:8, border:"1px solid rgba(255,255,255,.1)",
                   background:"rgba(255,255,255,.05)", color: isBusy ? "#E74C3C" : "#27AE60",
                   cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:600,
-                  transition:"all .15s",
                 }}
               >
                 {isBusy ? "✓ ចេញ" : "ចូល"}
@@ -1613,16 +1793,38 @@ function TablesPage({ tables, setTables, orders }) {
             </div>
           );
         })}
+
+        {/* Add table shortcut card — admin only */}
+        {canManage && (
+          <div onClick={() => setShowAdd(true)}
+            style={{
+              background:"var(--bg-card)", border:"2px dashed #333",
+              borderRadius:16, padding:18, textAlign:"center", cursor:"pointer",
+              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+              gap:8, opacity:0.6, transition:"opacity .2s", minHeight:160,
+            }}
+            onMouseEnter={e => e.currentTarget.style.opacity=1}
+            onMouseLeave={e => e.currentTarget.style.opacity=0.6}
+          >
+            <div style={{ fontSize:32 }}>➕</div>
+            <div style={{ fontSize:13, color:"#888", fontWeight:600 }}>បន្ថែមតុ</div>
+          </div>
+        )}
       </div>
 
       {/* Legend */}
       <div style={{ marginTop:20, display:"flex", gap:16, flexWrap:"wrap" }}>
-        {[["#27AE60","ទំ"],["#E74C3C","កំពុងប្រើ"],["#F39C12","បានRA"],["#3498DB","សំអាត"]].map(([color,label]) => (
+        {[["#27AE60","ទំនេរ"],["#E74C3C","កំពុងប្រើ"]].map(([color,label]) => (
           <div key={label} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#555" }}>
             <div style={{ width:10, height:10, borderRadius:"50%", background:color }} />
             {label}
           </div>
         ))}
+        {canManage && (
+          <div style={{ fontSize:12, color:"#555", marginLeft:"auto" }}>
+            💡 ចុច ✕ ដើម្បីលុបតុ · ✏️ ដើម្បីប្តូរឈ្មោះ
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3741,9 +3943,7 @@ const CAT_EMOJIS = ["💰","⚡","🏛️","🏠","🧴","📦","🚗","💊","�
 
 function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalAdmin, isBranchAdmin, branchId }) {
   const MON_KH = ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
-  const [selView,    setSelView]    = useState("month"); // "month" | "day"
   const [selMonth,   setSelMonth]   = useState(() => new Date().toISOString().slice(0,7));
-  const [selDay,     setSelDay]     = useState(() => new Date().toISOString().slice(0,10));
   const [editMode,   setEditMode]   = useState(false);
   const [catMode,    setCatMode]    = useState(false);
   const [draft,      setDraft]      = useState({});
@@ -3801,16 +4001,6 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   });
   const revenue = monthOrders.reduce((s,o) => s + o.total + o.tax, 0);
 
-  // ── Daily data ─────────────────────────────────────────────────────
-  const dayOrders = sourceOrders.filter(o => {
-    try { return new Date(o.order_id).toISOString().slice(0,10) === selDay; } catch { return false; }
-  });
-  const dayRevenue = dayOrders.reduce((s,o) => s + o.total + o.tax, 0);
-
-  // All days that have orders (for day picker quick-nav)
-  const orderDays = [...new Set((sourceOrders||[]).map(o => {
-    try { return new Date(o.order_id).toISOString().slice(0,10); } catch { return null; }
-  }).filter(Boolean))].sort().reverse();
   // ── Expense transactions (new system) ─────────────────────────────
   // Each entry: { id, date, cat_id, desc, amount, branch_id, created_by }
   const expTxns = Array.isArray(expenses)
@@ -3835,28 +4025,6 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const totalExp = monthTxns.reduce((s,t) => s + (Number(t.amount)||0), 0) + legacyExp;
   const profit   = revenue - totalExp;
   const profitColor = profit > 0 ? "#27AE60" : profit < 0 ? "#E74C3C" : "#888";
-
-  // Daily expense + profit
-  const dayTxns    = expTxns.filter(t => {
-    const inDay    = t.date === selDay;
-    const inBranch = viewBranchId === null ? true : (t.branch_id === viewBranchId);
-    return inDay && inBranch;
-  });
-  const dayExp     = dayTxns.reduce((s,t) => s + (Number(t.amount)||0), 0);
-  const dayProfit  = dayRevenue - dayExp;
-  const dayProfitColor = dayProfit > 0 ? "#27AE60" : dayProfit < 0 ? "#E74C3C" : "#888";
-
-  // Per-hour breakdown for the selected day
-  const hourMap = {};
-  dayOrders.forEach(o => {
-    try {
-      const h = new Date(o.order_id).getHours();
-      if (!hourMap[h]) hourMap[h] = { orders:0, revenue:0 };
-      hourMap[h].orders++;
-      hourMap[h].revenue += o.total + o.tax;
-    } catch {}
-  });
-
 
   // ── Add / Edit / Delete expense transaction ────────────────────────
   const [txnModal, setTxnModal] = useState(null); // null | {mode:"add"|"edit", data:{}}
@@ -4089,20 +4257,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
 
       {/* Sticky Header */}
       <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid #E8A84B44", background:"linear-gradient(135deg,#1a1208,#120f05)" }}>
-        <div style={{ fontWeight:700, fontSize:18, marginBottom:10, color:"var(--accent)" }}>💼 ហិរញ្ញវត្ថុ</div>
-
-        {/* View toggle: Month / Day */}
-        <div style={{ display:"flex", gap:6, marginBottom:10 }}>
-          {[["month","📆 ប្រចាំខែ"],["day","📅 ប្រចាំថ្ងៃ"]].map(([v,lb]) => (
-            <button key={v} onClick={() => setSelView(v)}
-              style={{ padding:"6px 18px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
-                fontSize:13, fontWeight:700,
-                background: selView===v ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
-                color: selView===v ? "#fff" : "#666" }}>
-              {lb}
-            </button>
-          ))}
-        </div>
+        <div style={{ fontWeight:700, fontSize:18, marginBottom:10, color:"var(--accent)" }}>💼 ហិរញ្ញវត្ថុប្រចាំខែ</div>
 
         {/* Row 1: Branch selector — GLOBAL ADMIN ONLY */}
         {isGlobalAdmin && (
@@ -4137,41 +4292,16 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
           </div>
         )}
 
-        {/* Row 2: Date selector + print */}
+        {/* Row 2: Month selector + print */}
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          {selView === "month" ? (
-            <>
-              <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📆 ខែ:</span>
-              <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
-                style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
-                {orderMonths.map(mo => {
-                  const [oy,om] = mo.split("-");
-                  return <option key={mo} value={mo}>{MON_KH[parseInt(om)-1]} {oy}</option>;
-                })}
-              </select>
-            </>
-          ) : (
-            <>
-              <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📅 ថ្ងៃ:</span>
-              <input type="date" value={selDay}
-                onChange={e => setSelDay(e.target.value)}
-                style={{ ...inputSt, fontSize:13, padding:"6px 12px" }} />
-              {/* Quick-nav: prev/next day that has orders */}
-              {(() => {
-                const idx = orderDays.indexOf(selDay);
-                const prev = orderDays[idx + 1];
-                const next = orderDays[idx - 1];
-                return (
-                  <div style={{ display:"flex", gap:4 }}>
-                    <button onClick={() => prev && setSelDay(prev)} disabled={!prev}
-                      style={{ ...btnSmall, fontSize:12, opacity: prev ? 1 : 0.3 }}>◀</button>
-                    <button onClick={() => next && setSelDay(next)} disabled={!next}
-                      style={{ ...btnSmall, fontSize:12, opacity: next ? 1 : 0.3 }}>▶</button>
-                  </div>
-                );
-              })()}
-            </>
-          )}
+          <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📆 ខែ:</span>
+          <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
+            style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
+            {orderMonths.map(mo => {
+              const [oy,om] = mo.split("-");
+              return <option key={mo} value={mo}>{MON_KH[parseInt(om)-1]} {oy}</option>;
+            })}
+          </select>
           {/* Branch label badge */}
           {isAdmin && selBranch !== "current" && (
             <span style={{ fontSize:11, padding:"3px 10px", borderRadius:12, background:"#E8A84B22", color:"var(--accent)", fontWeight:700, border:"1px solid #E8A84B33" }}>
@@ -4189,164 +4319,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       <div style={{ flex:1, overflowY:"auto", padding:"16px" }}>
         <div style={{ maxWidth:720, margin:"0 auto" }}>
 
-        {/* ══════════ DAILY VIEW ══════════ */}
-        {selView === "day" && (() => {
-          const maxH = Math.max(...Object.values(hourMap).map(h => h.revenue), 1);
-          // top products of the day
-          const prodMap = {};
-          dayOrders.forEach(o => (o.items||[]).forEach(it => {
-            const k = it.product_name || it.name || "?";
-            if (!prodMap[k]) prodMap[k] = { qty:0, rev:0, emoji: it.emoji||"🍽️" };
-            prodMap[k].qty  += it.qty || 1;
-            prodMap[k].rev  += (it.price||0) * (it.qty||1);
-          }));
-          const topProds = Object.entries(prodMap).sort((a,b)=>b[1].rev-a[1].rev).slice(0,8);
-          return (
-            <>
-              {/* KPI row */}
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:16 }}>
-                {[
-                  ["💰","ចំណូល",   dayRevenue,  "#E8A84B"],
-                  ["💸","ចំណាយ",   dayExp,      "#E74C3C"],
-                  ["📈","ចំណេញ",   dayProfit,   dayProfitColor],
-                ].map(([ic,lb,val,col]) => (
-                  <div key={lb} style={{ background:"var(--bg-card)", border:"1px solid "+col+"33", borderRadius:14, padding:"14px 10px", textAlign:"center" }}>
-                    <div style={{ fontSize:22 }}>{ic}</div>
-                    <div style={{ fontSize:18, fontWeight:700, color:col, marginTop:4 }}>{fmt(val)}</div>
-                    <div style={{ fontSize:11, color:"#555", marginTop:2 }}>{lb}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Orders count + avg */}
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:16 }}>
-                {[
-                  ["🧾", "Orders",    dayOrders.length,                                                                "#5BA3E0"],
-                  ["🛒", "Items sold", dayOrders.reduce((s,o)=>(o.items||[]).reduce((ss,i)=>ss+(i.qty||1),0)+s,0),    "#27AE60"],
-                  ["📊", "Avg/order",  dayOrders.length ? dayRevenue/dayOrders.length : 0,                             "#9B6FE8"],
-                ].map(([ic,lb,val,col]) => (
-                  <div key={lb} style={{ background:"var(--bg-card)", border:"1px solid "+col+"22", borderRadius:12, padding:"10px 12px", display:"flex", alignItems:"center", gap:10 }}>
-                    <span style={{ fontSize:20 }}>{ic}</span>
-                    <div>
-                      <div style={{ fontSize:15, fontWeight:700, color:col }}>{typeof val === "number" && !Number.isInteger(val) ? fmt(val) : val}</div>
-                      <div style={{ fontSize:11, color:"#555" }}>{lb}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Hourly chart */}
-              {Object.keys(hourMap).length > 0 && (
-                <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
-                  <div style={{ fontSize:13, fontWeight:700, color:"#E8A84B", marginBottom:12 }}>⏰ ចំណូលតាមម៉ោង</div>
-                  <div style={{ display:"flex", alignItems:"flex-end", gap:4, height:80 }}>
-                    {Array.from({length:24},(_,h) => {
-                      const d = hourMap[h];
-                      if (!d && !Object.keys(hourMap).some(k => Math.abs(k-h)<=2)) return null;
-                      const pct = d ? (d.revenue/maxH)*100 : 0;
-                      return (
-                        <div key={h} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", gap:2, minWidth:0 }}>
-                          <div style={{ width:"100%", height: pct+"%", minHeight: d?2:0,
-                            background: d ? "linear-gradient(0deg,#B8732A,#E8A84B)" : "transparent",
-                            borderRadius:"3px 3px 0 0", transition:"height .3s" }} />
-                          <div style={{ fontSize:9, color:"#444", lineHeight:1 }}>{h}h</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div style={{ marginTop:8, display:"flex", flexWrap:"wrap", gap:10 }}>
-                    {Object.entries(hourMap).sort((a,b)=>b[1].revenue-a[1].revenue).slice(0,3).map(([h,d]) => (
-                      <span key={h} style={{ fontSize:11, color:"#E8A84B", background:"#E8A84B11", padding:"2px 8px", borderRadius:8 }}>
-                        🕐 {h}:00 — {fmt(d.revenue)} ({d.orders} orders)
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Top products */}
-              {topProds.length > 0 && (
-                <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
-                  <div style={{ fontSize:13, fontWeight:700, color:"#E8A84B", marginBottom:10 }}>🏆 មុខទំនិញលក់ដាច់</div>
-                  <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                    {topProds.map(([name,d], i) => {
-                      const pct = dayRevenue > 0 ? Math.round((d.rev/dayRevenue)*100) : 0;
-                      return (
-                        <div key={name} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                          <span style={{ fontSize:13, color:"#555", minWidth:18, textAlign:"right" }}>{i+1}</span>
-                          <span style={{ fontSize:16 }}>{d.emoji}</span>
-                          <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ fontSize:12, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{name}</div>
-                            <div style={{ height:4, background:"#1A181C", borderRadius:2, marginTop:3, overflow:"hidden" }}>
-                              <div style={{ width:pct+"%", height:"100%", background:"linear-gradient(90deg,#B8732A,#E8A84B)", borderRadius:2 }} />
-                            </div>
-                          </div>
-                          <span style={{ fontSize:12, color:"#888", minWidth:30, textAlign:"right" }}>×{d.qty}</span>
-                          <span style={{ fontSize:13, fontWeight:700, color:"#E8A84B", fontFamily:"'DM Mono',monospace", minWidth:52, textAlign:"right" }}>{fmt(d.rev)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* Day expenses */}
-              <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-                  <div style={{ fontSize:13, fontWeight:700, color:"#E74C3C" }}>💸 ចំណាយថ្ងៃនេះ</div>
-                  <button onClick={() => setTxnModal({ data: { id:"txn_"+Date.now(), date:selDay, cat_id: expCats[0]?.id||"other", desc:"", amount:"", branch_id:branchId, _isNew:true } })}
-                    style={{ ...btnGold, padding:"6px 12px", fontSize:11 }}>➕ បន្ថែម</button>
-                </div>
-                {dayTxns.length === 0
-                  ? <div style={{ textAlign:"center", padding:"16px 0", color:"#444", fontSize:12 }}>គ្មានចំណាយថ្ងៃ {selDay}</div>
-                  : <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
-                      {dayTxns.sort((a,b)=>(a.date||"").localeCompare(b.date||"")).map(t => {
-                        const cat = expCats.find(c => c.id === t.cat_id);
-                        return (
-                          <div key={t.id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, background:"var(--bg-main)", border:"1px solid var(--border-col)" }}>
-                            <div style={{ width:8, height:8, borderRadius:"50%", background:cat?.color||"#888", flexShrink:0 }} />
-                            <div style={{ flex:1, fontSize:12 }}>{t.desc || cat?.label || "ចំណាយ"}</div>
-                            {cat && <span style={{ fontSize:11, color:cat.color }}>{cat.label}</span>}
-                            <span style={{ fontSize:13, fontWeight:700, color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(t.amount)}</span>
-                            <button onClick={() => setTxnModal({ data:{...t} })} style={{ ...btnSmall, fontSize:11, padding:"3px 6px", color:"#E8A84B" }}>✏️</button>
-                            <button onClick={() => setTxnConfirmDel({ id:t.id, desc:t.desc||cat?.label||"ចំណាយ", amount:t.amount })} style={{ ...btnSmall, fontSize:11, padding:"3px 6px", color:"#E74C3C" }}>🗑️</button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                }
-              </div>
-
-              {/* Orders list */}
-              <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16 }}>
-                <div style={{ fontSize:13, fontWeight:700, color:"#5BA3E0", marginBottom:10 }}>🧾 Orders ({dayOrders.length})</div>
-                {dayOrders.length === 0
-                  ? <div style={{ textAlign:"center", padding:"16px 0", color:"#444", fontSize:12 }}>គ្មាន orders ថ្ងៃ {selDay}</div>
-                  : <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
-                      {[...dayOrders].sort((a,b)=>b.order_id-a.order_id).map(o => {
-                        const t = new Date(o.order_id);
-                        const time = `${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
-                        return (
-                          <div key={o.order_id} style={{ display:"flex", alignItems:"center", gap:8, padding:"8px 10px", borderRadius:8, background:"var(--bg-main)", border:"1px solid var(--border-col)" }}>
-                            <span style={{ fontSize:11, color:"#555", minWidth:40 }}>🕐 {time}</span>
-                            <span style={{ fontSize:11, color:"#888", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {(o.items||[]).map(i=>`${i.emoji||""}${i.product_name||i.name||""}`).join(" · ")}
-                            </span>
-                            {o.table_name && <span style={{ fontSize:11, color:"#5BA3E0" }}>🪑 {o.table_name}</span>}
-                            <span style={{ fontSize:13, fontWeight:700, color:"#E8A84B", fontFamily:"'DM Mono',monospace" }}>{fmt(o.total+o.tax)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                }
-              </div>
-            </>
-          );
-        })()}
-
-        {/* ══════════ MONTHLY VIEW ══════════ */}
-        {selView === "month" && (<>
-
+          {/* KPI Cards */}
           <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, marginBottom:18 }}>
             {[
               ["💰","ចំណូល",  revenue,  "#E8A84B"],
@@ -4499,8 +4472,6 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
               </div>
             )}
           </div>
-
-        </>)}  {/* end monthly view */}
 
         </div>
       </div>
