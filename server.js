@@ -314,13 +314,27 @@ async function loadBranch(bid) {
     tables:      BRANCH_TABLES_DEF,
     ingredients: BRANCH_INGREDIENTS,
     expenses:    [],
+    recipes:     [],   // each branch owns its own recipe mapping
   };
   for (const [k, v] of Object.entries(def)) {
     if (!(k in db)) {
-      db[k] = v;
+      // For recipes: seed from shared_data recipes if they exist (one-time migration)
+      let seedVal = v;
+      if (k === "recipes") {
+        try {
+          const { rows: sr } = await pool.query(
+            "SELECT value FROM shared_data WHERE key='recipes'"
+          );
+          if (sr.length && Array.isArray(sr[0].value) && sr[0].value.length > 0) {
+            seedVal = sr[0].value;
+            console.log(`[Branch] Seeding recipes for ${bid} from shared_data (${seedVal.length} rows)`);
+          }
+        } catch (e) { /* ignore, use empty */ }
+      }
+      db[k] = seedVal;
       await pool.query(
         "INSERT INTO branch_data(branch_id,key,value) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
-        [bid, k, JSON.stringify(v)]
+        [bid, k, JSON.stringify(seedVal)]
       );
     }
   }
@@ -462,8 +476,8 @@ function broadcastSharedUpdate(table, data) {
 // ═══════════════════════════════════════════════════════════════════
 //  HTTP HANDLER
 // ═══════════════════════════════════════════════════════════════════
-const SHARED_TABLES = new Set(["categories","products","recipes","options","users","theme"]);
-const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses"]);
+const SHARED_TABLES = new Set(["categories","products","options","users","theme"]);
+const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses","recipes"]);
 
 function readBody(req) {
   return new Promise((resolve,reject) => {
