@@ -314,27 +314,13 @@ async function loadBranch(bid) {
     tables:      BRANCH_TABLES_DEF,
     ingredients: BRANCH_INGREDIENTS,
     expenses:    [],
-    recipes:     [],   // each branch owns its own recipe mapping
   };
   for (const [k, v] of Object.entries(def)) {
     if (!(k in db)) {
-      // For recipes: seed from shared_data recipes if they exist (one-time migration)
-      let seedVal = v;
-      if (k === "recipes") {
-        try {
-          const { rows: sr } = await pool.query(
-            "SELECT value FROM shared_data WHERE key='recipes'"
-          );
-          if (sr.length && Array.isArray(sr[0].value) && sr[0].value.length > 0) {
-            seedVal = sr[0].value;
-            console.log(`[Branch] Seeding recipes for ${bid} from shared_data (${seedVal.length} rows)`);
-          }
-        } catch (e) { /* ignore, use empty */ }
-      }
-      db[k] = seedVal;
+      db[k] = v;
       await pool.query(
         "INSERT INTO branch_data(branch_id,key,value) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
-        [bid, k, JSON.stringify(seedVal)]
+        [bid, k, JSON.stringify(v)]
       );
     }
   }
@@ -476,8 +462,8 @@ function broadcastSharedUpdate(table, data) {
 // ═══════════════════════════════════════════════════════════════════
 //  HTTP HANDLER
 // ═══════════════════════════════════════════════════════════════════
-const SHARED_TABLES = new Set(["categories","products","options","users","theme"]);
-const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses","recipes"]);
+const SHARED_TABLES = new Set(["categories","products","recipes","options","users","theme"]);
+const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses"]);
 
 function readBody(req) {
   return new Promise((resolve,reject) => {
@@ -703,8 +689,30 @@ async function handler(req, res) {
     const body  = await readBody(req);
 
     if (SHARED_TABLES.has(table)) {
-      await saveSharedKey(table, body);
-      broadcastSharedUpdate(table, body);
+      // ── Special handling for users: hash any plain-text passwords ──
+      let saveBody = body;
+      if (table === "users" && Array.isArray(body)) {
+        // Load current users to compare existing password hashes
+        const shared = await loadShared();
+        const existing = shared.users || [];
+        saveBody = body.map(u => {
+          const old = existing.find(e => e.user_id === u.user_id);
+          const pw  = u.password;
+          if (!pw) {
+            // No password field — keep old hash
+            return { ...u, password: old?.password || "" };
+          }
+          if (pw.startsWith("pbkdf2:")) {
+            // Already hashed — keep as-is
+            return u;
+          }
+          // Plain text — hash it now
+          console.log(`[Users] Hashing password for: ${u.username}`);
+          return { ...u, password: hashPassword(pw) };
+        });
+      }
+      await saveSharedKey(table, saveBody);
+      broadcastSharedUpdate(table, saveBody);
       console.log(`[SHARED] Saved: ${table}`);
       send(res, 200, { ok:true });
       return;
@@ -752,48 +760,6 @@ async function handler(req, res) {
       };
     }
     send(res, 200, result);
-    return;
-  }
-
-  // ── MIGRATE RECIPES: copy shared_data recipes → branch_data for all branches ─
-  // POST /api/migrate-recipes  (admin only, safe to run multiple times)
-  if (req.method === "POST" && url === "/api/migrate-recipes") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin") {
-      send(res, 403, { error:"Admin only" }); return;
-    }
-    // Load shared recipes
-    const { rows: sr } = await pool.query("SELECT value FROM shared_data WHERE key='recipes'");
-    const sharedRecipes = (sr.length && Array.isArray(sr[0].value)) ? sr[0].value : [];
-
-    const branches = (await loadBranches()).filter(b => b.active);
-    const results  = [];
-    for (const b of branches) {
-      const { rows: br } = await pool.query(
-        "SELECT value FROM branch_data WHERE branch_id=$1 AND key='recipes'", [b.branch_id]
-      );
-      const existing = (br.length && Array.isArray(br[0].value)) ? br[0].value : [];
-
-      // Load this branch's ingredients to know which ingredient_ids are valid
-      const bd   = await loadBranch(b.branch_id);
-      const ingIds = new Set((bd.ingredients||[]).map(i => Number(i.ingredient_id)));
-
-      // Filter shared recipes: keep only rows whose ingredient_id exists in this branch
-      const validRecipes = sharedRecipes.filter(r => ingIds.has(Number(r.ingredient_id)));
-
-      // Merge: keep existing branch recipes that are valid + add missing ones from shared
-      const existingIds = new Set(existing.map(r => r.recipe_id));
-      const merged = [
-        ...existing.filter(r => ingIds.has(Number(r.ingredient_id))),  // keep valid existing
-        ...validRecipes.filter(r => !existingIds.has(r.recipe_id)),    // add new from shared
-      ];
-
-      await saveBranchKey(b.branch_id, "recipes", merged);
-      broadcastBranchUpdate(b.branch_id, "recipes", merged);
-      results.push({ branch_id: b.branch_id, before: existing.length, after: merged.length });
-      console.log(`[Migrate] ${b.branch_id}: recipes ${existing.length} → ${merged.length}`);
-    }
-    send(res, 200, { ok:true, results });
     return;
   }
 
