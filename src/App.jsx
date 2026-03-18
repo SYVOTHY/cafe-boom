@@ -1538,19 +1538,8 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 // ═══════════════════════════════════════════════════════════════════
 //  TABLES PAGE
 // ═══════════════════════════════════════════════════════════════════
-function TablesPage({ tables, setTables, orders, currentUser, isAdmin, isGlobalAdmin }) {
+function TablesPage({ tables, setTables, orders }) {
   const busy = tables.filter(t => t.status === "busy").length;
-  const canManage = isAdmin || isGlobalAdmin;
-
-  // ── add table modal state ──
-  const [showAdd,    setShowAdd]    = useState(false);
-  const [addLabel,   setAddLabel]   = useState("");
-  const [addEmoji,   setAddEmoji]   = useState("🪑");
-  const [editTid,    setEditTid]    = useState(null); // table_id being renamed
-  const [editLabel,  setEditLabel]  = useState("");
-  const [delConfTid, setDelConfTid] = useState(null);
-
-  const TABLE_EMOJIS = ["🪑","🛋️","🏮","🌿","⭐","🎯","💎","🏠","🌸","🎪","🍽️","☕"];
 
   function toggleTable(tid) {
     setTables(prev => prev.map(t => t.table_id === tid
@@ -1559,151 +1548,23 @@ function TablesPage({ tables, setTables, orders, currentUser, isAdmin, isGlobalA
     ));
   }
 
-  function addTable() {
-    const label = addLabel.trim();
-    if (!label) return;
-    // Check duplicate
-    if (tables.find(t => String(t.table_id) === label || String(t.label) === label)) {
-      return;
-    }
-    // Next numeric id — use label as id if it's a number, else use next int
-    const nextId = isNaN(label)
-      ? label
-      : Math.max(0, ...tables.map(t => isNaN(t.table_id) ? 0 : Number(t.table_id))) + 1;
-    const displayId = isNaN(label) ? label : nextId;
-    setTables(prev => [...prev, {
-      table_id: displayId,
-      label:    addEmoji + " " + label,
-      status:   "free",
-    }]);
-    setAddLabel(""); setAddEmoji("🪑"); setShowAdd(false);
-  }
-
-  function saveRename(tid) {
-    const label = editLabel.trim();
-    if (!label) { setEditTid(null); return; }
-    setTables(prev => prev.map(t => t.table_id === tid ? { ...t, label } : t));
-    setEditTid(null);
-  }
-
-  function deleteTable(tid) {
-    setTables(prev => prev.filter(t => t.table_id !== tid));
-    setDelConfTid(null);
-  }
-
-  const btnSm = {
-    background:"transparent", border:"1px solid #333", borderRadius:6,
-    color:"#888", cursor:"pointer", fontFamily:"inherit", fontSize:11,
-    padding:"3px 8px", transition:"all .15s",
-  };
-
   return (
     <div style={{ padding:"16px 14px 32px" }}>
-
       {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20, flexWrap:"wrap" }}>
-        <div style={{ flex:1 }}>
-          <div style={{ fontWeight:700, fontSize:20, display:"flex", alignItems:"center", gap:8 }}>
-            🪑 គ្រប់គ្រងតុ
-          </div>
-          <div style={{ fontSize:12, color:"#555", marginTop:4 }}>
-            {busy} / {tables.length} តុ កំពុងប្រើ
-          </div>
+      <div style={{ marginBottom:20 }}>
+        <div style={{ fontWeight:700, fontSize:20, display:"flex", alignItems:"center", gap:8 }}>
+          🪑 គ្រប់គ្រងតុ
         </div>
-        {canManage && (
-          <button onClick={() => setShowAdd(true)}
-            style={{
-              padding:"9px 20px", borderRadius:10, border:"none", cursor:"pointer",
-              fontFamily:"inherit", fontSize:13, fontWeight:700,
-              background:"linear-gradient(135deg,#B8732A,#E8A84B)", color:"#fff",
-            }}>
-            ➕ បន្ថែមតុ
-          </button>
-        )}
+        <div style={{ fontSize:12, color:"#555", marginTop:4 }}>
+          {busy} / {tables.length} តុ កំពុងប្រើ
+        </div>
       </div>
-
-      {/* Add Table Modal */}
-      {showAdd && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <div style={{ background:"var(--bg-card)", border:"1px solid #E8A84B44", borderRadius:18, padding:28, width:340, maxWidth:"92vw" }}>
-            <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)", marginBottom:18 }}>➕ បន្ថែមតុថ្មី</div>
-
-            {/* Emoji picker */}
-            <div style={{ fontSize:12, color:"#888", marginBottom:6 }}>រូបភាព</div>
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
-              {TABLE_EMOJIS.map(e => (
-                <button key={e} onClick={() => setAddEmoji(e)}
-                  style={{ fontSize:20, padding:"4px 6px", borderRadius:8, border:"none", cursor:"pointer", fontFamily:"inherit",
-                    background: addEmoji===e ? "#E8A84B33" : "transparent",
-                    outline: addEmoji===e ? "2px solid #E8A84B" : "none" }}>
-                  {e}
-                </button>
-              ))}
-            </div>
-
-            {/* Label input */}
-            <div style={{ fontSize:12, color:"#888", marginBottom:6 }}>ឈ្មោះ / លេខតុ *</div>
-            <input
-              className="inp"
-              placeholder="ឧ. 1 ឬ VIP ឬ Terrace A"
-              value={addLabel}
-              onChange={e => setAddLabel(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && addTable()}
-              autoFocus
-              style={{ width:"100%", marginBottom:6, boxSizing:"border-box" }}
-            />
-            {tables.find(t => String(t.table_id) === addLabel.trim() || String(t.label) === addLabel.trim()) && (
-              <div style={{ fontSize:11, color:"#E74C3C", marginBottom:8 }}>⚠️ ឈ្មោះនេះមានរួចហើយ</div>
-            )}
-
-            {/* Preview */}
-            {addLabel.trim() && (
-              <div style={{ marginBottom:14, padding:"10px 14px", borderRadius:10, background:"var(--bg-main)", border:"1px solid #E8A84B33", fontSize:13, color:"var(--accent)" }}>
-                Preview: {addEmoji} {addLabel.trim()}
-              </div>
-            )}
-
-            <div style={{ display:"flex", gap:8 }}>
-              <button onClick={() => { setShowAdd(false); setAddLabel(""); }}
-                style={{ flex:1, padding:"9px", borderRadius:10, border:"1px solid #333", background:"transparent", color:"#888", cursor:"pointer", fontFamily:"inherit", fontSize:13 }}>
-                បោះបង់
-              </button>
-              <button onClick={addTable} disabled={!addLabel.trim()}
-                style={{ flex:1, padding:"9px", borderRadius:10, border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700,
-                  background: addLabel.trim() ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "#333",
-                  color: addLabel.trim() ? "#fff" : "#555" }}>
-                ✅ បង្កើតតុ
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirm */}
-      {delConfTid !== null && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <div style={{ background:"var(--bg-card)", borderRadius:16, padding:24, maxWidth:300, width:"90%", textAlign:"center" }}>
-            <div style={{ fontSize:36, marginBottom:8 }}>🗑️</div>
-            <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>លុបតុ {delConfTid}?</div>
-            <div style={{ fontSize:12, color:"#888", marginBottom:18 }}>action នេះ មិនអាចត្រឡប់វិញបានទេ</div>
-            <div style={{ display:"flex", gap:8 }}>
-              <button onClick={() => setDelConfTid(null)}
-                style={{ flex:1, padding:"9px", borderRadius:10, border:"1px solid #333", background:"transparent", color:"#888", cursor:"pointer", fontFamily:"inherit" }}>
-                បោះបង់
-              </button>
-              <button onClick={() => deleteTable(delConfTid)}
-                style={{ flex:1, padding:"9px", borderRadius:10, border:"none", background:"#8B1A1A", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>
-                🗑️ លុប
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Table grid */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:14 }}>
         {tables.map(t => {
           const isBusy = t.status === "busy";
+          // Only show TODAY's orders for this table (not all history)
           const todayStr = new Date().toISOString().slice(0, 10);
           const tableOrders = (orders||[]).filter(o => {
             const matchTable = String(o.table) === String(t.table_id) || o.table === t.table_id;
@@ -1712,58 +1573,18 @@ function TablesPage({ tables, setTables, orders, currentUser, isAdmin, isGlobalA
             return matchTable && isToday;
           });
           const tableTotal = isBusy ? tableOrders.reduce((s,o) => s + (o.total||0) + (o.tax||0), 0) : 0;
-          const displayName = t.label || ("តុ " + t.table_id);
-          const isEditing = editTid === t.table_id;
-
           return (
             <div key={t.table_id} style={{
               background:"var(--bg-card)",
               border:`2px solid ${isBusy ? "#8B1A1A" : "#1A4A1A"}`,
-              borderRadius:16, padding:18, textAlign:"center",
+              borderRadius:16, padding:22, textAlign:"center",
               boxShadow: isBusy ? "0 0 20px #8B1A1A22" : "0 0 20px #1A4A1A22",
-              transition:"all .2s", position:"relative",
+              transition:"all .2s",
             }}>
-              {/* Admin: delete button top-right */}
-              {canManage && !isBusy && (
-                <button onClick={() => setDelConfTid(t.table_id)}
-                  title="លុបតុ"
-                  style={{ position:"absolute", top:8, right:8, background:"transparent", border:"none",
-                    color:"#444", cursor:"pointer", fontSize:14, lineHeight:1, padding:"2px 4px", borderRadius:4 }}>
-                  ✕
-                </button>
-              )}
-
-              <div style={{ fontSize:32 }}>{t.label?.match(/^\S+/)?.[0] || "🪑"}</div>
-
-              {/* Name — editable for admin */}
-              {isEditing ? (
-                <div style={{ marginTop:6, marginBottom:6 }}>
-                  <input
-                    className="inp"
-                    value={editLabel}
-                    onChange={e => setEditLabel(e.target.value)}
-                    onKeyDown={e => { if (e.key==="Enter") saveRename(t.table_id); if (e.key==="Escape") setEditTid(null); }}
-                    autoFocus
-                    style={{ width:"100%", fontSize:13, padding:"4px 8px", textAlign:"center", boxSizing:"border-box" }}
-                  />
-                  <div style={{ display:"flex", gap:4, marginTop:4 }}>
-                    <button onClick={() => saveRename(t.table_id)} style={{ ...btnSm, flex:1, color:"#27AE60", borderColor:"#27AE6044" }}>✓</button>
-                    <button onClick={() => setEditTid(null)}       style={{ ...btnSm, flex:1 }}>✕</button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ fontWeight:700, fontSize:16, marginTop:6, marginBottom:4, display:"flex", alignItems:"center", justifyContent:"center", gap:4 }}>
-                  {displayName}
-                  {canManage && (
-                    <button onClick={() => { setEditTid(t.table_id); setEditLabel(displayName); }}
-                      title="ប្តូរឈ្មោះ"
-                      style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", fontSize:11, padding:"1px 3px" }}>
-                      ✏️
-                    </button>
-                  )}
-                </div>
-              )}
-
+              <div style={{ fontSize:34 }}>🪑</div>
+              <div style={{ fontWeight:700, fontSize:18, marginTop:8, marginBottom:6 }}>
+                តុ {t.table_id}
+              </div>
               <div style={{
                 fontSize:12, padding:"4px 14px", borderRadius:20,
                 display:"inline-block", fontWeight:600,
@@ -1772,20 +1593,19 @@ function TablesPage({ tables, setTables, orders, currentUser, isAdmin, isGlobalA
               }}>
                 {isBusy ? "🔴 មានអតិថិជន" : "🟢 ទំនេរ"}
               </div>
-
               {isBusy && tableTotal > 0 && (
                 <div style={{ fontSize:13, color:"#E8A84B", fontWeight:700, marginTop:6 }}>
                   ${tableTotal.toFixed(2)}
                 </div>
               )}
-
               <button
                 onClick={() => toggleTable(t.table_id)}
                 style={{
-                  marginTop:10, width:"100%", padding:"7px",
+                  marginTop:12, width:"100%", padding:"7px",
                   borderRadius:8, border:"1px solid rgba(255,255,255,.1)",
                   background:"rgba(255,255,255,.05)", color: isBusy ? "#E74C3C" : "#27AE60",
                   cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:600,
+                  transition:"all .15s",
                 }}
               >
                 {isBusy ? "✓ ចេញ" : "ចូល"}
@@ -1793,38 +1613,16 @@ function TablesPage({ tables, setTables, orders, currentUser, isAdmin, isGlobalA
             </div>
           );
         })}
-
-        {/* Add table shortcut card — admin only */}
-        {canManage && (
-          <div onClick={() => setShowAdd(true)}
-            style={{
-              background:"var(--bg-card)", border:"2px dashed #333",
-              borderRadius:16, padding:18, textAlign:"center", cursor:"pointer",
-              display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
-              gap:8, opacity:0.6, transition:"opacity .2s", minHeight:160,
-            }}
-            onMouseEnter={e => e.currentTarget.style.opacity=1}
-            onMouseLeave={e => e.currentTarget.style.opacity=0.6}
-          >
-            <div style={{ fontSize:32 }}>➕</div>
-            <div style={{ fontSize:13, color:"#888", fontWeight:600 }}>បន្ថែមតុ</div>
-          </div>
-        )}
       </div>
 
       {/* Legend */}
       <div style={{ marginTop:20, display:"flex", gap:16, flexWrap:"wrap" }}>
-        {[["#27AE60","ទំនេរ"],["#E74C3C","កំពុងប្រើ"]].map(([color,label]) => (
+        {[["#27AE60","ទំ"],["#E74C3C","កំពុងប្រើ"],["#F39C12","បានRA"],["#3498DB","សំអាត"]].map(([color,label]) => (
           <div key={label} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#555" }}>
             <div style={{ width:10, height:10, borderRadius:"50%", background:color }} />
             {label}
           </div>
         ))}
-        {canManage && (
-          <div style={{ fontSize:12, color:"#555", marginLeft:"auto" }}>
-            💡 ចុច ✕ ដើម្បីលុបតុ · ✏️ ដើម្បីប្តូរឈ្មោះ
-          </div>
-        )}
       </div>
     </div>
   );
@@ -5745,23 +5543,171 @@ function ThemePage({ theme, setTheme, notify, isGlobalAdmin, currentUser }) {
     return Object.keys(t).every(k => t[k] === theme[k]);
   };
 
-  const ColorRow = ({ label, k }) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-      <div style={{ width: 130, fontSize: 12, color: "var(--text-dim)", flexShrink: 0 }}>{label}</div>
-      <input type="color" value={custom[k]} onChange={e => setCustom(p => ({ ...p, [k]: e.target.value }))}
-        style={{
-          width: 44, height: 36, border: "none", borderRadius: 8, cursor: "pointer",
-          background: "transparent", padding: 2
-        }} />
-      <div style={{
-        flex: 1, height: 36, borderRadius: 8, background: custom[k],
-        border: "1px solid var(--border)", boxShadow: "inset 0 2px 4px rgba(0,0,0,.3)"
-      }} />
-      <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'DM Mono',monospace", minWidth: 70 }}>
-        {custom[k]}
+  // ── Advanced Color Picker state ──────────────────────────────────
+  const [pickerKey,  setPickerKey]  = useState(null); // which key is open
+  const [hoverKey,   setHoverKey]   = useState(null); // hover tooltip
+
+  // hex → {r,g,b}
+  const hexToRgb = hex => {
+    const h = hex.replace("#","");
+    return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) };
+  };
+  // {r,g,b} → hex
+  const rgbToHex = ({r,g,b}) => "#" + [r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,"0")).join("");
+
+  const updateChannel = (k, channel, val) => {
+    const rgb = hexToRgb(custom[k] || "#000000");
+    rgb[channel] = Math.max(0, Math.min(255, parseInt(val)||0));
+    setCustom(p => ({ ...p, [k]: rgbToHex(rgb) }));
+  };
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!pickerKey) return;
+    const fn = () => setPickerKey(null);
+    setTimeout(() => document.addEventListener("click", fn), 0);
+    return () => document.removeEventListener("click", fn);
+  }, [pickerKey]);
+
+  const COLOR_FIELDS = [
+    { k:"bgMain",     label:"Background ចម្បង",   icon:"🌑", group:"backgrounds" },
+    { k:"bgCard",     label:"Background Cards",    icon:"🗂️", group:"backgrounds" },
+    { k:"bgHeader",   label:"Background Header",   icon:"📌", group:"backgrounds" },
+    { k:"accent",     label:"Accent ចម្បង",        icon:"⭐", group:"accents" },
+    { k:"accentDark", label:"Accent ងងឹត",         icon:"🔆", group:"accents" },
+    { k:"textMain",   label:"ពណ៌អក្សរ ចម្បង",     icon:"📝", group:"text" },
+    { k:"textDim",    label:"ពណ៌អក្សរ ស្រាល",     icon:"📝", group:"text" },
+    { k:"borderCol",  label:"Border / Divider",    icon:"📐", group:"borders" },
+  ];
+
+  const GROUP_LABELS = {
+    backgrounds: "🖥️ Backgrounds",
+    accents:     "⭐ Accent Colors",
+    text:        "🔤 Text Colors",
+    borders:     "📐 Borders",
+  };
+
+  const ColorRow = ({ k, label, icon }) => {
+    const hex   = custom[k] || "#000000";
+    const rgb   = hexToRgb(hex);
+    const isOpen   = pickerKey === k;
+    const isHover  = hoverKey  === k;
+
+    return (
+      <div style={{ marginBottom:10, position:"relative" }}>
+        <div
+          style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:10,
+            background: isOpen ? "var(--bg-main)" : isHover ? "var(--bg-main)" : "transparent",
+            border: isOpen ? "1px solid var(--accent)" : "1px solid transparent",
+            cursor:"pointer", transition:"all .15s" }}
+          onMouseEnter={() => setHoverKey(k)}
+          onMouseLeave={() => setHoverKey(null)}
+        >
+          {/* Color swatch — click to open picker */}
+          <div onClick={e => { e.stopPropagation(); setPickerKey(isOpen ? null : k); }}
+            style={{ width:36, height:36, borderRadius:8, background:hex, border:"2px solid #33333388",
+              flexShrink:0, cursor:"pointer", boxShadow: isOpen ? `0 0 0 3px ${hex}88` : "none",
+              transition:"box-shadow .15s" }} />
+
+          {/* Label */}
+          <div style={{ flex:1, minWidth:0 }}>
+            <div style={{ fontSize:12, color:"var(--text-main)", fontWeight:600 }}>{icon} {label}</div>
+            {/* Hover: show RGB breakdown */}
+            {isHover && !isOpen && (
+              <div style={{ fontSize:10, color:"var(--text-dim)", marginTop:2, display:"flex", gap:8 }}>
+                <span style={{ color:"#E74C3C" }}>R {rgb.r}</span>
+                <span style={{ color:"#27AE60" }}>G {rgb.g}</span>
+                <span style={{ color:"#5BA3E0" }}>B {rgb.b}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Preview bar */}
+          <div onClick={e => { e.stopPropagation(); setPickerKey(isOpen ? null : k); }}
+            style={{ width:100, height:28, borderRadius:6, background:hex, border:"1px solid #33333388",
+              cursor:"pointer", flexShrink:0 }} />
+
+          {/* Hex code */}
+          <div style={{ fontSize:11, color:"var(--text-dim)", fontFamily:"'DM Mono',monospace", minWidth:68, textAlign:"right" }}>
+            {hex.toUpperCase()}
+          </div>
+
+          {/* Native color input hidden */}
+          <input type="color" value={hex}
+            onChange={e => setCustom(p => ({ ...p, [k]: e.target.value }))}
+            style={{ width:0, height:0, opacity:0, position:"absolute", pointerEvents:"none" }}
+            id={`cp-native-${k}`} />
+        </div>
+
+        {/* ── Expanded Picker Panel ── */}
+        {isOpen && (
+          <div onClick={e => e.stopPropagation()}
+            style={{ position:"absolute", left:0, right:0, zIndex:200,
+              background:"var(--bg-card)", border:"1px solid var(--accent)", borderRadius:12,
+              padding:16, marginTop:4, boxShadow:"0 8px 32px rgba(0,0,0,.5)" }}>
+
+            {/* Visual color picker via native input — large */}
+            <div style={{ display:"flex", gap:12, alignItems:"flex-start", marginBottom:14 }}>
+              <input type="color" value={hex}
+                onChange={e => setCustom(p => ({ ...p, [k]: e.target.value }))}
+                style={{ width:80, height:80, border:"none", borderRadius:10, cursor:"pointer",
+                  background:"transparent", padding:0, flexShrink:0 }} />
+              <div style={{ flex:1 }}>
+                {/* Hex input */}
+                <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>HEX</div>
+                <input
+                  value={hex.toUpperCase()}
+                  onChange={e => {
+                    const v = e.target.value.trim();
+                    if (/^#[0-9A-Fa-f]{6}$/.test(v)) setCustom(p => ({ ...p, [k]: v.toLowerCase() }));
+                  }}
+                  maxLength={7}
+                  style={{ ...inputSt, fontSize:13, fontFamily:"'DM Mono',monospace", width:"100%",
+                    border:"1px solid var(--accent)", background:"var(--bg-main)",
+                    color:"var(--text-main)", padding:"6px 10px", boxSizing:"border-box" }} />
+                {/* Color preview large */}
+                <div style={{ marginTop:8, height:20, borderRadius:6, background:hex, border:"1px solid #33333388" }} />
+              </div>
+            </div>
+
+            {/* RGB Sliders */}
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {[["r","R","#E74C3C"],["g","G","#27AE60"],["b","B","#5BA3E0"]].map(([ch,lb,col]) => (
+                <div key={ch} style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:11, fontWeight:700, color:col, minWidth:14 }}>{lb}</span>
+                  <input type="range" min={0} max={255} value={rgb[ch]}
+                    onChange={e => updateChannel(k, ch, e.target.value)}
+                    style={{ flex:1, accentColor:col, cursor:"pointer" }} />
+                  <input type="number" min={0} max={255} value={rgb[ch]}
+                    onChange={e => updateChannel(k, ch, e.target.value)}
+                    style={{ ...inputSt, width:52, fontSize:12, fontFamily:"'DM Mono',monospace",
+                      padding:"4px 6px", textAlign:"center", background:"var(--bg-main)",
+                      color:"var(--text-main)", border:"1px solid var(--border-col)", boxSizing:"border-box" }} />
+                </div>
+              ))}
+            </div>
+
+            {/* Quick swatches — preset accent / neutral colors */}
+            <div style={{ marginTop:12, borderTop:"1px solid var(--border-col)", paddingTop:10 }}>
+              <div style={{ fontSize:10, color:"var(--text-dim)", marginBottom:6 }}>Quick swatches</div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
+                {["#E8A84B","#B8732A","#E74C3C","#27AE60","#5BA3E0","#9B59B6","#1ABC9C","#F39C12",
+                  "#09080A","#120F13","#0E0C0F","#1E1B1F","#EDE8E1","#666666","#FFFFFF","#000000"]
+                  .map(sw => (
+                    <div key={sw} onClick={() => setCustom(p => ({ ...p, [k]: sw }))}
+                      style={{ width:22, height:22, borderRadius:5, background:sw, cursor:"pointer",
+                        border: hex===sw ? "2px solid var(--text-main)" : "1px solid #33333388",
+                        boxShadow: hex===sw ? `0 0 0 2px ${sw}88` : "none",
+                        transition:"all .1s" }} />
+                  ))
+                }
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div style={{ padding: "16px 14px 32px" }}>
@@ -5960,42 +5906,43 @@ function ThemePage({ theme, setTheme, notify, isGlobalAdmin, currentUser }) {
 
       {/* CUSTOM */}
       {tab === "custom" && (
-        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, maxWidth: 520 }}>
-          <div style={{ fontWeight: 700, marginBottom: 18, fontSize: 13 }}>🖌️ កំណត់ពណ៌ផ្ទាល់ខ្លួន</div>
-          <ColorRow label="🌑 Background ចម្បង" k="bgMain" />
-          <ColorRow label="🗂️ Background Cards" k="bgCard" />
-          <ColorRow label="📌 Background Header" k="bgHeader" />
-          <ColorRow label="⭐ Accent ចម្បង" k="accent" />
-          <ColorRow label="🔆 Accent ងងឹត" k="accentDark" />
-          <ColorRow label="📝 ពណ៌អក្សរ ចម្បង" k="textMain" />
-          <ColorRow label="📝 ពណ៌អក្សរ ស្រាល" k="textDim" />
-          <ColorRow label="📐 Border / Divider" k="borderCol" />
+        <div style={{ maxWidth:560 }}>
+          <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:12 }}>
+            💡 ចុចលើ swatch ឬ preview bar ដើម្បីបើក picker · Hover ដើម្បីមើល RGB
+          </div>
 
-          {/* Custom preview */}
-          <div style={{
-            background: custom.bgMain, borderRadius: 10, padding: 14, marginBottom: 16,
-            border: `1px solid ${custom.borderCol}`
-          }}>
-            <div style={{ fontSize: 11, color: custom.textDim, marginBottom: 6 }}>Preview ផ្ទាល់</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <div style={{
-                background: custom.bgCard, border: `1px solid ${custom.borderCol}`,
-                borderRadius: 8, padding: "8px 12px"
-              }}>
-                <div style={{ fontSize: 11, color: custom.textDim }}>ចំណូល</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: custom.accent }}>$128.00</div>
+          {/* Grouped color fields */}
+          {Object.entries(GROUP_LABELS).map(([grp, grpLabel]) => {
+            const fields = COLOR_FIELDS.filter(f => f.group === grp);
+            return (
+              <div key={grp} style={{ background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:14, padding:"14px 14px 6px", marginBottom:12 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:"var(--accent)", marginBottom:10 }}>{grpLabel}</div>
+                {fields.map(f => <ColorRow key={f.k} k={f.k} label={f.label} icon={f.icon} />)}
               </div>
-              <div style={{
-                background: `linear-gradient(135deg,${custom.accentDark},${custom.accent})`,
-                borderRadius: 8, padding: "8px 14px", color: "#fff", fontSize: 12, fontWeight: 700,
-                display: "flex", alignItems: "center"
-              }}>
-                ✅ Apply
+            );
+          })}
+
+          {/* Live preview of custom */}
+          <div style={{ background:custom.bgMain, borderRadius:12, padding:14, marginBottom:14,
+            border:`1px solid ${custom.borderCol}` }}>
+            <div style={{ fontSize:11, color:custom.textDim, marginBottom:8 }}>👁️ Preview ផ្ទាល់</div>
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <div style={{ background:custom.bgCard, border:`1px solid ${custom.borderCol}`, borderRadius:8, padding:"8px 12px" }}>
+                <div style={{ fontSize:11, color:custom.textDim }}>ចំណូល</div>
+                <div style={{ fontSize:16, fontWeight:700, color:custom.accent }}>$128.00</div>
+              </div>
+              <div style={{ background:`linear-gradient(135deg,${custom.accentDark},${custom.accent})`,
+                borderRadius:8, padding:"8px 14px", fontSize:12, fontWeight:700,
+                display:"flex", alignItems:"center", color:"#fff" }}>✅ Apply</div>
+              <div style={{ background:custom.bgHeader, border:`1px solid ${custom.borderCol}`,
+                borderRadius:8, padding:"8px 12px" }}>
+                <div style={{ fontSize:11, color:custom.textMain }}>Header</div>
+                <div style={{ fontSize:11, color:custom.textDim }}>Dim text</div>
               </div>
             </div>
           </div>
 
-          <button onClick={applyCustom} style={{ ...btnGold, width: "100%", fontSize: 14 }}>
+          <button onClick={applyCustom} style={{ ...btnGold, width:"100%", fontSize:14 }}>
             🎨 Apply Custom Theme
           </button>
         </div>
