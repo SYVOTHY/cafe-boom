@@ -378,31 +378,52 @@ export default function CafeBloom() {
   const { db, loading, socketOnline, saveTable, reload } = useRealtimeDB(CLOUD_URL, activeBranchId);
 
   // Sync DB → state when data arrives/updates
+  // Skip if table has a pending local write (within 3s) to prevent socket overwrite
+  const skipIfPending = (key, fn) => {
+    const pending = pendingWrites.current[key];
+    if (pending && Date.now() - pending < 3000) {
+      console.log(`[DB sync] Skipping ${key} — pending local write`);
+      return;
+    }
+    fn();
+  };
+
   useEffect(() => {
     if (!db) return;
-    if (db.categories)  setCatsRaw(db.categories);
-    if (db.products)    setProdsRaw(db.products);
-    if (db.ingredients) setIngsRaw(db.ingredients);
-    if (db.recipes)     setRecipesRaw(db.recipes);
-    if (db.options)     setOptionsRaw(db.options);
-    if (db.tables)      setTablesRaw(db.tables);
-    if (db.orders)      setOrdersRaw(db.orders);
-    if (db.logs)        setLogsRaw(db.logs);
-    if (db.users)       setUsersRaw(db.users);
+    if (db.categories)  skipIfPending("categories",  () => setCatsRaw(db.categories));
+    if (db.products)    skipIfPending("products",    () => setProdsRaw(db.products));
+    if (db.ingredients) skipIfPending("ingredients", () => setIngsRaw(db.ingredients));
+    if (db.recipes)     skipIfPending("recipes",     () => setRecipesRaw(db.recipes));
+    if (db.options)     skipIfPending("options",     () => setOptionsRaw(db.options));
+    if (db.tables)      skipIfPending("tables",      () => setTablesRaw(db.tables));
+    if (db.orders)      skipIfPending("orders",      () => setOrdersRaw(db.orders));
+    if (db.logs)        skipIfPending("logs",        () => setLogsRaw(db.logs));
+    if (db.users)       skipIfPending("users",       () => setUsersRaw(db.users));
     if (db.theme) {
-      setThemeRaw({ ...DEFAULT_THEME, ...db.theme });
-      // Sync shopName+shopLogo from DB to localStorage so all devices show same brand
-      if (db.theme.shopName) localStorage.setItem("cb_shop_name", db.theme.shopName);
-      if (db.theme.shopLogo !== undefined) localStorage.setItem("cb_shop_logo", db.theme.shopLogo || "");
+      skipIfPending("theme", () => {
+        setThemeRaw({ ...DEFAULT_THEME, ...db.theme });
+        if (db.theme.shopName) localStorage.setItem("cb_shop_name", db.theme.shopName);
+        if (db.theme.shopLogo !== undefined) localStorage.setItem("cb_shop_logo", db.theme.shopLogo || "");
+      });
     }
-    if (db.expenses)    setExpensesRaw(db.expenses);
+    if (db.expenses)    skipIfPending("expenses",    () => setExpensesRaw(db.expenses));
     setOffline(false);
   }, [db]);
+
+  // ── Local write tracker — prevent socket from overwriting pending local writes ──
+  const pendingWrites = useRef({});
 
   // ── mkSet: update state + save to server ──────────────────────
   const mkSet = useCallback((setRaw, key) => (v) => setRaw(prev => {
     const n = typeof v === "function" ? v(prev) : v;
-    saveTable(key, n);
+    // Mark this table as having a pending local write
+    pendingWrites.current[key] = Date.now();
+    saveTable(key, n).then(() => {
+      // Clear pending write 2s after successful save
+      setTimeout(() => {
+        delete pendingWrites.current[key];
+      }, 2000);
+    });
     return n;
   }), [saveTable]);
 
