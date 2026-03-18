@@ -10,7 +10,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { initSocket, onBranchUpdate, onSharedUpdate, isConnected } from "./socket.js";
 
 // Tables that belong to a branch vs shared
-const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses"]);
+const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses","recipes"]);
 
 // Helper: get auth header from localStorage
 function authHeaders() {
