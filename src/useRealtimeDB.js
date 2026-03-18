@@ -56,9 +56,14 @@ export function useRealtimeDB(serverUrl, branchId) {
   }, [serverUrl, branchId]);
 
   // ── Save a table via REST (also triggers socket broadcast on server) ─
+  const lastWriteRef = useRef({});
+
   const saveTable = useCallback(async (table, data, retries = 3) => {
     const isShared = !BRANCH_TABLES.has(table);
     const url = `${serverUrl}/api/db/${table}${isShared ? "" : "?branch=" + branchId}`;
+
+    // Record local write time to block stale socket updates
+    lastWriteRef.current[table] = Date.now();
 
     // Optimistic update locally
     dbRef.current = { ...dbRef.current, [table]: data };
@@ -109,9 +114,25 @@ export function useRealtimeDB(serverUrl, branchId) {
     // 3) Listen for branch-specific updates from OTHER clients
     const offBranch = onBranchUpdate(({ branch_id, table, data }) => {
       if (branch_id !== branchId) return;   // ignore other branches
+
+      // For ingredients: ignore socket updates that are OLDER than our last local write
+      // This prevents checkout stock deduction from being overwritten by stale broadcasts
+      if (table === "ingredients" && Array.isArray(data) && data.length > 0 && data[0]._ts) {
+        const incomingTs = data[0]._ts;
+        const myLastWrite = lastWriteRef.current[table] || 0;
+        if (incomingTs < myLastWrite - 500) { // 500ms tolerance
+          console.log(`[Socket] Ignoring stale ${table} (server:${incomingTs} < local:${myLastWrite})`);
+          return;
+        }
+      }
+
       console.log(`[Socket] Branch update: ${table} (${branch_id})`);
-      dbRef.current = { ...dbRef.current, [table]: data };
-      if (mounted) setDb(prev => ({ ...prev, [table]: data }));
+      // Strip internal timestamps before storing
+      const cleanData = (table === "ingredients" && Array.isArray(data))
+        ? data.map(({ _ts, ...rest }) => rest)
+        : data;
+      dbRef.current = { ...dbRef.current, [table]: cleanData };
+      if (mounted) setDb(prev => ({ ...prev, [table]: cleanData }));
     });
 
     // 4) Listen for shared data updates (menu, products, users…)
