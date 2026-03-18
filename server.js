@@ -755,6 +755,48 @@ async function handler(req, res) {
     return;
   }
 
+  // ── MIGRATE RECIPES: copy shared_data recipes → branch_data for all branches ─
+  // POST /api/migrate-recipes  (admin only, safe to run multiple times)
+  if (req.method === "POST" && url === "/api/migrate-recipes") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin") {
+      send(res, 403, { error:"Admin only" }); return;
+    }
+    // Load shared recipes
+    const { rows: sr } = await pool.query("SELECT value FROM shared_data WHERE key='recipes'");
+    const sharedRecipes = (sr.length && Array.isArray(sr[0].value)) ? sr[0].value : [];
+
+    const branches = (await loadBranches()).filter(b => b.active);
+    const results  = [];
+    for (const b of branches) {
+      const { rows: br } = await pool.query(
+        "SELECT value FROM branch_data WHERE branch_id=$1 AND key='recipes'", [b.branch_id]
+      );
+      const existing = (br.length && Array.isArray(br[0].value)) ? br[0].value : [];
+
+      // Load this branch's ingredients to know which ingredient_ids are valid
+      const bd   = await loadBranch(b.branch_id);
+      const ingIds = new Set((bd.ingredients||[]).map(i => Number(i.ingredient_id)));
+
+      // Filter shared recipes: keep only rows whose ingredient_id exists in this branch
+      const validRecipes = sharedRecipes.filter(r => ingIds.has(Number(r.ingredient_id)));
+
+      // Merge: keep existing branch recipes that are valid + add missing ones from shared
+      const existingIds = new Set(existing.map(r => r.recipe_id));
+      const merged = [
+        ...existing.filter(r => ingIds.has(Number(r.ingredient_id))),  // keep valid existing
+        ...validRecipes.filter(r => !existingIds.has(r.recipe_id)),    // add new from shared
+      ];
+
+      await saveBranchKey(b.branch_id, "recipes", merged);
+      broadcastBranchUpdate(b.branch_id, "recipes", merged);
+      results.push({ branch_id: b.branch_id, before: existing.length, after: merged.length });
+      console.log(`[Migrate] ${b.branch_id}: recipes ${existing.length} → ${merged.length}`);
+    }
+    send(res, 200, { ok:true, results });
+    return;
+  }
+
   // ── RESET DAILY ─────────────────────────────────────────────────
   if (req.method === "POST" && url.startsWith("/api/reset-daily")) {
     const bid = resolveBranch(req);
