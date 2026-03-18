@@ -1343,20 +1343,20 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
               }
               return "ok";
             })();
-            const stockColor = stockStatus==="out"?"#E74C3C":stockStatus==="low"?"#F39C12":stockStatus==="missing"?"#9B59B6":"transparent";
-            const stockLabel = stockStatus==="out"?"❌ អស់":stockStatus==="low"?"⚠️ ចិត":stockStatus==="missing"?null:null;
+            const stockColor = stockStatus==="out"||stockStatus==="missing"?"#E74C3C":stockStatus==="low"?"#F39C12":"transparent";
+            const stockLabel = stockStatus==="out"||stockStatus==="missing"?"❌ អស់":stockStatus==="low"?"⚠️ ចិត":null;
             return (
               <button key={p.product_id}
-                onClick={() => stockStatus==="out" ? null : openCustomize(p)}
+                onClick={() => stockStatus==="out"||stockStatus==="missing" ? null : openCustomize(p)}
                 className="hover-lift"
                 style={{
                   background: "var(--bg-card)",
-                  border: stockStatus==="out" ? "1px solid #E74C3C44" : stockStatus==="low" ? "1px solid #F39C1244" : "1px solid var(--border)",
+                  border: stockStatus==="out"||stockStatus==="missing" ? "1px solid #E74C3C44" : stockStatus==="low" ? "1px solid #F39C1244" : "1px solid var(--border)",
                   borderRadius: 14,
-                  padding: "10px 8px", cursor: stockStatus==="out" ? "not-allowed" : "pointer",
+                  padding: "10px 8px", cursor: stockStatus==="out"||stockStatus==="missing" ? "not-allowed" : "pointer",
                   textAlign: "center", fontFamily: "inherit",
                   display: "flex", flexDirection: "column", alignItems: "center", gap: 5,
-                  opacity: stockStatus==="out" ? 0.5 : 1,
+                  opacity: stockStatus==="out"||stockStatus==="missing" ? 0.5 : 1,
                   position: "relative"
                 }}>
                 {/* Stock badge overlay */}
