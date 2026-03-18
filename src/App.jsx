@@ -3647,7 +3647,10 @@ const DEFAULT_EXPENSE_CATS = [
   { id:"electricity", label:"⚡ ភ្លើង",              color:"#F39C12" },
   { id:"tax",         label:"🏛️ ពន្ធ",               color:"#9B59B6" },
   { id:"rent",        label:"🏠 ជួលកន្លែង",          color:"#5BA3E0" },
+  { id:"ingredients", label:"🧂 គ្រឿងទេស/វត្ថុធាតុ",color:"#1ABC9C" },
   { id:"supplies",    label:"🧴 គ្រឿងប្រើប្រាស់",   color:"#27AE60" },
+  { id:"equipment",   label:"🔧 ឧបករណ៍/ជួសជុល",    color:"#E8A84B" },
+  { id:"marketing",   label:"📢 ផ្សព្វផ្សាយ",        color:"#9B6FE8" },
   { id:"other",       label:"📦 ចំណាយផ្សេងៗ",       color:"#7F8C8D" },
 ];
 
@@ -3850,28 +3853,72 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
 
   // ── Print PDF ──────────────────────────────────────────────────────
   const doPrint = () => {
-    const expRows = expCats.map(c => {
-      const val = Number(expItems[c.id])||0;
-      return "<tr><td>" + c.label + "</td><td style='text-align:right;font-weight:"+(val>0?700:400)+";color:"+(val>0?"#c0392b":"#aaa")+"'>" + (val>0?fmt(val):"—") + "</td></tr>";
+    const shopName = localStorage.getItem("cb_shop_name") || "Cafe Bloom";
+    const branchLabel = viewBranchId
+      ? (branches.find(b=>b.branch_id===viewBranchId)?.branch_name || viewBranchId)
+      : branchId;
+
+    // Transaction detail rows (new system)
+    const sortedTxns = [...monthTxns].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+    const txnRows = sortedTxns.map(t => {
+      const cat = expCats.find(c=>c.id===t.cat_id);
+      const bName = branches.find(b=>b.branch_id===t.branch_id)?.branch_name || t.branch_id || branchId;
+      return "<tr>"
+        +"<td>"+t.date+"</td>"
+        +"<td>"+(cat ? cat.label : t.cat_id)+"</td>"
+        +"<td>"+(t.desc||"—")+"</td>"
+        +(branches.length > 1 ? "<td style='font-size:10px;color:#888'>"+bName+"</td>" : "")
+        +(t.created_by ? "<td style='font-size:10px;color:#888'>"+t.created_by+"</td>" : "<td></td>")
+        +"<td style='text-align:right;font-weight:700;color:#c0392b'>"+fmt(t.amount)+"</td>"
+        +"</tr>";
     }).join("");
-    const histRows = monthlyRecords.slice(0,12).map(e => {
-      const parts = e.month.split("-"); const ey=parts[0]; const em=parts[1];
-      const rev2 = (sourceOrders||[]).filter(o => { try { return new Date(o.order_id).toISOString().slice(0,7)===e.month; } catch { return false; } }).reduce((s,o) => s+o.total+o.tax, 0);
-      const exp2 = expCats.reduce((s,c) => s+Number((e.items||{})[c.id]||0), 0);
-      const pnl2 = rev2-exp2;
-      return "<tr"+(e.month===selMonth?" style='background:#fff7f0'":'')+">"
+
+    // Category summary
+    const catSummaryRows = expCats.map(c => {
+      const catTotal = monthTxns.filter(t=>t.cat_id===c.id).reduce((s,t)=>s+Number(t.amount||0),0);
+      if (catTotal===0) return "";
+      const pct = totalExp > 0 ? Math.round((catTotal/totalExp)*100) : 0;
+      return "<tr><td>"+c.label+"</td>"
+        +"<td style='text-align:right;font-weight:700;color:#c0392b'>"+fmt(catTotal)+"</td>"
+        +"<td style='text-align:right;color:#888;font-size:11px'>"+pct+"%</td></tr>";
+    }).filter(Boolean).join("");
+
+    // Monthly history
+    const allMonths = [...new Set([
+      ...(Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).map(t=>t.date?.slice(0,7)).filter(Boolean),
+      selMonth
+    ])].sort().reverse().slice(0,12);
+
+    const histRows = allMonths.map(mo => {
+      const [ey,em] = mo.split("-");
+      const rev2 = (sourceOrders||[]).filter(o=>{
+        try{return new Date(o.order_id).toISOString().slice(0,7)===mo;}catch{return false;}
+      }).reduce((s,o)=>s+o.total+o.tax,0);
+      const txnExp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[])
+        .filter(t=>t.date?.slice(0,7)===mo&&(!viewBranchId||t.branch_id===viewBranchId))
+        .reduce((s,t)=>s+Number(t.amount||0),0);
+      const legRec = monthlyRecords.find(e=>e.month===mo);
+      const legExp2 = legRec ? expCats.reduce((s,c)=>s+Number((legRec.items||{})[c.id]||0),0) : 0;
+      const exp2 = txnExp2 + legExp2;
+      const pnl2 = rev2 - exp2;
+      return "<tr"+(mo===selMonth?" style='background:#fff7f0'":'')+">"
         +"<td>"+MON_KH[parseInt(em)-1]+" "+ey+"</td>"
         +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
         +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
         +"<td style='font-weight:700;color:"+(pnl2>=0?"#27ae60":"#c0392b")+"'>"+(pnl2>=0?"+":"")+fmt(pnl2)+"</td></tr>";
     }).join("");
+
     const barExpW = totalExp>0 ? Math.min(100,(totalExp/Math.max(revenue,totalExp))*100) : 0;
-    const html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Cafe Bloom - ហិរញ្ញវត្ថុ "+monthLabel+"</title>"
+
+    const html = "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+      +"<title>"+shopName+" - ហិរញ្ញវត្ថុ "+monthLabel+"</title>"
       +"<style>@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');"
-      +"*{box-sizing:border-box;margin:0;padding:0}body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px}"
+      +"*{box-sizing:border-box;margin:0;padding:0}"
+      +"body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px}"
       +".header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #B8732A}"
       +".logo{font-size:20px;font-weight:700;color:#B8732A}.logo span{font-size:11px;color:#888;display:block;font-weight:400}"
-      +".meta{text-align:right;font-size:12px;color:#888}h2{font-size:14px;font-weight:700;color:#B8732A;margin:18px 0 8px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A}"
+      +".meta{text-align:right;font-size:12px;color:#888}"
+      +"h2{font-size:14px;font-weight:700;color:#B8732A;margin:18px 0 8px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A}"
       +".kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:10px 0 16px}"
       +".kpi{background:#fff7f0;border:1px solid #e8d8c8;border-radius:8px;padding:12px 14px}"
       +".kpi .val{font-size:20px;font-weight:700;margin-top:3px}.kpi .lbl{font-size:11px;color:#888}"
@@ -3879,25 +3926,43 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       +".bar-exp{background:#e74c3c;height:100%}.bar-rev{background:#27ae60;height:100%;flex:1}"
       +"table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:12px}"
       +"th{background:#B8732A;color:#fff;padding:7px 10px;text-align:left;font-size:11px}"
-      +"td{padding:7px 10px;border-bottom:1px solid #f0ece8}tr:nth-child(even) td{background:#fdf9f6}"
+      +"td{padding:6px 10px;border-bottom:1px solid #f0ece8}tr:nth-child(even) td{background:#fdf9f6}"
       +".footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}"
       +"@media print{body{padding:14px}}</style></head><body>"
-      +"<div class='header'><div class='logo'>☕ Cafe Bloom <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ</span></div>"
-      +"<div class='meta'><b>"+monthLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div></div>"
+      +"<div class='header'>"
+        +"<div class='logo'>☕ "+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+"</span></div>"
+        +"<div class='meta'><b>"+monthLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
+      +"</div>"
       +"<h2>📊 សង្ខេបហិរញ្ញវត្ថុ</h2>"
       +"<div class='kpi-grid'>"
-      +"<div class='kpi'><div class='lbl'>💰 ចំណូលសរុប</div><div class='val' style='color:#B8732A'>"+fmt(revenue)+"</div></div>"
-      +"<div class='kpi'><div class='lbl'>💸 ចំណាយសរុប</div><div class='val' style='color:#e74c3c'>"+fmt(totalExp)+"</div></div>"
-      +"<div class='kpi'><div class='lbl'>📈 ចំណេញសុទ្ធ</div><div class='val' style='color:"+(profit>=0?"#27ae60":"#e74c3c")+"'>"+(profit>=0?"+":"")+fmt(profit)+"</div></div>"
+        +"<div class='kpi'><div class='lbl'>💰 ចំណូលសរុប</div><div class='val' style='color:#B8732A'>"+fmt(revenue)+"</div></div>"
+        +"<div class='kpi'><div class='lbl'>💸 ចំណាយសរុប</div><div class='val' style='color:#e74c3c'>"+fmt(totalExp)+"</div></div>"
+        +"<div class='kpi'><div class='lbl'>📈 ចំណេញសុទ្ធ</div><div class='val' style='color:"+(profit>=0?"#27ae60":"#e74c3c")+"'>"+(profit>=0?"+":"")+fmt(profit)+"</div></div>"
       +"</div>"
       +(revenue>0||totalExp>0?"<div class='bar-wrap'>"+(totalExp>0?"<div class='bar-exp' style='width:"+barExpW+"%'></div>":"")+(revenue>totalExp?"<div class='bar-rev'></div>":"")+"</div><div style='display:flex;justify-content:space-between;font-size:11px;color:#888;margin-bottom:12px'><span style='color:#e74c3c'>ចំណាយ "+fmt(totalExp)+"</span><span style='color:#27ae60'>ចំណូល "+fmt(revenue)+"</span></div>":"")
-      +"<h2>📋 បញ្ជីចំណាយ</h2>"
-      +"<table><thead><tr><th>ប្រភេទចំណាយ</th><th style='text-align:right'>ចំនួន</th></tr></thead>"
-      +"<tbody>"+expRows+"<tr style='background:#fff3e8'><td style='font-weight:700'>💸 ចំណាយសរុប</td><td style='text-align:right;font-weight:700;color:#c0392b'>"+fmt(totalExp)+"</td></tr></tbody></table>"
-      +(histRows?"<h2>📅 ប្រវត្តិប្រចាំខែ</h2><table><thead><tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr></thead><tbody>"+histRows+"</tbody></table>":"")
-      +"<div class='footer'>Cafe Bloom POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+monthLabel+"</div>"
-      +"\x3cscript\x3ewindow.onload=function(){window.print();}\x3c/script\x3e</body></html>";
-    const win = window.open("","_blank","width=1000,height=750");
+      +(txnRows
+        ?"<h2>📋 បញ្ជីចំណាយលម្អិត ("+monthTxns.length+" រាយការណ៍)</h2>"
+         +"<table><thead><tr><th>ថ្ងៃ</th><th>ប្រភេទ</th><th>ការរៀបរាប់</th>"
+         +(branches.length>1?"<th>សាខា</th>":"")
+         +"<th>បញ្ចូលដោយ</th><th style='text-align:right'>ចំនួន</th>"
+         +"</tr></thead><tbody>"+txnRows
+         +"<tr style='background:#fff3e8'><td colspan='"+(branches.length>1?5:4)+"' style='font-weight:700'>💸 ចំណាយសរុប</td><td style='text-align:right;font-weight:700;color:#c0392b'>"+fmt(totalExp)+"</td></tr>"
+         +"</tbody></table>"
+        :"<p style='color:#888;font-size:12px;margin:12px 0'>គ្មានចំណាយសម្រាប់ខែនេះ</p>")
+      +(catSummaryRows
+        ?"<h2>📊 សង្ខេបតាមប្រភេទ</h2>"
+         +"<table><thead><tr><th>ប្រភេទ</th><th style='text-align:right'>សរុប</th><th style='text-align:right'>%</th></tr></thead>"
+         +"<tbody>"+catSummaryRows+"</tbody></table>"
+        :"")
+      +(histRows
+        ?"<h2>📅 ប្រវត្តិប្រចាំខែ</h2>"
+         +"<table><thead><tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr></thead>"
+         +"<tbody>"+histRows+"</tbody></table>"
+        :"")
+      +"<div class='footer'>"+shopName+" POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+monthLabel+"</div>"
+      +"<script>window.onload=function(){window.print();}</script></body></html>";
+
+    const win = window.open("","_blank","width=1100,height=800");
     win.document.write(html);
     win.document.close();
   };
