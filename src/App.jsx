@@ -2014,64 +2014,6 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
 // ═══════════════════════════════════════════════════════════════════
 
 
-// ── MigrateRecipesBtn — copy shared recipes → each branch (admin only) ──
-function MigrateRecipesBtn({ api, notify }) {
-  const [busy,   setBusy]   = useState(false);
-  const [result, setResult] = useState(null);
-  const run = async () => {
-    setBusy(true); setResult(null);
-    try {
-      const token = localStorage.getItem("pos_token");
-      const r = await fetch(`${api}/api/migrate-recipes`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true",
-          ...(token ? { Authorization: "Bearer " + token } : {}),
-        },
-      });
-      const data = await r.json();
-      if (data.ok) {
-        setResult(data.results);
-        notify("✅ Migrate recipes រួចរាល់!");
-      } else {
-        notify("❌ " + (data.error || "មានបញ្ហា"));
-      }
-    } catch (e) {
-      notify("❌ " + e.message);
-    }
-    setBusy(false);
-  };
-  return (
-    <div style={{ marginBottom: 20, padding: "14px 16px", background: "#1A0A0A", border: "1px solid #E74C3C44", borderRadius: 10 }}>
-      <div style={{ fontWeight: 700, fontSize: 13, color: "#E8A84B", marginBottom: 6 }}>
-        🔧 Migrate Recipes → Branch Data
-      </div>
-      <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>
-        Copy recipes ពី shared_data ទៅ branch_data រៀងរាល់ branch — filter ingredient invalid ចេញ
-      </div>
-      <button
-        className="btn-primary"
-        onClick={run}
-        disabled={busy}
-        style={{ opacity: busy ? 0.6 : 1, fontSize: 13 }}
-      >
-        {busy ? "⏳ កំពុង migrate..." : "▶ Run Migration"}
-      </button>
-      {result && (
-        <div style={{ marginTop: 10 }}>
-          {result.map(r => (
-            <div key={r.branch_id} style={{ fontSize: 12, color: "#aaa", padding: "2px 0" }}>
-              <span style={{ color: "#27AE60", fontWeight: 700 }}>{r.branch_id}</span>
-              {" "}: {r.before} → <span style={{ color: "#E8A84B", fontWeight: 700 }}>{r.after}</span> recipes
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser }) {
   // Staff: read-only view — cannot add/edit/delete/restock
   const canEdit = isAdmin;
@@ -2455,9 +2397,6 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
 
         {subTab === "sql" && (
           <div style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
-            {isAdmin && (
-              <MigrateRecipesBtn api={API} notify={notify} />
-            )}
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
@@ -3852,7 +3791,12 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const expCats = (() => {
     if (!Array.isArray(expenses)) return DEFAULT_EXPENSE_CATS;
     const meta = expenses.find(e => e && e._meta);
-    return (meta && meta._cats && meta._cats.length > 0) ? meta._cats : DEFAULT_EXPENSE_CATS;
+    const saved = (meta && meta._cats && meta._cats.length > 0) ? meta._cats : [];
+    if (saved.length === 0) return DEFAULT_EXPENSE_CATS;
+    // Merge: keep saved order, append any DEFAULT cats whose id is not yet in saved
+    const savedIds = new Set(saved.map(c => c.id));
+    const merged = [...saved, ...DEFAULT_EXPENSE_CATS.filter(c => !savedIds.has(c.id))];
+    return merged;
   })();
 
   const monthOrders = sourceOrders.filter(o => {
