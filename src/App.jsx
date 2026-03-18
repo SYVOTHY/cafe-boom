@@ -22,6 +22,26 @@ function getBranchDisplayName(branchId, branches) {
   return found ? found.branch_name : branchId;
 }
 
+// Helper: get branch label badge for a user
+function getUserBranchBadge(user, branches) {
+  const bid = user?.branch_id;
+  if (!bid) return null;
+  if (bid === "all") {
+    // Super Admin
+    return { label: "⭐ Super Admin", bg: "linear-gradient(135deg,#1A0A3A,#6A3FB8)", color: "#C084FC", border: "#9B6FE833" };
+  }
+  const bName = (branches||[]).find(b => b.branch_id === bid)?.branch_name || bid;
+  const colors = {
+    branch_1: { bg:"#1A2A0A", color:"#27AE60", border:"#27AE6033" },
+    branch_2: { bg:"#0A1A2A", color:"#5BA3E0", border:"#5BA3E033" },
+    branch_3: { bg:"#2A0A1A", color:"#C0527A", border:"#C0527A33" },
+    branch_4: { bg:"#1A1A0A", color:"#E8A84B", border:"#E8A84B33" },
+    branch_5: { bg:"#0A1A1A", color:"#3ABFBF", border:"#3ABFBF33" },
+  };
+  const c = colors[bid] || { bg:"#1A181C", color:"#888", border:"#33333333" };
+  return { label: "🏪 " + bName, ...c };
+}
+
 function getBranchName() {
   if (typeof window !== "undefined") {
     if (window.CAFE_BRANCH_NAME) return window.CAFE_BRANCH_NAME;
@@ -750,8 +770,24 @@ export default function CafeBloom() {
                     </div>
                 }
                 <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{currentUser.name}</div>
-                  <div style={{ fontSize:11, color:"#888" }}>@{currentUser.username} · {currentUser.role}</div>
+                  <div style={{ fontSize:13, fontWeight:700, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                    {currentUser.name}
+                    {currentUser.branch_id === "all" && (
+                      <span style={{ marginLeft:6, fontSize:10, background:"linear-gradient(135deg,#1A0A3A,#6A3FB8)",
+                        color:"#C084FC", padding:"1px 7px", borderRadius:8, border:"1px solid #9B6FE833", fontWeight:700 }}>⭐ Super Admin</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize:11, color:"#888", display:"flex", alignItems:"center", gap:5, flexWrap:"wrap", marginTop:2 }}>
+                    <span>@{currentUser.username} · {currentUser.role}</span>
+                    {currentUser.branch_id && currentUser.branch_id !== "all" && (() => {
+                      const badge = getUserBranchBadge(currentUser, branchList);
+                      return badge ? (
+                        <span style={{ fontSize:10, padding:"1px 7px", borderRadius:8,
+                          background:badge.bg, color:badge.color,
+                          border:`1px solid ${badge.border}`, fontWeight:700 }}>{badge.label}</span>
+                      ) : null;
+                    })()}
+                  </div>
                 </div>
               </div>
               {/* Branch switcher — global admin, mobile only */}
@@ -1029,6 +1065,18 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
             </div>
         }
         <span className="topbar-username" style={{ fontSize:12, fontWeight:600 }}>{currentUser.name}</span>
+        {currentUser.branch_id === "all"
+          ? <span className="topbar-username" style={{ fontSize:9, padding:"1px 6px", borderRadius:8,
+              background:"linear-gradient(135deg,#1A0A3A,#6A3FB8)", color:"#C084FC",
+              border:"1px solid #9B6FE833", fontWeight:700 }}>⭐</span>
+          : currentUser.branch_id
+            ? <span className="topbar-username" style={{ fontSize:9, padding:"1px 6px", borderRadius:8,
+                background:"rgba(91,163,224,.15)", color:"#5BA3E0",
+                border:"1px solid #5BA3E033", fontWeight:700 }}>
+                🏪 {(branchList||[]).find(b=>b.branch_id===currentUser.branch_id)?.branch_name || currentUser.branch_id}
+              </span>
+            : null
+        }
 
       </div>
       {/* 🔐 Reset own password — always visible, inside topbar */}
@@ -2612,7 +2660,7 @@ function OrdersPage({ orders, ings }) {
 //  REPORT PAGE  — ថ្ងៃ / ខែ / ឆ្នាំ
 // ═══════════════════════════════════════════════════════════════════
 
-function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalAdmin, isBranchAdmin, branchId, currentUser }) {
+function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalAdmin, isBranchAdmin, branchId, currentUser, users, branchList }) {
   const [period, setPeriod] = useState("day");   // day | month | year
   const [selDate, setSelDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -3247,10 +3295,15 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
             const userSales = {};
             filtered.forEach(o => {
               const key = o.cashier || o.user || "unknown";
-              if (!userSales[key]) userSales[key] = { orders: 0, revenue: 0, items: 0 };
+              if (!userSales[key]) userSales[key] = { orders: 0, revenue: 0, items: 0, branch_id: o.branch_id };
               userSales[key].orders++;
               userSales[key].revenue += o.total + o.tax;
               userSales[key].items += (o.items||[]).reduce((s,i) => s+i.qty, 0);
+              // Try to enrich branch from users list
+              if (!userSales[key].branch_id && users) {
+                const u = (users||[]).find(u => u.name === key || u.username === key);
+                if (u) userSales[key].branch_id = u.branch_id;
+              }
             });
             const entries = Object.entries(userSales).sort((a,b) => b[1].revenue - a[1].revenue);
             if (entries.length === 0) return null;
@@ -3266,9 +3319,13 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
                     const pct = (s.revenue / maxRev) * 100;
                     const medal = idx === 0 ? "🥇" : idx === 1 ? "🥈" : idx === 2 ? "🥉" : `#${idx+1}`;
                     const col = idx === 0 ? "#E8A84B" : idx === 1 ? "#aaa" : idx === 2 ? "#CD7F32" : "#555";
+                    // Branch badge for this cashier
+                    const cashierUser = (users||[]).find(u => u.name === name || u.username === name);
+                    const cashierBid = s.branch_id || cashierUser?.branch_id;
+                    const branchBadge = cashierBid ? getUserBranchBadge({ branch_id: cashierBid }, branchList) : null;
                     return (
                       <div key={name} style={{
-                        background:"#0E0C0F", border:"1px solid #1A181C",
+                        background:"var(--bg-main)", border:"1px solid var(--border-col)",
                         borderRadius:12, padding:"12px 14px"
                       }}>
                         <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:10 }}>
@@ -3281,8 +3338,18 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
                             display:"flex", alignItems:"center", justifyContent:"center", fontSize:17
                           }}>{medal}</div>
                           <div style={{ flex:1, minWidth:0 }}>
-                            <div style={{ fontWeight:700, fontSize:13, color:col, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                              {name}
+                            <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
+                              <span style={{ fontWeight:700, fontSize:13, color:col, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                {name}
+                              </span>
+                              {/* Branch badge */}
+                              {branchBadge && (
+                                <span style={{
+                                  fontSize:10, padding:"1px 7px", borderRadius:8,
+                                  background:branchBadge.bg, color:branchBadge.color,
+                                  border:`1px solid ${branchBadge.border}`, fontWeight:700, flexShrink:0
+                                }}>{branchBadge.label}</span>
+                              )}
                             </div>
                             <div style={{ fontSize:11, color:"#555", marginTop:1 }}>
                               {s.orders} Order · {s.items} មុខ
@@ -4458,14 +4525,30 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
                           padding: "2px 6px", borderRadius: 8, marginLeft: 4
                         }}>ខ្ញុំ</span>}
                       </div>
-                      <div style={{ fontSize: 12, color: "#555", fontFamily: "'DM Mono',monospace" }}>@{u.username}</div>
+                      <div style={{ fontSize: 11, color: "#555", fontFamily: "'DM Mono',monospace", display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginTop:2 }}>
+                        <span>@{u.username}</span>
+                        {/* Branch badge */}
+                        {(() => {
+                          const badge = getUserBranchBadge(u, branchList);
+                          if (!badge) return null;
+                          return (
+                            <span style={{
+                              fontSize:10, padding:"1px 8px", borderRadius:10,
+                              background:badge.bg, color:badge.color,
+                              border:`1px solid ${badge.border}`, fontWeight:700,
+                              fontFamily:"inherit"
+                            }}>{badge.label}</span>
+                          );
+                        })()}
+                      </div>
                     </div>
                   </div>
+                  {/* Role badge */}
                   <span style={{
                     fontSize: 11, fontWeight: 700, color: roleInfo?.color,
-                    background: `${roleInfo?.color}22`, padding: "3px 10px", borderRadius: 20
+                    background: `${roleInfo?.color}22`, padding: "3px 10px", borderRadius: 20, flexShrink:0
                   }}>
-                    {roleInfo?.label}
+                    {u.branch_id === "all" ? "⭐ Super Admin" : roleInfo?.label}
                   </span>
                 </div>
 
