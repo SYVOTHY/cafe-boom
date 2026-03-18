@@ -4054,19 +4054,19 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
 
       {/* Sticky Header */}
-      <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid #E8A84B44", background:"linear-gradient(135deg,#1a1208,#120f05)" }}>
+      <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid var(--border-col)", background:"var(--bg-header)" }}>
         <div style={{ fontWeight:700, fontSize:18, marginBottom:10, color:"var(--accent)" }}>💼 ហិរញ្ញវត្ថុប្រចាំខែ</div>
 
         {/* Row 1: Branch selector — GLOBAL ADMIN ONLY */}
         {isGlobalAdmin && (
           <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
-            <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>🏪 សាខា:</span>
+            <span style={{ fontSize:12, color:"var(--text-dim)", flexShrink:0 }}>🏪 សាខា:</span>
             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
               <button onClick={()=>{ setSelBranch("current"); setEditMode(false); setCatMode(false); }}
                 style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
                   fontSize:12, fontWeight:700,
                   background: selBranch==="current" ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
-                  color: selBranch==="current" ? "#fff" : "#666" }}>
+                  color: selBranch==="current" ? "#fff" : "var(--text-dim)" }}>
                 🏪 សាខាខ្ញុំ
               </button>
               {branches.filter(b=>b.active).map(b => (
@@ -4075,7 +4075,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                   style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
                     fontSize:12, fontWeight:700,
                     background: selBranch===b.branch_id ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
-                    color: selBranch===b.branch_id ? "#fff" : "#666" }}>
+                    color: selBranch===b.branch_id ? "#fff" : "var(--text-dim)" }}>
                   {b.branch_name}
                 </button>
               ))}
@@ -4083,7 +4083,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                 style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
                   fontSize:12, fontWeight:700,
                   background: selBranch==="all" ? "linear-gradient(135deg,#1A3A5A,#5BA3E0)" : "var(--bg-card)",
-                  color: selBranch==="all" ? "#fff" : "#666" }}>
+                  color: selBranch==="all" ? "#fff" : "var(--text-dim)" }}>
                 🌐 ទាំងអស់
               </button>
             </div>
@@ -4092,7 +4092,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
 
         {/* Row 2: Month selector + print */}
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📆 ខែ:</span>
+          <span style={{ fontSize:12, color:"var(--text-dim)", flexShrink:0 }}>📆 ខែ:</span>
           <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
             style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
             {orderMonths.map(mo => {
@@ -4102,12 +4102,12 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
           </select>
           {/* Branch label badge */}
           {isAdmin && selBranch !== "current" && (
-            <span style={{ fontSize:11, padding:"3px 10px", borderRadius:12, background:"#E8A84B22", color:"var(--accent)", fontWeight:700, border:"1px solid #E8A84B33" }}>
+            <span style={{ fontSize:11, padding:"3px 10px", borderRadius:12, background:"var(--bg-card)", color:"var(--accent)", fontWeight:700, border:"1px solid var(--border-col)" }}>
               {selBranch === "all" ? "🌐 ទាំងអស់" : (branches.find(b=>b.branch_id===selBranch)?.branch_name || selBranch)}
             </span>
           )}
-          {loadingAll && <span style={{ fontSize:11, color:"#888" }}>⏳ កំពុងទាញ...</span>}
-          <button onClick={doPrint} style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B44", fontSize:12, padding:"6px 14px", marginLeft:"auto" }}>
+          {loadingAll && <span style={{ fontSize:11, color:"var(--text-dim)" }}>⏳ កំពុងទាញ...</span>}
+          <button onClick={doPrint} style={{ ...btnSmall, color:"var(--accent)", borderColor:"var(--accent)", fontSize:12, padding:"6px 14px", marginLeft:"auto" }}>
             🖨️ Print / PDF
           </button>
         </div>
@@ -4127,7 +4127,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
               <div key={lb} style={{ background:"var(--bg-card)", border:"1px solid "+col+"33", borderRadius:14, padding:"14px 10px", textAlign:"center" }}>
                 <div style={{ fontSize:24 }}>{ic}</div>
                 <div style={{ fontSize:18, fontWeight:700, color:col, marginTop:4 }}>{fmt(val)}</div>
-                <div style={{ fontSize:11, color:"#555", marginTop:2 }}>{lb}</div>
+                <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:2 }}>{lb}</div>
               </div>
             ))}
           </div>
@@ -4135,8 +4135,8 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
           {/* Revenue vs Expense bar */}
           {(revenue > 0 || totalExp > 0) && (
             <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
-              <div style={{ fontSize:12, color:"#666", marginBottom:8, fontWeight:600 }}>ចំណូល vs ចំណាយ</div>
-              <div style={{ height:14, background:"#1A181C", borderRadius:7, overflow:"hidden", display:"flex" }}>
+              <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:8, fontWeight:600 }}>ចំណូល vs ចំណាយ</div>
+              <div style={{ height:14, background:"var(--bg-main)", borderRadius:7, overflow:"hidden", display:"flex" }}>
                 {totalExp > 0 && (
                   <div style={{ width:Math.min(100,(totalExp/Math.max(revenue,totalExp))*100)+"%", background:"linear-gradient(90deg,#8B1A1A,#E74C3C)" }} />
                 )}
@@ -4157,7 +4157,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
               <div style={{ background:"var(--bg-card)", border:"1px solid #3a1a1a", borderRadius:16, padding:24, maxWidth:340, width:"90%", textAlign:"center" }}>
                 <div style={{ fontSize:36, marginBottom:8 }}>🗑️</div>
                 <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>លុបចំណាយ?</div>
-                <div style={{ fontSize:13, color:"#888", marginBottom:18 }}>{txnConfirmDel.desc} — {fmt(txnConfirmDel.amount)}</div>
+                <div style={{ fontSize:13, color:"var(--text-dim)", marginBottom:18 }}>{txnConfirmDel.desc} — {fmt(txnConfirmDel.amount)}</div>
                 <div style={{ display:"flex", gap:8 }}>
                   <button style={{ ...btnGhost, flex:1 }} onClick={() => setTxnConfirmDel(null)}>បោះបង់</button>
                   <button style={{ ...btnRed, flex:1 }} onClick={() => deleteTxn(txnConfirmDel.id)}>🗑️ លុប</button>
@@ -4185,7 +4185,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
               <div>
                 <div style={{ fontWeight:700, fontSize:14 }}>💸 ចំណាយប្រចាំខែ</div>
-                <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{monthTxns.length} រាយការណ៍ · សរុប {fmt(totalExp)}</div>
+                <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:2 }}>{monthTxns.length} រាយការណ៍ · សរុប {fmt(totalExp)}</div>
               </div>
               <button
                 onClick={() => setTxnModal({ data: { id:"txn_"+Date.now(), date:selMonth+"-"+new Date().toISOString().slice(8,10), cat_id: expCats[0]?.id||"other", desc:"", amount:"", branch_id:branchId, _isNew:true } })}
@@ -4195,7 +4195,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
             </div>
 
             {monthTxns.length === 0 ? (
-              <div style={{ textAlign:"center", padding:"24px 0", color:"#444", fontSize:13 }}>
+              <div style={{ textAlign:"center", padding:"24px 0", color:"var(--text-dim)", fontSize:13 }}>
                 <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
                 មិនទាន់មានចំណាយសម្រាប់ខែនេះ
               </div>
@@ -4211,17 +4211,17 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                       background:"var(--bg-main)", border:"1px solid var(--border-col)"
                     }}>
                       {/* Cat color dot */}
-                      <div style={{ width:10, height:10, borderRadius:"50%", background:cat?.color||"#888", flexShrink:0 }} />
+                      <div style={{ width:10, height:10, borderRadius:"50%", background:cat?.color||"var(--text-dim)", flexShrink:0 }} />
                       {/* Info */}
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                           {t.desc || cat?.label || "ចំណាយ"}
                         </div>
-                        <div style={{ fontSize:11, color:"#666", marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
+                        <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
                           <span>📅 {t.date}</span>
                           {cat && <span style={{ color:cat.color }}>{cat.label}</span>}
                           {isAdmin && t.branch_id && <span style={{ color:"#5BA3E0" }}>🏪 {bName}</span>}
-                          {t.created_by && <span style={{ color:"#555" }}>👤 {t.created_by}</span>}
+                          {t.created_by && <span style={{ color:"var(--text-dim)" }}>👤 {t.created_by}</span>}
                         </div>
                       </div>
                       {/* Amount */}
@@ -4231,7 +4231,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                       {/* Actions */}
                       <div style={{ display:"flex", gap:4, flexShrink:0 }}>
                         <button onClick={() => setTxnModal({ data:{ ...t } })}
-                          style={{ ...btnSmall, fontSize:12, padding:"4px 8px", color:"#E8A84B", borderColor:"#E8A84B33" }}>✏️</button>
+                          style={{ ...btnSmall, fontSize:12, padding:"4px 8px", color:"var(--accent)", borderColor:"var(--accent)" }}>✏️</button>
                         <button onClick={() => setTxnConfirmDel({ id:t.id, desc:t.desc||cat?.label||"ចំណាយ", amount:t.amount })}
                           style={{ ...btnSmall, fontSize:12, padding:"4px 8px", color:"#E74C3C", borderColor:"#E74C3C33" }}>🗑️</button>
                       </div>
@@ -4244,7 +4244,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
             {/* Summary by category */}
             {monthTxns.length > 0 && (
               <div style={{ marginTop:14, paddingTop:12, borderTop:"1px solid var(--border-col)" }}>
-                <div style={{ fontSize:12, color:"#666", marginBottom:8, fontWeight:600 }}>📊 សង្ខេបតាមប្រភេទ</div>
+                <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:8, fontWeight:600 }}>📊 សង្ខេបតាមប្រភេទ</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
                   {expCats.map(c => {
                     const catTotal = monthTxns.filter(t => t.cat_id === c.id).reduce((s,t) => s + Number(t.amount||0), 0);
@@ -4253,17 +4253,17 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                     return (
                       <div key={c.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
                         <div style={{ width:8, height:8, borderRadius:"50%", background:c.color, flexShrink:0 }} />
-                        <div style={{ flex:1, fontSize:12, color:"#aaa" }}>{c.label}</div>
+                        <div style={{ flex:1, fontSize:12, color:"var(--text-dim)" }}>{c.label}</div>
                         <div style={{ fontSize:12, fontWeight:700, color:"#E74C3C", fontFamily:"'DM Mono',monospace", minWidth:60, textAlign:"right" }}>{fmt(catTotal)}</div>
-                        <div style={{ fontSize:10, color:"#555", minWidth:32, textAlign:"right" }}>{pct}%</div>
-                        <div style={{ width:60, height:4, background:"#1A181C", borderRadius:2, overflow:"hidden" }}>
+                        <div style={{ fontSize:10, color:"var(--text-dim)", minWidth:32, textAlign:"right" }}>{pct}%</div>
+                        <div style={{ width:60, height:4, background:"var(--bg-main)", borderRadius:2, overflow:"hidden" }}>
                           <div style={{ width:pct+"%", height:"100%", background:c.color, borderRadius:2 }} />
                         </div>
                       </div>
                     );
                   }).filter(Boolean)}
                   <div style={{ display:"flex", justifyContent:"space-between", paddingTop:8, marginTop:4, borderTop:"1px solid var(--border-col)" }}>
-                    <span style={{ fontSize:12, fontWeight:700, color:"#aaa" }}>💸 សរុបចំណាយ</span>
+                    <span style={{ fontSize:12, fontWeight:700, color:"var(--text-dim)" }}>💸 សរុបចំណាយ</span>
                     <span style={{ fontSize:13, fontWeight:700, color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(totalExp)}</span>
                   </div>
                 </div>
@@ -4378,7 +4378,7 @@ function BranchesPage({ notify, isGlobalAdmin, currentUser }) {
 
   // Branch color map for visual identity
   const BRANCH_COLORS = [
-    "#27AE60","#5BA3E0","#C0527A","#E8A84B","#3ABFBF",
+    "#27AE60","#5BA3E0","#C0527A","var(--accent)","#3ABFBF",
     "#9B6FE8","#FB923C","#F472B6","#22D3EE","#D97706",
   ];
 
@@ -4497,7 +4497,7 @@ function BranchesPage({ notify, isGlobalAdmin, currentUser }) {
             <div style={{ fontWeight:700, fontSize:16, color:"#E74C3C", textAlign:"center", marginBottom:8 }}>
               លុបសាខា?
             </div>
-            <div style={{ fontSize:13, color:"#888", textAlign:"center", marginBottom:20 }}>
+            <div style={{ fontSize:13, color:"var(--text-dim)", textAlign:"center", marginBottom:20 }}>
               <b>{confirmDel.branch_name}</b> ({confirmDel.branch_id})<br/>
               <span style={{ fontSize:11 }}>Data ស្តុក + tables នៅ branch នេះ នឹងត្រូវលុបផងដែរ!</span>
             </div>
@@ -5543,171 +5543,23 @@ function ThemePage({ theme, setTheme, notify, isGlobalAdmin, currentUser }) {
     return Object.keys(t).every(k => t[k] === theme[k]);
   };
 
-  // ── Advanced Color Picker state ──────────────────────────────────
-  const [pickerKey,  setPickerKey]  = useState(null); // which key is open
-  const [hoverKey,   setHoverKey]   = useState(null); // hover tooltip
-
-  // hex → {r,g,b}
-  const hexToRgb = hex => {
-    const h = hex.replace("#","");
-    return { r: parseInt(h.slice(0,2),16), g: parseInt(h.slice(2,4),16), b: parseInt(h.slice(4,6),16) };
-  };
-  // {r,g,b} → hex
-  const rgbToHex = ({r,g,b}) => "#" + [r,g,b].map(v=>Math.max(0,Math.min(255,v)).toString(16).padStart(2,"0")).join("");
-
-  const updateChannel = (k, channel, val) => {
-    const rgb = hexToRgb(custom[k] || "#000000");
-    rgb[channel] = Math.max(0, Math.min(255, parseInt(val)||0));
-    setCustom(p => ({ ...p, [k]: rgbToHex(rgb) }));
-  };
-
-  // Close picker on outside click
-  useEffect(() => {
-    if (!pickerKey) return;
-    const fn = () => setPickerKey(null);
-    setTimeout(() => document.addEventListener("click", fn), 0);
-    return () => document.removeEventListener("click", fn);
-  }, [pickerKey]);
-
-  const COLOR_FIELDS = [
-    { k:"bgMain",     label:"Background ចម្បង",   icon:"🌑", group:"backgrounds" },
-    { k:"bgCard",     label:"Background Cards",    icon:"🗂️", group:"backgrounds" },
-    { k:"bgHeader",   label:"Background Header",   icon:"📌", group:"backgrounds" },
-    { k:"accent",     label:"Accent ចម្បង",        icon:"⭐", group:"accents" },
-    { k:"accentDark", label:"Accent ងងឹត",         icon:"🔆", group:"accents" },
-    { k:"textMain",   label:"ពណ៌អក្សរ ចម្បង",     icon:"📝", group:"text" },
-    { k:"textDim",    label:"ពណ៌អក្សរ ស្រាល",     icon:"📝", group:"text" },
-    { k:"borderCol",  label:"Border / Divider",    icon:"📐", group:"borders" },
-  ];
-
-  const GROUP_LABELS = {
-    backgrounds: "🖥️ Backgrounds",
-    accents:     "⭐ Accent Colors",
-    text:        "🔤 Text Colors",
-    borders:     "📐 Borders",
-  };
-
-  const ColorRow = ({ k, label, icon }) => {
-    const hex   = custom[k] || "#000000";
-    const rgb   = hexToRgb(hex);
-    const isOpen   = pickerKey === k;
-    const isHover  = hoverKey  === k;
-
-    return (
-      <div style={{ marginBottom:10, position:"relative" }}>
-        <div
-          style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 10px", borderRadius:10,
-            background: isOpen ? "var(--bg-main)" : isHover ? "var(--bg-main)" : "transparent",
-            border: isOpen ? "1px solid var(--accent)" : "1px solid transparent",
-            cursor:"pointer", transition:"all .15s" }}
-          onMouseEnter={() => setHoverKey(k)}
-          onMouseLeave={() => setHoverKey(null)}
-        >
-          {/* Color swatch — click to open picker */}
-          <div onClick={e => { e.stopPropagation(); setPickerKey(isOpen ? null : k); }}
-            style={{ width:36, height:36, borderRadius:8, background:hex, border:"2px solid #33333388",
-              flexShrink:0, cursor:"pointer", boxShadow: isOpen ? `0 0 0 3px ${hex}88` : "none",
-              transition:"box-shadow .15s" }} />
-
-          {/* Label */}
-          <div style={{ flex:1, minWidth:0 }}>
-            <div style={{ fontSize:12, color:"var(--text-main)", fontWeight:600 }}>{icon} {label}</div>
-            {/* Hover: show RGB breakdown */}
-            {isHover && !isOpen && (
-              <div style={{ fontSize:10, color:"var(--text-dim)", marginTop:2, display:"flex", gap:8 }}>
-                <span style={{ color:"#E74C3C" }}>R {rgb.r}</span>
-                <span style={{ color:"#27AE60" }}>G {rgb.g}</span>
-                <span style={{ color:"#5BA3E0" }}>B {rgb.b}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Preview bar */}
-          <div onClick={e => { e.stopPropagation(); setPickerKey(isOpen ? null : k); }}
-            style={{ width:100, height:28, borderRadius:6, background:hex, border:"1px solid #33333388",
-              cursor:"pointer", flexShrink:0 }} />
-
-          {/* Hex code */}
-          <div style={{ fontSize:11, color:"var(--text-dim)", fontFamily:"'DM Mono',monospace", minWidth:68, textAlign:"right" }}>
-            {hex.toUpperCase()}
-          </div>
-
-          {/* Native color input hidden */}
-          <input type="color" value={hex}
-            onChange={e => setCustom(p => ({ ...p, [k]: e.target.value }))}
-            style={{ width:0, height:0, opacity:0, position:"absolute", pointerEvents:"none" }}
-            id={`cp-native-${k}`} />
-        </div>
-
-        {/* ── Expanded Picker Panel ── */}
-        {isOpen && (
-          <div onClick={e => e.stopPropagation()}
-            style={{ position:"absolute", left:0, right:0, zIndex:200,
-              background:"var(--bg-card)", border:"1px solid var(--accent)", borderRadius:12,
-              padding:16, marginTop:4, boxShadow:"0 8px 32px rgba(0,0,0,.5)" }}>
-
-            {/* Visual color picker via native input — large */}
-            <div style={{ display:"flex", gap:12, alignItems:"flex-start", marginBottom:14 }}>
-              <input type="color" value={hex}
-                onChange={e => setCustom(p => ({ ...p, [k]: e.target.value }))}
-                style={{ width:80, height:80, border:"none", borderRadius:10, cursor:"pointer",
-                  background:"transparent", padding:0, flexShrink:0 }} />
-              <div style={{ flex:1 }}>
-                {/* Hex input */}
-                <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>HEX</div>
-                <input
-                  value={hex.toUpperCase()}
-                  onChange={e => {
-                    const v = e.target.value.trim();
-                    if (/^#[0-9A-Fa-f]{6}$/.test(v)) setCustom(p => ({ ...p, [k]: v.toLowerCase() }));
-                  }}
-                  maxLength={7}
-                  style={{ ...inputSt, fontSize:13, fontFamily:"'DM Mono',monospace", width:"100%",
-                    border:"1px solid var(--accent)", background:"var(--bg-main)",
-                    color:"var(--text-main)", padding:"6px 10px", boxSizing:"border-box" }} />
-                {/* Color preview large */}
-                <div style={{ marginTop:8, height:20, borderRadius:6, background:hex, border:"1px solid #33333388" }} />
-              </div>
-            </div>
-
-            {/* RGB Sliders */}
-            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              {[["r","R","#E74C3C"],["g","G","#27AE60"],["b","B","#5BA3E0"]].map(([ch,lb,col]) => (
-                <div key={ch} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{ fontSize:11, fontWeight:700, color:col, minWidth:14 }}>{lb}</span>
-                  <input type="range" min={0} max={255} value={rgb[ch]}
-                    onChange={e => updateChannel(k, ch, e.target.value)}
-                    style={{ flex:1, accentColor:col, cursor:"pointer" }} />
-                  <input type="number" min={0} max={255} value={rgb[ch]}
-                    onChange={e => updateChannel(k, ch, e.target.value)}
-                    style={{ ...inputSt, width:52, fontSize:12, fontFamily:"'DM Mono',monospace",
-                      padding:"4px 6px", textAlign:"center", background:"var(--bg-main)",
-                      color:"var(--text-main)", border:"1px solid var(--border-col)", boxSizing:"border-box" }} />
-                </div>
-              ))}
-            </div>
-
-            {/* Quick swatches — preset accent / neutral colors */}
-            <div style={{ marginTop:12, borderTop:"1px solid var(--border-col)", paddingTop:10 }}>
-              <div style={{ fontSize:10, color:"var(--text-dim)", marginBottom:6 }}>Quick swatches</div>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>
-                {["#E8A84B","#B8732A","#E74C3C","#27AE60","#5BA3E0","#9B59B6","#1ABC9C","#F39C12",
-                  "#09080A","#120F13","#0E0C0F","#1E1B1F","#EDE8E1","#666666","#FFFFFF","#000000"]
-                  .map(sw => (
-                    <div key={sw} onClick={() => setCustom(p => ({ ...p, [k]: sw }))}
-                      style={{ width:22, height:22, borderRadius:5, background:sw, cursor:"pointer",
-                        border: hex===sw ? "2px solid var(--text-main)" : "1px solid #33333388",
-                        boxShadow: hex===sw ? `0 0 0 2px ${sw}88` : "none",
-                        transition:"all .1s" }} />
-                  ))
-                }
-              </div>
-            </div>
-          </div>
-        )}
+  const ColorRow = ({ label, k }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+      <div style={{ width: 130, fontSize: 12, color: "var(--text-dim)", flexShrink: 0 }}>{label}</div>
+      <input type="color" value={custom[k]} onChange={e => setCustom(p => ({ ...p, [k]: e.target.value }))}
+        style={{
+          width: 44, height: 36, border: "none", borderRadius: 8, cursor: "pointer",
+          background: "transparent", padding: 2
+        }} />
+      <div style={{
+        flex: 1, height: 36, borderRadius: 8, background: custom[k],
+        border: "1px solid var(--border)", boxShadow: "inset 0 2px 4px rgba(0,0,0,.3)"
+      }} />
+      <div style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "'DM Mono',monospace", minWidth: 70 }}>
+        {custom[k]}
       </div>
-    );
-  };
+    </div>
+  );
 
   return (
     <div style={{ padding: "16px 14px 32px" }}>
@@ -5906,43 +5758,42 @@ function ThemePage({ theme, setTheme, notify, isGlobalAdmin, currentUser }) {
 
       {/* CUSTOM */}
       {tab === "custom" && (
-        <div style={{ maxWidth:560 }}>
-          <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:12 }}>
-            💡 ចុចលើ swatch ឬ preview bar ដើម្បីបើក picker · Hover ដើម្បីមើល RGB
-          </div>
+        <div style={{ background: "var(--bg-card)", border: "1px solid var(--border)", borderRadius: 14, padding: 20, maxWidth: 520 }}>
+          <div style={{ fontWeight: 700, marginBottom: 18, fontSize: 13 }}>🖌️ កំណត់ពណ៌ផ្ទាល់ខ្លួន</div>
+          <ColorRow label="🌑 Background ចម្បង" k="bgMain" />
+          <ColorRow label="🗂️ Background Cards" k="bgCard" />
+          <ColorRow label="📌 Background Header" k="bgHeader" />
+          <ColorRow label="⭐ Accent ចម្បង" k="accent" />
+          <ColorRow label="🔆 Accent ងងឹត" k="accentDark" />
+          <ColorRow label="📝 ពណ៌អក្សរ ចម្បង" k="textMain" />
+          <ColorRow label="📝 ពណ៌អក្សរ ស្រាល" k="textDim" />
+          <ColorRow label="📐 Border / Divider" k="borderCol" />
 
-          {/* Grouped color fields */}
-          {Object.entries(GROUP_LABELS).map(([grp, grpLabel]) => {
-            const fields = COLOR_FIELDS.filter(f => f.group === grp);
-            return (
-              <div key={grp} style={{ background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:14, padding:"14px 14px 6px", marginBottom:12 }}>
-                <div style={{ fontSize:12, fontWeight:700, color:"var(--accent)", marginBottom:10 }}>{grpLabel}</div>
-                {fields.map(f => <ColorRow key={f.k} k={f.k} label={f.label} icon={f.icon} />)}
+          {/* Custom preview */}
+          <div style={{
+            background: custom.bgMain, borderRadius: 10, padding: 14, marginBottom: 16,
+            border: `1px solid ${custom.borderCol}`
+          }}>
+            <div style={{ fontSize: 11, color: custom.textDim, marginBottom: 6 }}>Preview ផ្ទាល់</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{
+                background: custom.bgCard, border: `1px solid ${custom.borderCol}`,
+                borderRadius: 8, padding: "8px 12px"
+              }}>
+                <div style={{ fontSize: 11, color: custom.textDim }}>ចំណូល</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: custom.accent }}>$128.00</div>
               </div>
-            );
-          })}
-
-          {/* Live preview of custom */}
-          <div style={{ background:custom.bgMain, borderRadius:12, padding:14, marginBottom:14,
-            border:`1px solid ${custom.borderCol}` }}>
-            <div style={{ fontSize:11, color:custom.textDim, marginBottom:8 }}>👁️ Preview ផ្ទាល់</div>
-            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-              <div style={{ background:custom.bgCard, border:`1px solid ${custom.borderCol}`, borderRadius:8, padding:"8px 12px" }}>
-                <div style={{ fontSize:11, color:custom.textDim }}>ចំណូល</div>
-                <div style={{ fontSize:16, fontWeight:700, color:custom.accent }}>$128.00</div>
-              </div>
-              <div style={{ background:`linear-gradient(135deg,${custom.accentDark},${custom.accent})`,
-                borderRadius:8, padding:"8px 14px", fontSize:12, fontWeight:700,
-                display:"flex", alignItems:"center", color:"#fff" }}>✅ Apply</div>
-              <div style={{ background:custom.bgHeader, border:`1px solid ${custom.borderCol}`,
-                borderRadius:8, padding:"8px 12px" }}>
-                <div style={{ fontSize:11, color:custom.textMain }}>Header</div>
-                <div style={{ fontSize:11, color:custom.textDim }}>Dim text</div>
+              <div style={{
+                background: `linear-gradient(135deg,${custom.accentDark},${custom.accent})`,
+                borderRadius: 8, padding: "8px 14px", color: "#fff", fontSize: 12, fontWeight: 700,
+                display: "flex", alignItems: "center"
+              }}>
+                ✅ Apply
               </div>
             </div>
           </div>
 
-          <button onClick={applyCustom} style={{ ...btnGold, width:"100%", fontSize:14 }}>
+          <button onClick={applyCustom} style={{ ...btnGold, width: "100%", fontSize: 14 }}>
             🎨 Apply Custom Theme
           </button>
         </div>
