@@ -3799,6 +3799,23 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     return merged;
   })();
 
+  // Auto-save merged cats back to DB if any DEFAULT cats were missing from saved list
+  const expCatsSavedLen = Array.isArray(expenses) ? (expenses.find(e => e?._meta)?._cats?.length ?? -1) : -1;
+  useEffect(() => {
+    if (!Array.isArray(expenses)) return;
+    const meta = expenses.find(e => e && e._meta);
+    const saved = meta?._cats;
+    if (!saved || saved.length === 0) return;
+    const savedIds = new Set(saved.map(c => c.id));
+    const missing = DEFAULT_EXPENSE_CATS.filter(c => !savedIds.has(c.id));
+    if (missing.length === 0) return;
+    const merged = [...saved, ...missing];
+    const monthRecs = expenses.filter(e => e && !e._meta);
+    setExpenses([...monthRecs, { _meta: true, _cats: merged }]);
+  // run only when the saved cats list length changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expCatsSavedLen]);
+
   const monthOrders = sourceOrders.filter(o => {
     try { return new Date(o.order_id).toISOString().slice(0,7) === selMonth; } catch { return false; }
   });
