@@ -928,7 +928,7 @@ export default function CafeBloom() {
         {page === "pos"       && <POSPage       {...shared} />}
         {page === "tables"    && <TablesPage    {...shared} />}
         {page === "menu"      && <MenuPage      {...shared} />}
-        {page === "inventory" && <InventoryPage {...shared} />}
+        {page === "inventory" && <InventoryPage {...shared} serverUrl={CLOUD_URL} />}
         {page === "orders"    && <OrdersPage    {...shared} />}
         {page === "report"    && <ReportPage    {...shared} />}
         {page === "finance"   && <FinancePage   {...shared} />}
@@ -2014,7 +2014,68 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
 // ═══════════════════════════════════════════════════════════════════
 
 
-function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser }) {
+// ── MigrateRecipesBtn — copy shared recipes → each branch (admin only) ──
+function MigrateRecipesBtn({ serverUrl, notify }) {
+  const [busy,   setBusy]   = useState(false);
+  const [result, setResult] = useState(null);
+  const run = async () => {
+    setBusy(true); setResult(null);
+    try {
+      const token = localStorage.getItem("pos_token");
+      const r = await fetch(`${serverUrl}/api/migrate-recipes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          ...(token ? { Authorization: "Bearer " + token } : {}),
+        },
+      });
+      const data = await r.json();
+      if (data.ok) {
+        setResult(data.results);
+        notify("✅ Migrate recipes រួចរាល់!");
+      } else {
+        notify("❌ " + (data.error || "មានបញ្ហា"));
+      }
+    } catch (e) {
+      notify("❌ " + e.message);
+    }
+    setBusy(false);
+  };
+  return (
+    <div style={{ marginBottom: 20, padding: "14px 16px", background: "#1A0A0A", border: "1px solid #E74C3C44", borderRadius: 10 }}>
+      <div style={{ fontWeight: 700, fontSize: 13, color: "#E8A84B", marginBottom: 6 }}>
+        🔧 Migrate Recipes → Branch Data
+      </div>
+      <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>
+        Copy recipes ពី shared_data ទៅ branch_data រៀងរាល់ branch — filter ingredient invalid ចេញ
+      </div>
+      <button
+        onClick={run}
+        disabled={busy}
+        style={{
+          padding: "8px 18px", borderRadius: 8, border: "none", cursor: busy ? "not-allowed" : "pointer",
+          fontFamily: "inherit", fontSize: 13, fontWeight: 700,
+          background: busy ? "#333" : "linear-gradient(135deg,#B8732A,#E8A84B)",
+          color: busy ? "#666" : "#fff", opacity: busy ? 0.7 : 1,
+        }}>
+        {busy ? "⏳ កំពុង migrate..." : "▶ Run Migration"}
+      </button>
+      {result && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+          {result.map(r => (
+            <div key={r.branch_id} style={{ fontSize: 12, color: "#aaa" }}>
+              <span style={{ color: "#27AE60", fontWeight: 700 }}>{r.branch_id}</span>
+              {" → "}{r.before} recipes <span style={{ color: "#E8A84B" }}>→ {r.after}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser, serverUrl }) {
   // Staff: read-only view — cannot add/edit/delete/restock
   const canEdit = isAdmin;
   const [subTab, setSubTab] = useState("stock");
@@ -2396,7 +2457,11 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         })()}
 
         {subTab === "sql" && (
-          <div style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
+          <div style={{ background: "var(--bg-main)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 20 }}>
+            {isAdmin && serverUrl && (
+              <MigrateRecipesBtn serverUrl={serverUrl} notify={notify} />
+            )}
+            <div style={{ fontWeight: 700, fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>📋 Reference SQL</div>
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
@@ -4054,19 +4119,19 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
 
       {/* Sticky Header */}
-      <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid var(--border-col)", background:"var(--bg-header)" }}>
+      <div style={{ flexShrink:0, padding:"14px 16px 12px", borderBottom:"1px solid #E8A84B44", background:"linear-gradient(135deg,#1a1208,#120f05)" }}>
         <div style={{ fontWeight:700, fontSize:18, marginBottom:10, color:"var(--accent)" }}>💼 ហិរញ្ញវត្ថុប្រចាំខែ</div>
 
         {/* Row 1: Branch selector — GLOBAL ADMIN ONLY */}
         {isGlobalAdmin && (
           <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap", marginBottom:10 }}>
-            <span style={{ fontSize:12, color:"var(--text-dim)", flexShrink:0 }}>🏪 សាខា:</span>
+            <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>🏪 សាខា:</span>
             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
               <button onClick={()=>{ setSelBranch("current"); setEditMode(false); setCatMode(false); }}
                 style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
                   fontSize:12, fontWeight:700,
                   background: selBranch==="current" ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
-                  color: selBranch==="current" ? "#fff" : "var(--text-dim)" }}>
+                  color: selBranch==="current" ? "#fff" : "#666" }}>
                 🏪 សាខាខ្ញុំ
               </button>
               {branches.filter(b=>b.active).map(b => (
@@ -4075,7 +4140,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                   style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
                     fontSize:12, fontWeight:700,
                     background: selBranch===b.branch_id ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
-                    color: selBranch===b.branch_id ? "#fff" : "var(--text-dim)" }}>
+                    color: selBranch===b.branch_id ? "#fff" : "#666" }}>
                   {b.branch_name}
                 </button>
               ))}
@@ -4083,7 +4148,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                 style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit",
                   fontSize:12, fontWeight:700,
                   background: selBranch==="all" ? "linear-gradient(135deg,#1A3A5A,#5BA3E0)" : "var(--bg-card)",
-                  color: selBranch==="all" ? "#fff" : "var(--text-dim)" }}>
+                  color: selBranch==="all" ? "#fff" : "#666" }}>
                 🌐 ទាំងអស់
               </button>
             </div>
@@ -4092,7 +4157,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
 
         {/* Row 2: Month selector + print */}
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:12, color:"var(--text-dim)", flexShrink:0 }}>📆 ខែ:</span>
+          <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📆 ខែ:</span>
           <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
             style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
             {orderMonths.map(mo => {
@@ -4102,12 +4167,12 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
           </select>
           {/* Branch label badge */}
           {isAdmin && selBranch !== "current" && (
-            <span style={{ fontSize:11, padding:"3px 10px", borderRadius:12, background:"var(--bg-card)", color:"var(--accent)", fontWeight:700, border:"1px solid var(--border-col)" }}>
+            <span style={{ fontSize:11, padding:"3px 10px", borderRadius:12, background:"#E8A84B22", color:"var(--accent)", fontWeight:700, border:"1px solid #E8A84B33" }}>
               {selBranch === "all" ? "🌐 ទាំងអស់" : (branches.find(b=>b.branch_id===selBranch)?.branch_name || selBranch)}
             </span>
           )}
-          {loadingAll && <span style={{ fontSize:11, color:"var(--text-dim)" }}>⏳ កំពុងទាញ...</span>}
-          <button onClick={doPrint} style={{ ...btnSmall, color:"var(--accent)", borderColor:"var(--accent)", fontSize:12, padding:"6px 14px", marginLeft:"auto" }}>
+          {loadingAll && <span style={{ fontSize:11, color:"#888" }}>⏳ កំពុងទាញ...</span>}
+          <button onClick={doPrint} style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B44", fontSize:12, padding:"6px 14px", marginLeft:"auto" }}>
             🖨️ Print / PDF
           </button>
         </div>
@@ -4127,7 +4192,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
               <div key={lb} style={{ background:"var(--bg-card)", border:"1px solid "+col+"33", borderRadius:14, padding:"14px 10px", textAlign:"center" }}>
                 <div style={{ fontSize:24 }}>{ic}</div>
                 <div style={{ fontSize:18, fontWeight:700, color:col, marginTop:4 }}>{fmt(val)}</div>
-                <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:2 }}>{lb}</div>
+                <div style={{ fontSize:11, color:"#555", marginTop:2 }}>{lb}</div>
               </div>
             ))}
           </div>
@@ -4135,8 +4200,8 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
           {/* Revenue vs Expense bar */}
           {(revenue > 0 || totalExp > 0) && (
             <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
-              <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:8, fontWeight:600 }}>ចំណូល vs ចំណាយ</div>
-              <div style={{ height:14, background:"var(--bg-main)", borderRadius:7, overflow:"hidden", display:"flex" }}>
+              <div style={{ fontSize:12, color:"#666", marginBottom:8, fontWeight:600 }}>ចំណូល vs ចំណាយ</div>
+              <div style={{ height:14, background:"#1A181C", borderRadius:7, overflow:"hidden", display:"flex" }}>
                 {totalExp > 0 && (
                   <div style={{ width:Math.min(100,(totalExp/Math.max(revenue,totalExp))*100)+"%", background:"linear-gradient(90deg,#8B1A1A,#E74C3C)" }} />
                 )}
@@ -4157,7 +4222,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
               <div style={{ background:"var(--bg-card)", border:"1px solid #3a1a1a", borderRadius:16, padding:24, maxWidth:340, width:"90%", textAlign:"center" }}>
                 <div style={{ fontSize:36, marginBottom:8 }}>🗑️</div>
                 <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>លុបចំណាយ?</div>
-                <div style={{ fontSize:13, color:"var(--text-dim)", marginBottom:18 }}>{txnConfirmDel.desc} — {fmt(txnConfirmDel.amount)}</div>
+                <div style={{ fontSize:13, color:"#888", marginBottom:18 }}>{txnConfirmDel.desc} — {fmt(txnConfirmDel.amount)}</div>
                 <div style={{ display:"flex", gap:8 }}>
                   <button style={{ ...btnGhost, flex:1 }} onClick={() => setTxnConfirmDel(null)}>បោះបង់</button>
                   <button style={{ ...btnRed, flex:1 }} onClick={() => deleteTxn(txnConfirmDel.id)}>🗑️ លុប</button>
@@ -4185,7 +4250,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
               <div>
                 <div style={{ fontWeight:700, fontSize:14 }}>💸 ចំណាយប្រចាំខែ</div>
-                <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:2 }}>{monthTxns.length} រាយការណ៍ · សរុប {fmt(totalExp)}</div>
+                <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{monthTxns.length} រាយការណ៍ · សរុប {fmt(totalExp)}</div>
               </div>
               <button
                 onClick={() => setTxnModal({ data: { id:"txn_"+Date.now(), date:selMonth+"-"+new Date().toISOString().slice(8,10), cat_id: expCats[0]?.id||"other", desc:"", amount:"", branch_id:branchId, _isNew:true } })}
@@ -4195,7 +4260,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
             </div>
 
             {monthTxns.length === 0 ? (
-              <div style={{ textAlign:"center", padding:"24px 0", color:"var(--text-dim)", fontSize:13 }}>
+              <div style={{ textAlign:"center", padding:"24px 0", color:"#444", fontSize:13 }}>
                 <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
                 មិនទាន់មានចំណាយសម្រាប់ខែនេះ
               </div>
@@ -4211,17 +4276,17 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                       background:"var(--bg-main)", border:"1px solid var(--border-col)"
                     }}>
                       {/* Cat color dot */}
-                      <div style={{ width:10, height:10, borderRadius:"50%", background:cat?.color||"var(--text-dim)", flexShrink:0 }} />
+                      <div style={{ width:10, height:10, borderRadius:"50%", background:cat?.color||"#888", flexShrink:0 }} />
                       {/* Info */}
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontSize:13, fontWeight:600, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
                           {t.desc || cat?.label || "ចំណាយ"}
                         </div>
-                        <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
+                        <div style={{ fontSize:11, color:"#666", marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
                           <span>📅 {t.date}</span>
                           {cat && <span style={{ color:cat.color }}>{cat.label}</span>}
                           {isAdmin && t.branch_id && <span style={{ color:"#5BA3E0" }}>🏪 {bName}</span>}
-                          {t.created_by && <span style={{ color:"var(--text-dim)" }}>👤 {t.created_by}</span>}
+                          {t.created_by && <span style={{ color:"#555" }}>👤 {t.created_by}</span>}
                         </div>
                       </div>
                       {/* Amount */}
@@ -4231,7 +4296,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                       {/* Actions */}
                       <div style={{ display:"flex", gap:4, flexShrink:0 }}>
                         <button onClick={() => setTxnModal({ data:{ ...t } })}
-                          style={{ ...btnSmall, fontSize:12, padding:"4px 8px", color:"var(--accent)", borderColor:"var(--accent)" }}>✏️</button>
+                          style={{ ...btnSmall, fontSize:12, padding:"4px 8px", color:"#E8A84B", borderColor:"#E8A84B33" }}>✏️</button>
                         <button onClick={() => setTxnConfirmDel({ id:t.id, desc:t.desc||cat?.label||"ចំណាយ", amount:t.amount })}
                           style={{ ...btnSmall, fontSize:12, padding:"4px 8px", color:"#E74C3C", borderColor:"#E74C3C33" }}>🗑️</button>
                       </div>
@@ -4244,7 +4309,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
             {/* Summary by category */}
             {monthTxns.length > 0 && (
               <div style={{ marginTop:14, paddingTop:12, borderTop:"1px solid var(--border-col)" }}>
-                <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:8, fontWeight:600 }}>📊 សង្ខេបតាមប្រភេទ</div>
+                <div style={{ fontSize:12, color:"#666", marginBottom:8, fontWeight:600 }}>📊 សង្ខេបតាមប្រភេទ</div>
                 <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
                   {expCats.map(c => {
                     const catTotal = monthTxns.filter(t => t.cat_id === c.id).reduce((s,t) => s + Number(t.amount||0), 0);
@@ -4253,17 +4318,17 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
                     return (
                       <div key={c.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
                         <div style={{ width:8, height:8, borderRadius:"50%", background:c.color, flexShrink:0 }} />
-                        <div style={{ flex:1, fontSize:12, color:"var(--text-dim)" }}>{c.label}</div>
+                        <div style={{ flex:1, fontSize:12, color:"#aaa" }}>{c.label}</div>
                         <div style={{ fontSize:12, fontWeight:700, color:"#E74C3C", fontFamily:"'DM Mono',monospace", minWidth:60, textAlign:"right" }}>{fmt(catTotal)}</div>
-                        <div style={{ fontSize:10, color:"var(--text-dim)", minWidth:32, textAlign:"right" }}>{pct}%</div>
-                        <div style={{ width:60, height:4, background:"var(--bg-main)", borderRadius:2, overflow:"hidden" }}>
+                        <div style={{ fontSize:10, color:"#555", minWidth:32, textAlign:"right" }}>{pct}%</div>
+                        <div style={{ width:60, height:4, background:"#1A181C", borderRadius:2, overflow:"hidden" }}>
                           <div style={{ width:pct+"%", height:"100%", background:c.color, borderRadius:2 }} />
                         </div>
                       </div>
                     );
                   }).filter(Boolean)}
                   <div style={{ display:"flex", justifyContent:"space-between", paddingTop:8, marginTop:4, borderTop:"1px solid var(--border-col)" }}>
-                    <span style={{ fontSize:12, fontWeight:700, color:"var(--text-dim)" }}>💸 សរុបចំណាយ</span>
+                    <span style={{ fontSize:12, fontWeight:700, color:"#aaa" }}>💸 សរុបចំណាយ</span>
                     <span style={{ fontSize:13, fontWeight:700, color:"#E74C3C", fontFamily:"'DM Mono',monospace" }}>{fmt(totalExp)}</span>
                   </div>
                 </div>
@@ -4378,7 +4443,7 @@ function BranchesPage({ notify, isGlobalAdmin, currentUser }) {
 
   // Branch color map for visual identity
   const BRANCH_COLORS = [
-    "#27AE60","#5BA3E0","#C0527A","var(--accent)","#3ABFBF",
+    "#27AE60","#5BA3E0","#C0527A","#E8A84B","#3ABFBF",
     "#9B6FE8","#FB923C","#F472B6","#22D3EE","#D97706",
   ];
 
@@ -4497,7 +4562,7 @@ function BranchesPage({ notify, isGlobalAdmin, currentUser }) {
             <div style={{ fontWeight:700, fontSize:16, color:"#E74C3C", textAlign:"center", marginBottom:8 }}>
               លុបសាខា?
             </div>
-            <div style={{ fontSize:13, color:"var(--text-dim)", textAlign:"center", marginBottom:20 }}>
+            <div style={{ fontSize:13, color:"#888", textAlign:"center", marginBottom:20 }}>
               <b>{confirmDel.branch_name}</b> ({confirmDel.branch_id})<br/>
               <span style={{ fontSize:11 }}>Data ស្តុក + tables នៅ branch នេះ នឹងត្រូវលុបផងដែរ!</span>
             </div>
