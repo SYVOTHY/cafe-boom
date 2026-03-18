@@ -600,7 +600,8 @@ export default function CafeBloom() {
     { id:"finance",   label:"ហិរញ្ញវត្ថុ", emoji:"💰" },
     // users: global admin sees all users; branch admin sees own-branch users only
     { id:"users",     label:"អ្នកប្រើ",    emoji:"👥", requireAdmin:true },
-    // theme: GLOBAL ADMIN ONLY
+    // branches + theme: GLOBAL ADMIN ONLY
+    { id:"branches",  label:"សាខា",         emoji:"🏪", globalOnly:true },
     { id:"theme",     label:"រចនាប័ទ្ម",   emoji:"🎨", globalOnly:true },
   ];
 
@@ -904,6 +905,7 @@ export default function CafeBloom() {
         {page === "report"    && <ReportPage    {...shared} />}
         {page === "finance"   && <FinancePage   {...shared} />}
         {page === "users"     && <UsersPage     {...shared} />}
+        {page === "branches"  && <BranchesPage  {...shared} />}
         {page === "theme"     && <ThemePage     {...shared} />}
       </div>
     </div>
@@ -4215,6 +4217,385 @@ function ExpenseTxnModal({ data, expCats, branchId, branches, isAdmin, selMonth,
         </div>
       </div>
     </Modal>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  BRANCHES PAGE  (Super Admin only)
+// ═══════════════════════════════════════════════════════════════════
+function BranchesPage({ notify, isGlobalAdmin, currentUser }) {
+  const [branches,    setBranches]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [modal,       setModal]       = useState(null); // null | {mode:"add"|"edit"|"delete", data:{}}
+  const [saving,      setSaving]      = useState(false);
+  const [confirmDel,  setConfirmDel]  = useState(null);
+
+  // Branch color map for visual identity
+  const BRANCH_COLORS = [
+    "#27AE60","#5BA3E0","#C0527A","#E8A84B","#3ABFBF",
+    "#9B6FE8","#FB923C","#F472B6","#22D3EE","#D97706",
+  ];
+
+  const authHeaders = () => {
+    const token = localStorage.getItem("pos_token");
+    return {
+      "Content-Type":"application/json",
+      "ngrok-skip-browser-warning":"true",
+      ...(token ? { Authorization:"Bearer "+token } : {}),
+    };
+  };
+
+  // Load branches
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API}/api/branches`, { headers: authHeaders() });
+      const d = await r.json();
+      if (Array.isArray(d)) setBranches(d);
+    } catch(e) { notify("❌ មិនអាចទាញ branches: "+e.message, "error"); }
+    finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); }, []);
+
+  // ── ADD branch ───────────────────────────────────────────────────
+  const addBranch = async (data) => {
+    if (!data.branch_name?.trim()) { notify("⚠️ សូមបំពេញ ឈ្មោះ!", "error"); return; }
+    // Auto-generate branch_id
+    const autoId = "branch_" + (branches.length + 1);
+    const bid = data.branch_id?.trim() || autoId;
+    setSaving(true);
+    try {
+      const r = await fetch(`${API}/api/branch/add`, {
+        method:"POST", headers:authHeaders(),
+        body: JSON.stringify({ branch_id:bid, branch_name:data.branch_name.trim(), address:data.address||"" }),
+      });
+      const d = await r.json();
+      if (!r.ok) { notify("❌ " + (d.error||"Error"), "error"); return; }
+      if (Array.isArray(d.branches)) setBranches(d.branches);
+      notify("✅ បន្ថែមសាខា "+data.branch_name+" រួចហើយ! ID: "+bid);
+      setModal(null);
+    } catch(e) { notify("❌ "+e.message,"error"); }
+    finally { setSaving(false); }
+  };
+
+  // ── EDIT branch name/address ──────────────────────────────────────
+  const editBranch = async (data) => {
+    if (!data.branch_name?.trim()) { notify("⚠️ សូមបំពេញ ឈ្មោះ!", "error"); return; }
+    setSaving(true);
+    try {
+      // Update via POST /api/branches with full list
+      const updated = branches.map(b =>
+        b.branch_id === data.branch_id ? { ...b, branch_name:data.branch_name.trim(), address:data.address||"" } : b
+      );
+      const r = await fetch(`${API}/api/branches`, {
+        method:"POST", headers:authHeaders(), body: JSON.stringify(updated),
+      });
+      if (!r.ok) { notify("❌ Save failed","error"); return; }
+      setBranches(updated);
+      notify("✅ កែ "+data.branch_name+" រួចហើយ!");
+      setModal(null);
+    } catch(e) { notify("❌ "+e.message,"error"); }
+    finally { setSaving(false); }
+  };
+
+  // ── TOGGLE active ────────────────────────────────────────────────
+  const toggleActive = async (bid) => {
+    const updated = branches.map(b => b.branch_id===bid ? {...b, active:!b.active} : b);
+    try {
+      await fetch(`${API}/api/branches`, {
+        method:"POST", headers:authHeaders(), body:JSON.stringify(updated),
+      });
+      setBranches(updated);
+      const b = updated.find(b=>b.branch_id===bid);
+      notify(`${b.active?"✅ បើក":"⛔ បិទ"} ${b.branch_name}`);
+    } catch(e) { notify("❌ "+e.message,"error"); }
+  };
+
+  // ── DELETE branch ─────────────────────────────────────────────────
+  const deleteBranch = async (bid) => {
+    setSaving(true);
+    try {
+      const r = await fetch(`${API}/api/branch/delete`, {
+        method:"POST", headers:authHeaders(), body:JSON.stringify({ branch_id:bid }),
+      });
+      const d = await r.json();
+      if (!r.ok) { notify("❌ " + (d.error||"Error"), "error"); setConfirmDel(null); return; }
+      if (Array.isArray(d.branches)) setBranches(d.branches);
+      notify("🗑️ លុបសាខា រួចហើយ!");
+      setConfirmDel(null);
+    } catch(e) { notify("❌ "+e.message,"error"); }
+    finally { setSaving(false); }
+  };
+
+  if (!isGlobalAdmin) {
+    return (
+      <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+        height:"100%", gap:12, color:"var(--text-dim)" }}>
+        <div style={{ fontSize:48 }}>🔒</div>
+        <div style={{ fontSize:16, fontWeight:700 }}>Super Admin Only</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", height:"100%", overflow:"hidden" }}>
+
+      {/* Confirm Delete */}
+      {confirmDel && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.75)", zIndex:500,
+          display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
+          <div style={{ background:"var(--bg-card)", border:"2px solid #E74C3C44",
+            borderRadius:18, padding:28, maxWidth:360, width:"100%" }}>
+            <div style={{ fontSize:36, textAlign:"center", marginBottom:12 }}>🗑️</div>
+            <div style={{ fontWeight:700, fontSize:16, color:"#E74C3C", textAlign:"center", marginBottom:8 }}>
+              លុបសាខា?
+            </div>
+            <div style={{ fontSize:13, color:"#888", textAlign:"center", marginBottom:20 }}>
+              <b>{confirmDel.branch_name}</b> ({confirmDel.branch_id})<br/>
+              <span style={{ fontSize:11 }}>Data ស្តុក + tables នៅ branch នេះ នឹងត្រូវលុបផងដែរ!</span>
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button style={{ ...btnGhost, flex:1 }} onClick={() => setConfirmDel(null)}>បោះបង់</button>
+              <button style={{ ...btnRed, flex:1, opacity:saving?0.5:1 }} disabled={saving}
+                onClick={() => deleteBranch(confirmDel.branch_id)}>
+                {saving ? "កំពុងលុប..." : "🗑️ លុប"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add/Edit Modal */}
+      {modal && (
+        <Modal onClose={() => setModal(null)} maxW={440}>
+          <BranchForm
+            data={modal.data}
+            mode={modal.mode}
+            branches={branches}
+            onSave={modal.mode==="add" ? addBranch : editBranch}
+            onCancel={() => setModal(null)}
+            saving={saving}
+          />
+        </Modal>
+      )}
+
+      {/* Sticky Header */}
+      <div style={{ flexShrink:0, padding:"16px 14px 12px", borderBottom:"1px solid var(--border-col)", background:"var(--bg-main)" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+          <div>
+            <div style={{ fontWeight:700, fontSize:18 }}>🏪 គ្រប់គ្រងសាខា</div>
+            <div style={{ fontSize:12, color:"#888", marginTop:2 }}>
+              {branches.length} សាខា · {branches.filter(b=>b.active).length} active
+              <span style={{ marginLeft:8, color:"var(--accent)", fontWeight:600 }}>⭐ Super Admin</span>
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={load} style={{ ...btnSmall, fontSize:12, color:"#5BA3E0" }}>🔄 Refresh</button>
+            <button
+              onClick={() => setModal({ mode:"add", data:{ branch_id:"", branch_name:"", address:"" } })}
+              style={{ ...btnGold, padding:"9px 18px", fontSize:13 }}>
+              ➕ បន្ថែមសាខា
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Scrollable Content */}
+      <div style={{ flex:1, overflowY:"auto", padding:"16px 14px 32px" }}>
+        {loading ? (
+          <div style={{ textAlign:"center", padding:40, color:"#888" }}>
+            <div className="spinner" style={{ margin:"0 auto 12px" }} />
+            កំពុងទាញ...
+          </div>
+        ) : (
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))", gap:14 }}>
+            {branches.map((b, idx) => {
+              const color = BRANCH_COLORS[idx % BRANCH_COLORS.length];
+              const badge = getUserBranchBadge({ branch_id: b.branch_id }, branches);
+              return (
+                <div key={b.branch_id} style={{
+                  background:"var(--bg-card)",
+                  border:`2px solid ${b.active ? color+"44" : "#2A1A1A"}`,
+                  borderRadius:16, padding:"16px 18px",
+                  opacity: b.active ? 1 : 0.6,
+                  transition:"all .2s"
+                }}>
+                  {/* Top row */}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                      <div style={{
+                        width:44, height:44, borderRadius:12, flexShrink:0,
+                        background:`linear-gradient(135deg,${color}44,${color}88)`,
+                        display:"flex", alignItems:"center", justifyContent:"center", fontSize:22
+                      }}>🏪</div>
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:15, color: b.active ? "var(--text-main)" : "#666" }}>
+                          {b.branch_name}
+                        </div>
+                        <div style={{ fontSize:11, color:"#666", fontFamily:"'DM Mono',monospace", marginTop:2 }}>
+                          ID: {b.branch_id}
+                        </div>
+                      </div>
+                    </div>
+                    <span style={{
+                      fontSize:11, fontWeight:700,
+                      color: b.active ? color : "#666",
+                      background: b.active ? color+"22" : "#1A1A1A",
+                      padding:"3px 10px", borderRadius:20,
+                      border:`1px solid ${b.active ? color+"44" : "#333"}`
+                    }}>{b.active ? "✅ Active" : "⛔ Inactive"}</span>
+                  </div>
+
+                  {/* Address */}
+                  {b.address && (
+                    <div style={{ fontSize:12, color:"#888", marginBottom:10, display:"flex", alignItems:"center", gap:5 }}>
+                      📍 {b.address}
+                    </div>
+                  )}
+
+                  {/* Branch color bar */}
+                  <div style={{ height:3, background:color+"33", borderRadius:2, marginBottom:12, overflow:"hidden" }}>
+                    <div style={{ height:"100%", width: b.active?"100%":"0%", background:color, borderRadius:2, transition:"width .4s" }} />
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                    <button
+                      onClick={() => toggleActive(b.branch_id)}
+                      style={{ flex:1, ...btnSmall, fontSize:12,
+                        color: b.active ? "#27AE60" : "#E74C3C",
+                        borderColor: b.active ? "#27AE6033" : "#E74C3C33" }}>
+                      {b.active ? "✅ Active" : "⛔ Inactive"}
+                    </button>
+                    <button
+                      onClick={() => setModal({ mode:"edit", data:{ ...b } })}
+                      style={{ ...btnSmall, fontSize:12, color:"#E8A84B", borderColor:"#E8A84B33" }}
+                      title="កែប្រែ">✏️</button>
+                    {b.branch_id !== "branch_1" && (
+                      <button
+                        onClick={() => setConfirmDel(b)}
+                        style={{ ...btnSmall, fontSize:12, color:"#E74C3C", borderColor:"#E74C3C33" }}
+                        title="លុបសាខា">🗑️</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Add new branch card */}
+            <div
+              onClick={() => setModal({ mode:"add", data:{ branch_id:"", branch_name:"", address:"" } })}
+              style={{
+                background:"var(--bg-main)", border:"2px dashed var(--border-col)",
+                borderRadius:16, padding:"24px 18px",
+                display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+                gap:10, cursor:"pointer", opacity:.7, transition:"all .2s",
+                minHeight:160
+              }}
+              onMouseEnter={e => e.currentTarget.style.opacity="1"}
+              onMouseLeave={e => e.currentTarget.style.opacity=".7"}>
+              <div style={{ fontSize:36 }}>➕</div>
+              <div style={{ fontSize:13, fontWeight:700, color:"var(--text-dim)" }}>បន្ថែមសាខាថ្មី</div>
+              <div style={{ fontSize:11, color:"#666", textAlign:"center" }}>
+                ចុចដើម្បីបន្ថែម<br/>data ស្តុក + tables ត្រូវបានបង្កើតដោយស្វ័យប្រវត្តិ
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── BranchForm ────────────────────────────────────────────────────
+function BranchForm({ data, mode, branches, onSave, onCancel, saving }) {
+  const [v, setV] = useState({ ...data });
+  const s = (k, val) => setV(p => ({ ...p, [k]: val }));
+
+  // Auto-suggest next branch_id
+  const nextId = (() => {
+    const nums = branches
+      .map(b => b.branch_id.replace("branch_",""))
+      .filter(n => /^\d+$/.test(n))
+      .map(Number);
+    const max = nums.length ? Math.max(...nums) : 0;
+    return "branch_" + (max + 1);
+  })();
+
+  const isNew = mode === "add";
+  const isValid = v.branch_name?.trim();
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)" }}>
+        {isNew ? "➕ បន្ថែមសាខាថ្មី" : "✏️ កែប្រែសាខា"}
+      </div>
+
+      {/* Branch ID */}
+      <div>
+        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>
+          Branch ID {isNew ? <span style={{ color:"#888" }}>(auto: {nextId})</span> : ""}
+        </div>
+        <input className="inp"
+          placeholder={isNew ? nextId + " (leave blank = auto)" : v.branch_id}
+          value={isNew ? v.branch_id||"" : v.branch_id}
+          onChange={e => s("branch_id", e.target.value)}
+          disabled={!isNew}
+          style={{ width:"100%", opacity: isNew ? 1 : 0.6 }}
+        />
+        {isNew && (
+          <div style={{ fontSize:10, color:"#888", marginTop:3 }}>
+            💡 ទុកទទេ = auto-generate ({nextId}) · ឬ custom: "branch_6", "phnom_penh" ...
+          </div>
+        )}
+      </div>
+
+      {/* Branch Name */}
+      <div>
+        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>ឈ្មោះសាខា *</div>
+        <input className="inp"
+          placeholder="ឧ: តូប ៦, សាខា ភ្នំពេញ..."
+          value={v.branch_name||""}
+          onChange={e => s("branch_name", e.target.value)}
+          style={{ width:"100%" }}
+          autoFocus
+        />
+      </div>
+
+      {/* Address */}
+      <div>
+        <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>អាសយដ្ឋាន (optional)</div>
+        <input className="inp"
+          placeholder="ឧ: ផ្លូវ ១២៣ ភ្នំពេញ..."
+          value={v.address||""}
+          onChange={e => s("address", e.target.value)}
+          style={{ width:"100%" }}
+        />
+      </div>
+
+      {isNew && (
+        <div style={{ background:"#0A2A0A", border:"1px solid #27AE6033", borderRadius:10, padding:"10px 14px", fontSize:12 }}>
+          <div style={{ color:"#27AE60", fontWeight:700, marginBottom:6 }}>✅ Auto-create ដោយស្វ័យប្រវត្តិ:</div>
+          <div style={{ color:"#5C9E5C", lineHeight:1.8 }}>
+            🧂 Ingredients (default stock)<br/>
+            🪑 Tables (8 tables)<br/>
+            📋 Orders list (empty)<br/>
+            📦 Expenses (empty)
+          </div>
+        </div>
+      )}
+
+      <div style={{ display:"flex", gap:8, marginTop:4 }}>
+        <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>
+        <button
+          style={{ ...btnGold, flex:1, opacity:(!isValid||saving)?0.4:1 }}
+          disabled={!isValid||saving}
+          onClick={() => onSave({ ...v, branch_id: isNew ? (v.branch_id?.trim()||nextId) : v.branch_id })}>
+          {saving ? "កំពុង..." : isNew ? "🏪 បន្ថែម" : "💾 រក្សា"}
+        </button>
+      </div>
+    </div>
   );
 }
 
