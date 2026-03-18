@@ -530,10 +530,64 @@ async function handler(req, res) {
   }
 
   if (req.method === "POST" && url === "/api/branches") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin" || session.branch_id !== "all") {
+      send(res, 403, { error:"Super Admin only" }); return;
+    }
     const body = await readBody(req);
     await saveBranchList(body);
     io.emit("shared_update", { table:"branches", data:body });
     send(res, 200, { ok:true });
+    return;
+  }
+
+  // ── ADD single branch (super admin) ──────────────────────────────
+  if (req.method === "POST" && url === "/api/branch/add") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin" || session.branch_id !== "all") {
+      send(res, 403, { error:"Super Admin only" }); return;
+    }
+    const { branch_id, branch_name, address } = await readBody(req);
+    if (!branch_id || !branch_name) { send(res, 400, { error:"Missing branch_id or branch_name" }); return; }
+    // Check duplicate
+    const existing = await loadBranches();
+    if (existing.find(b => b.branch_id === branch_id)) {
+      send(res, 409, { error:"Branch ID already exists: " + branch_id }); return;
+    }
+    await pool.query(
+      "INSERT INTO branches(branch_id,branch_name,address,active) VALUES($1,$2,$3,true)",
+      [branch_id, branch_name, address||""]
+    );
+    // Initialize branch data (orders, tables, ingredients)
+    await loadBranch(branch_id); // this seeds defaults
+    const updated = await loadBranches();
+    io.emit("shared_update", { table:"branches", data:updated });
+    console.log(`[Branch] Added: ${branch_id} — ${branch_name}`);
+    send(res, 200, { ok:true, branches:updated });
+    return;
+  }
+
+  // ── DELETE branch (super admin, must be empty) ────────────────────
+  if (req.method === "POST" && url === "/api/branch/delete") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin" || session.branch_id !== "all") {
+      send(res, 403, { error:"Super Admin only" }); return;
+    }
+    const { branch_id } = await readBody(req);
+    if (!branch_id || branch_id === "branch_1") {
+      send(res, 400, { error:"Cannot delete branch_1 (default)" }); return;
+    }
+    // Check if branch has orders
+    const bd = await loadBranch(branch_id);
+    if ((bd.orders||[]).length > 0) {
+      send(res, 409, { error:"Branch has orders — clear data first" }); return;
+    }
+    await pool.query("DELETE FROM branches WHERE branch_id=$1", [branch_id]);
+    await pool.query("DELETE FROM branch_data WHERE branch_id=$1", [branch_id]);
+    const updated = await loadBranches();
+    io.emit("shared_update", { table:"branches", data:updated });
+    console.log(`[Branch] Deleted: ${branch_id}`);
+    send(res, 200, { ok:true, branches:updated });
     return;
   }
 
