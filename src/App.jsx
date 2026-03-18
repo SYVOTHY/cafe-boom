@@ -2697,9 +2697,17 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       .catch(() => setStockLoading(false));
   }, [reportMode, isAdmin]);
 
+  // Branch filter within "all" mode (global admin only)
+  const [selReportBranch, setSelReportBranch] = useState("all"); // "all" | branch_id
+
   // Only global admin in "all" mode sees all branches
   // Branch admin + staff: always own branch only
-  const sourceOrders = (isGlobalAdmin && reportMode === "all") ? allOrders : orders;
+  const sourceOrders = (() => {
+    if (!isGlobalAdmin || reportMode !== "all") return orders;
+    if (allOrders === null || allOrders.length === 0) return orders;
+    if (selReportBranch === "all") return allOrders;
+    return allOrders.filter(o => o.branch_id === selReportBranch);
+  })();
 
   // ── Filter orders by period ──────────────────────────────────────
   const filtered = sourceOrders.filter(o => {
@@ -2758,6 +2766,13 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     : period === "month"
       ? `${MON_KH[parseInt(selMonth.slice(5)) - 1]} ${selYear}`
       : `ឆ្នាំ ${selYear}`;
+
+  // Branch label for current view
+  const reportBranchLabel = (() => {
+    if (!isGlobalAdmin || reportMode !== "all") return null;
+    if (selReportBranch === "all") return "🌐 ទាំងអស់";
+    return "🏪 " + (branches.find(b=>b.branch_id===selReportBranch)?.branch_name || selReportBranch);
+  })();
 
   // ── Available years from orders ──────────────────────────────────
   const allYears = [...new Set(orders.map(o => String(new Date(o.order_id).getFullYear())))].sort().reverse();
@@ -2957,7 +2972,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
 
       {/* ── STICKY HEADER ── */}
       <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
-        <SectionHeader title="📊 របាយការណ៍លក់" sub={periodLabel} />
+        <SectionHeader title="📊 របាយការណ៍លក់" sub={periodLabel + (reportBranchLabel ? " · " + reportBranchLabel : "")} />
 
         {/* Multi-Branch Toggle — GLOBAL ADMIN ONLY */}
         {isGlobalAdmin && (
@@ -2981,6 +2996,39 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
                 🔄 Refresh
               </button>
             )}
+          </div>
+        )}
+
+        {/* Branch filter — show when in "all" mode */}
+        {isGlobalAdmin && reportMode === "all" && branches.length > 0 && (
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center", marginBottom:10 }}>
+            <span style={{ fontSize:12, color:"var(--text-dim)", flexShrink:0 }}>🏪 សាខា:</span>
+            <button
+              onClick={() => setSelReportBranch("all")}
+              style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer",
+                fontFamily:"inherit", fontSize:12, fontWeight:700,
+                background: selReportBranch==="all" ? "linear-gradient(135deg,#1A3A5A,#5BA3E0)" : "var(--bg-card)",
+                color: selReportBranch==="all" ? "#fff" : "var(--text-dim)" }}>
+              🌐 ទាំងអស់
+            </button>
+            {branches.filter(b => b.active).map(b => {
+              const badge = getUserBranchBadge({ branch_id: b.branch_id }, branches);
+              const isActive = selReportBranch === b.branch_id;
+              const bOrders = (allOrders||[]).filter(o => o.branch_id === b.branch_id);
+              return (
+                <button key={b.branch_id}
+                  onClick={() => setSelReportBranch(b.branch_id)}
+                  style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer",
+                    fontFamily:"inherit", fontSize:12, fontWeight:700,
+                    background: isActive ? (badge?.bg||"var(--bg-card)") : "var(--bg-card)",
+                    color: isActive ? (badge?.color||"#fff") : "var(--text-dim)",
+                    boxShadow: isActive ? `0 0 0 1px ${badge?.border||"#333"}` : "none",
+                    display:"flex", alignItems:"center", gap:5 }}>
+                  🏪 {b.branch_name}
+                  <span style={{ fontSize:10, opacity:.7 }}>({bOrders.length})</span>
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -3027,32 +3075,74 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       {/* ── SCROLLABLE CONTENT ── */}
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 32px" }}>
 
-        {/* Per-branch summary (all mode only) */}
+        {/* Per-branch summary cards — clickable to filter */}
         {reportMode === "all" && !allLoading && branches.length > 0 && (
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10 }}>🏪 សង្ខេបតាមតូប</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 10 }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
+              <div style={{ fontWeight:700, fontSize:13 }}>🏪 សង្ខេបតាមតូប</div>
+              {selReportBranch !== "all" && (
+                <button onClick={() => setSelReportBranch("all")}
+                  style={{ fontSize:11, color:"#888", background:"transparent", border:"1px solid #333",
+                    borderRadius:10, padding:"2px 10px", cursor:"pointer", fontFamily:"inherit" }}>
+                  ✕ លុប Filter
+                </button>
+              )}
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:10 }}>
               {branches.filter(b => b.active).map(b => {
-                const bOrders = filtered.filter(o => o.branch_id === b.branch_id);
-                const bRev = bOrders.reduce((s, o) => s + o.total + o.tax, 0);
+                // Use allOrders for period-filtered data per branch
+                const allBOrders = (allOrders||[]).filter(o => {
+                  if (o.branch_id !== b.branch_id) return false;
+                  try {
+                    const d = new Date(o.order_id);
+                    if (period === "day")   return d.toISOString().slice(0,10) === selDate;
+                    if (period === "month") return d.toISOString().slice(0,7)  === selMonth;
+                    if (period === "year")  return String(d.getFullYear())      === selYear;
+                  } catch { return false; }
+                  return false;
+                });
+                const bRev = allBOrders.reduce((s,o) => s + o.total + o.tax, 0);
+                const totalAllRev = (allOrders||[]).filter(o => {
+                  try {
+                    const d = new Date(o.order_id);
+                    if (period === "day")   return d.toISOString().slice(0,10) === selDate;
+                    if (period === "month") return d.toISOString().slice(0,7)  === selMonth;
+                    if (period === "year")  return String(d.getFullYear())      === selYear;
+                  } catch { return false; }
+                  return false;
+                }).reduce((s,o) => s + o.total + o.tax, 0);
+                const pct = totalAllRev > 0 ? Math.round((bRev / totalAllRev) * 100) : 0;
+                const isSelected = selReportBranch === b.branch_id;
+                const badge = getUserBranchBadge({ branch_id: b.branch_id }, branches);
                 return (
-                  <div key={b.branch_id} style={{
-                    background: "var(--bg-card)", border: "1px solid var(--border)",
-                    borderRadius: 12, padding: "12px 14px"
-                  }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>🏪 {b.branch_name}</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: "var(--accent)" }}>{fmt(bRev)}</div>
-                    <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>{bOrders.length} orders</div>
-                    {/* Revenue bar */}
-                    {filtered.length > 0 && (
-                      <div style={{ height: 4, background: "var(--bg-main)", borderRadius: 2, marginTop: 8 }}>
-                        <div style={{
-                          height: "100%", borderRadius: 2,
-                          background: `linear-gradient(90deg,var(--accent-dk),var(--accent))`,
-                          width: `${Math.round((bRev / filtered.reduce((s, o) => s + o.total + o.tax, 0) || 1) * 100)}%`
-                        }} />
-                      </div>
-                    )}
+                  <div key={b.branch_id}
+                    onClick={() => setSelReportBranch(isSelected ? "all" : b.branch_id)}
+                    style={{
+                      background: isSelected ? (badge?.bg||"var(--bg-card)") : "var(--bg-card)",
+                      border: `2px solid ${isSelected ? (badge?.color||"var(--accent)") : "var(--border-col)"}`,
+                      borderRadius:12, padding:"12px 14px", cursor:"pointer",
+                      transition:"all .15s",
+                      boxShadow: isSelected ? `0 0 0 2px ${badge?.border||"var(--accent)33"}` : "none"
+                    }}>
+                    <div style={{ fontSize:12, fontWeight:700, marginBottom:4,
+                      color: isSelected ? (badge?.color||"var(--accent)") : "var(--text-main)" }}>
+                      🏪 {b.branch_name}
+                      {isSelected && <span style={{ marginLeft:5, fontSize:10 }}>✓</span>}
+                    </div>
+                    <div style={{ fontSize:18, fontWeight:700,
+                      color: isSelected ? (badge?.color||"var(--accent)") : "var(--accent)" }}>
+                      {fmt(bRev)}
+                    </div>
+                    <div style={{ fontSize:11, color:"var(--text-dim)", marginTop:2 }}>
+                      {allBOrders.length} orders · {pct}%
+                    </div>
+                    <div style={{ height:4, background:"var(--bg-main)", borderRadius:2, marginTop:8, overflow:"hidden" }}>
+                      <div style={{
+                        height:"100%", borderRadius:2,
+                        background: badge?.bg || `linear-gradient(90deg,var(--accent-dk),var(--accent))`,
+                        width: pct + "%", transition:"width .4s"
+                      }} />
+                    </div>
                   </div>
                 );
               })}
@@ -4443,6 +4533,16 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
 
   const ROLES = [{ v: "admin", label: "👑 Admin", color: "#E8A84B" }, { v: "staff", label: "👤 Staff", color: "#5BA3E0" }];
 
+  // Super admin branch filter
+  const [filterBranch, setFilterBranch] = useState("all"); // "all" | branch_id
+
+  // Apply branch filter on top of visibleUsers
+  const displayUsers = (() => {
+    if (!isGlobalAdmin || filterBranch === "all") return visibleUsers;
+    if (filterBranch === "none") return visibleUsers.filter(u => !u.branch_id || u.branch_id === "all");
+    return visibleUsers.filter(u => u.branch_id === filterBranch);
+  })();
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {delConf && <ConfirmDel name={delConf.name} onConfirm={delConf.fn} onCancel={() => setDelConf(null)} />}
@@ -4474,9 +4574,19 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
 
       {/* Sticky header */}
       <div style={{ flexShrink: 0, padding: "16px 14px 12px", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
-        <SectionHeader title="👥 គ្រប់គ្រង Users"
-          sub={`${visibleUsers.length} users · ${visibleUsers.filter(u => u.active).length} active${isBranchAdmin ? " · " + branchId : ""}`} />
-        <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 8 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8, flexWrap:"wrap", gap:8 }}>
+          <div>
+            <div style={{ fontWeight:700, fontSize:18 }}>👥 គ្រប់គ្រង Users</div>
+            <div style={{ fontSize:12, color:"#888", marginTop:2 }}>
+              {displayUsers.length} users · {displayUsers.filter(u => u.active).length} active
+              {isBranchAdmin && <span style={{ marginLeft:6, color:"var(--accent)" }}>· {branchId}</span>}
+              {isGlobalAdmin && filterBranch !== "all" && (
+                <span style={{ marginLeft:6, color:"#5BA3E0" }}>
+                  · {branchList.find(b=>b.branch_id===filterBranch)?.branch_name || filterBranch}
+                </span>
+              )}
+            </div>
+          </div>
           <button onClick={() => setModal({
             mode: "add",
             data: {
@@ -4488,11 +4598,53 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
           })}
             style={btnGold}>➕ បន្ថែម User</button>
         </div>
+
+        {/* Branch filter tabs — Super Admin only */}
+        {isGlobalAdmin && branchList.length > 0 && (
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", paddingTop:10, alignItems:"center" }}>
+            <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>🏪 តម្រងតាមតូប:</span>
+            <button
+              onClick={() => setFilterBranch("all")}
+              style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer",
+                fontFamily:"inherit", fontSize:12, fontWeight:700,
+                background: filterBranch==="all" ? "linear-gradient(135deg,#B8732A,#E8A84B)" : "var(--bg-card)",
+                color: filterBranch==="all" ? "#fff" : "#666" }}>
+              🌐 ទាំងអស់ ({visibleUsers.length})
+            </button>
+            {/* No-branch users */}
+            {visibleUsers.filter(u => !u.branch_id).length > 0 && (
+              <button
+                onClick={() => setFilterBranch("none")}
+                style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer",
+                  fontFamily:"inherit", fontSize:12, fontWeight:700,
+                  background: filterBranch==="none" ? "linear-gradient(135deg,#555,#888)" : "var(--bg-card)",
+                  color: filterBranch==="none" ? "#fff" : "#666" }}>
+                ⭐ Super Admin ({visibleUsers.filter(u => !u.branch_id || u.branch_id==="all").length})
+              </button>
+            )}
+            {branchList.map(b => {
+              const count = visibleUsers.filter(u => u.branch_id === b.branch_id).length;
+              const badge = getUserBranchBadge({ branch_id: b.branch_id }, branchList);
+              const isActive = filterBranch === b.branch_id;
+              return (
+                <button key={b.branch_id}
+                  onClick={() => setFilterBranch(b.branch_id)}
+                  style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer",
+                    fontFamily:"inherit", fontSize:12, fontWeight:700,
+                    background: isActive ? (badge?.bg || "var(--bg-card)") : "var(--bg-card)",
+                    color: isActive ? (badge?.color || "#fff") : "#666",
+                    boxShadow: isActive ? `0 0 0 1px ${badge?.border||"#333"}` : "none" }}>
+                  🏪 {b.branch_name} ({count})
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "14px 14px 32px" }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 12 }}>
-          {visibleUsers.map(u => {
+          {displayUsers.map(u => {
             const roleInfo = ROLES.find(r => r.v === u.role);
             const isMe = u.user_id === currentUser.user_id;
             const perms = u.role === "admin"
