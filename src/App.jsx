@@ -479,6 +479,9 @@ export default function CafeBloom() {
     try { return JSON.parse(localStorage.getItem("cb_stock_alert_dismissed")||"{}"); } catch { return {}; }
   });
 
+  // Track last shown time to prevent repeated popups (session-based)
+  const stockAlertShownRef = React.useRef(0);
+
   useEffect(() => {
     if (!ingsRaw?.length) return;
     const low = ingsRaw.filter(i => {
@@ -487,9 +490,13 @@ export default function CafeBloom() {
       return thresh > 0 && stock <= thresh;
     });
     if (!low.length) { setStockAlert(null); return; }
-    // Check if already dismissed for this combination (use ingredient ids + stock as key)
     const key = low.map(i => i.ingredient_id + ":" + i.current_stock).sort().join(",");
+    // Skip if already dismissed
     if (stockAlertDismissed[key]) return;
+    // Skip if shown recently (within 10 min) — prevents re-pop after stock deduction
+    const now = Date.now();
+    if (now - stockAlertShownRef.current < 10 * 60 * 1000) return;
+    stockAlertShownRef.current = now;
     setStockAlert({ items: low, key });
   }, [ingsRaw]);
 
@@ -1417,12 +1424,29 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
                 <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.product_name}</div>
                 <div style={{ fontSize: 10, color: "#555" }}>{item.opts.size} · {item.opts.sugar}</div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <button onClick={() => setCart(p => p.map(i => i.key === item.key ? { ...i, qty: Math.max(0, i.qty - 1) } : i).filter(i => i.qty > 0))}
-                  style={{ width: 22, height: 22, borderRadius: 5, border: "none", background: "var(--bg-main)", color: "var(--text-main)", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>−</button>
-                <span style={{ fontSize: 12, fontWeight: 700, minWidth: 14, textAlign: "center" }}>{item.qty}</span>
+                  style={{ width: 26, height: 26, borderRadius: 6, border: "none", background: "var(--bg-main)", color: "var(--text-main)", cursor: "pointer", fontWeight: 700, fontSize: 16, display:"flex", alignItems:"center", justifyContent:"center" }}>−</button>
+                <input
+                  type="number"
+                  min="1"
+                  value={item.qty}
+                  onChange={e => {
+                    const v = parseInt(e.target.value, 10);
+                    if (isNaN(v) || v < 1) return;
+                    setCart(p => p.map(i => i.key === item.key ? { ...i, qty: v } : i));
+                  }}
+                  onFocus={e => e.target.select()}
+                  style={{
+                    width: 38, height: 26, borderRadius: 6, border: "1px solid var(--border-col)",
+                    background: "var(--bg-main)", color: "var(--text-main)",
+                    textAlign: "center", fontSize: 13, fontWeight: 700,
+                    fontFamily: "inherit", padding: 0,
+                    MozAppearance: "textfield", WebkitAppearance: "none",
+                  }}
+                />
                 <button onClick={() => setCart(p => p.map(i => i.key === item.key ? { ...i, qty: i.qty + 1 } : i))}
-                  style={{ width: 22, height: 22, borderRadius: 5, border: "none", background: "#B8732A", color: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 14 }}>+</button>
+                  style={{ width: 26, height: 26, borderRadius: 6, border: "none", background: "#B8732A", color: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 16, display:"flex", alignItems:"center", justifyContent:"center" }}>+</button>
               </div>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#E8A84B", minWidth: 40, textAlign: "right" }}>{fmt(item.price * item.qty)}</div>
             </div>
@@ -6450,6 +6474,11 @@ const CSS = `
 
   /* ── Responsive ── */
   .page-pos-active { padding: 0 !important; }
+
+  /* Hide number input arrows */
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  input[type=number] { -moz-appearance: textfield; }
 
   /* Slide in animation for sidebar */
   @keyframes slideInLeft {
