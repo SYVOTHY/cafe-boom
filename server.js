@@ -33,8 +33,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 })();
 
 const PORT           = process.env.PORT           || 5000;
-const SESSION_HOURS  = parseInt(process.env.SESSION_EXPIRES_HOURS || "12", 10);
+const SESSION_HOURS  = parseInt(process.env.SESSION_EXPIRES_HOURS || "720", 10); // 30 days default
 const DATABASE_URL   = process.env.DATABASE_URL;   // set by Railway PostgreSQL plugin
+// JWT secret — stable across restarts (use env var or derive from DB URL)
+const JWT_SECRET = process.env.JWT_SECRET || DATABASE_URL.slice(-32) || "cafe_bloom_secret_2025";
 
 if (!DATABASE_URL) {
   console.error("❌ DATABASE_URL មិនទាន់​កំណត់! បន្ថែម PostgreSQL plugin នៅ Railway។");
@@ -354,27 +356,38 @@ function verifyPassword(pw, stored) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  SESSIONS  (in-memory — acceptable: short-lived tokens)
+//  SESSIONS — Stateless HMAC tokens (survive server restarts!)
+//  Format: base64url(payload_json) + "." + base64url(hmac_sha256)
 // ═══════════════════════════════════════════════════════════════════
-const sessions = new Map();
+function b64u(buf) { return Buffer.from(buf).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=/g,""); }
+function fromb64u(s) { return Buffer.from(s.replace(/-/g,"+").replace(/_/g,"/"), "base64"); }
 
 function createSession(user) {
-  const token   = crypto.randomBytes(32).toString("hex");
-  const expires = Date.now() + SESSION_HOURS * 3600 * 1000;
-  sessions.set(token, {
+  const payload = {
     user_id:user.user_id, username:user.username,
-    role:user.role, name:user.name, branch_id:user.branch_id, expires
-  });
-  for (const [t,s] of sessions) if (s.expires < Date.now()) sessions.delete(t);
-  return token;
+    role:user.role, name:user.name, branch_id:user.branch_id,
+    exp: Date.now() + SESSION_HOURS * 3600 * 1000
+  };
+  const data = b64u(JSON.stringify(payload));
+  const sig  = b64u(crypto.createHmac("sha256", JWT_SECRET).update(data).digest());
+  return data + "." + sig;
 }
 
 function getSession(req) {
-  const token = (req.headers["authorization"]||"").replace("Bearer ","").trim();
-  if (!token) return null;
-  const s = sessions.get(token);
-  if (!s || s.expires < Date.now()) { sessions.delete(token); return null; }
-  return s;
+  const raw = (req.headers["authorization"]||"").replace("Bearer ","").trim();
+  if (!raw) return null;
+  const dot = raw.lastIndexOf(".");
+  if (dot < 0) return null;
+  const data = raw.slice(0, dot);
+  const sig  = raw.slice(dot + 1);
+  // Verify signature
+  const expected = b64u(crypto.createHmac("sha256", JWT_SECRET).update(data).digest());
+  if (sig !== expected) return null;
+  try {
+    const payload = JSON.parse(fromb64u(data).toString());
+    if (payload.exp < Date.now()) return null; // expired
+    return payload;
+  } catch { return null; }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -545,8 +558,8 @@ async function handler(req, res) {
 
   // ── LOGOUT ──────────────────────────────────────────────────────
   if (req.method === "POST" && url === "/api/logout") {
-    const auth = (req.headers["authorization"]||"").replace("Bearer ","").trim();
-    if (auth) sessions.delete(auth);
+    // JWT is stateless — client just discards the token
+    // Optionally add a token blacklist here for extra security
     send(res, 200, { ok:true });
     return;
   }
