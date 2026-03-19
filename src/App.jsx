@@ -928,7 +928,7 @@ export default function CafeBloom() {
         {page === "pos"       && <POSPage       {...shared} />}
         {page === "tables"    && <TablesPage    {...shared} />}
         {page === "menu"      && <MenuPage      {...shared} />}
-        {page === "inventory" && <InventoryPage {...shared} serverUrl={CLOUD_URL} />}
+        {page === "inventory" && <InventoryPage {...shared} />}
         {page === "orders"    && <OrdersPage    {...shared} />}
         {page === "report"    && <ReportPage    {...shared} />}
         {page === "finance"   && <FinancePage   {...shared} />}
@@ -2014,68 +2014,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
 // ═══════════════════════════════════════════════════════════════════
 
 
-// ── MigrateRecipesBtn — copy shared recipes → each branch (admin only) ──
-function MigrateRecipesBtn({ serverUrl, notify }) {
-  const [busy,   setBusy]   = useState(false);
-  const [result, setResult] = useState(null);
-  const run = async () => {
-    setBusy(true); setResult(null);
-    try {
-      const token = localStorage.getItem("pos_token");
-      const r = await fetch(`${serverUrl}/api/migrate-recipes`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true",
-          ...(token ? { Authorization: "Bearer " + token } : {}),
-        },
-      });
-      const data = await r.json();
-      if (data.ok) {
-        setResult(data.results);
-        notify("✅ Migrate recipes រួចរាល់!");
-      } else {
-        notify("❌ " + (data.error || "មានបញ្ហា"));
-      }
-    } catch (e) {
-      notify("❌ " + e.message);
-    }
-    setBusy(false);
-  };
-  return (
-    <div style={{ marginBottom: 20, padding: "14px 16px", background: "#1A0A0A", border: "1px solid #E74C3C44", borderRadius: 10 }}>
-      <div style={{ fontWeight: 700, fontSize: 13, color: "#E8A84B", marginBottom: 6 }}>
-        🔧 Migrate Recipes → Branch Data
-      </div>
-      <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>
-        Copy recipes ពី shared_data ទៅ branch_data រៀងរាល់ branch — filter ingredient invalid ចេញ
-      </div>
-      <button
-        onClick={run}
-        disabled={busy}
-        style={{
-          padding: "8px 18px", borderRadius: 8, border: "none", cursor: busy ? "not-allowed" : "pointer",
-          fontFamily: "inherit", fontSize: 13, fontWeight: 700,
-          background: busy ? "#333" : "linear-gradient(135deg,#B8732A,#E8A84B)",
-          color: busy ? "#666" : "#fff", opacity: busy ? 0.7 : 1,
-        }}>
-        {busy ? "⏳ កំពុង migrate..." : "▶ Run Migration"}
-      </button>
-      {result && (
-        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
-          {result.map(r => (
-            <div key={r.branch_id} style={{ fontSize: 12, color: "#aaa" }}>
-              <span style={{ color: "#27AE60", fontWeight: 700 }}>{r.branch_id}</span>
-              {" → "}{r.before} recipes <span style={{ color: "#E8A84B" }}>→ {r.after}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser, serverUrl }) {
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser }) {
   // Staff: read-only view — cannot add/edit/delete/restock
   const canEdit = isAdmin;
   const [subTab, setSubTab] = useState("stock");
@@ -2325,7 +2264,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
           );
           const totalMappings = recipes.length;
           const totalProds = new Set(recipes.map(r => r.product_id)).size;
-          const missingIng = recipes.filter(r => !ings.find(i => i.ingredient_id === r.ingredient_id)).length;
+          const missingIng = recipes.filter(r => !ings.find(i => Number(i.ingredient_id) === Number(r.ingredient_id))).length;
           return (
             <>
               {/* Summary bar */}
@@ -2348,14 +2287,14 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 <div style={{ background:"#E74C3C11",border:"1px solid #E74C3C44",borderRadius:10,padding:"12px 16px",marginBottom:12,fontSize:12,color:"#E74C3C" }}>
                   <div style={{fontWeight:700,marginBottom:6}}>⚠️ មាន {missingIng} mapping ដែល ingredient ត្រូវបានលុប</div>
                   <div style={{fontSize:11,color:"#E74C3C88"}}>
-                    {recipes.filter(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id)).map(r=>{
+                    {recipes.filter(r=>!ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id))).map(r=>{
                       const prod = prods.find(p=>p.product_id===r.product_id);
                       return <span key={r.recipe_id} style={{background:"#E74C3C22",borderRadius:6,padding:"2px 8px",marginRight:6,marginBottom:4,display:"inline-block"}}>
                         {prod?.product_name||"?"} → ID:{r.ingredient_id}
                       </span>;
                     })}
                   </div>
-                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>i.ingredient_id===r.ingredient_id)))}
+                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id))))}
                     style={{...btnSmall,marginTop:8,fontSize:11,color:"#E74C3C",borderColor:"#E74C3C44"}}>
                     🗑 លុប mappings ខូច​ទាំងអស់
                   </button>
@@ -2365,11 +2304,11 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 const pr = recipes.filter(r => r.product_id === prod.product_id);
                 const isCollapsed = collapsed[prod.product_id] !== undefined ? collapsed[prod.product_id] : !expandAll;
                 const totalCost = pr.reduce((sum,r) => {
-                  const ing = ings.find(i=>i.ingredient_id===r.ingredient_id);
+                  const ing = ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id));
                   return sum + (Number(r.quantity_required)*(ing?.cost_per_unit||0));
                 },0);
-                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>i.ingredient_id===r.ingredient_id); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
-                const hasMissing = pr.some(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id));
+                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id)); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
+                const hasMissing = pr.some(r=>!ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id)));
                 return (
                   <div key={prod.product_id} style={{ background:"var(--bg-card)",border:`1px solid ${hasMissing?"#E74C3C33":canMake?"#27AE6033":"#F39C1233"}`,borderRadius:12,marginBottom:10,overflow:"hidden" }}>
                     <div style={{ background:"var(--bg-header)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}
@@ -2388,7 +2327,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                     {!isCollapsed && (
                       <TableWrap headers={["#","ingredient + ប្រើ/serve","ស្តុក​នៅ","status / ចំនួន",""]}>
                         {pr.map((r,idx)=>{
-                          const ing=ings.find(i=>i.ingredient_id===r.ingredient_id);
+                          const ing=ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id));
                           const enough=ing&&Number(ing?.current_stock)>=Number(r.quantity_required);
                           const servings=ing?Math.floor(Number(ing?.current_stock)/Number(r.quantity_required)):0;
                           return (
@@ -2457,11 +2396,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         })()}
 
         {subTab === "sql" && (
-          <div style={{ background: "var(--bg-main)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 20 }}>
-            {isAdmin && serverUrl && (
-              <MigrateRecipesBtn serverUrl={serverUrl} notify={notify} />
-            )}
-            <div style={{ fontWeight: 700, fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>📋 Reference SQL</div>
+          <div style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
