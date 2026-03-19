@@ -212,16 +212,20 @@ const PERM_LABELS = {
   orders:    { icon: "📋", label: "ប្រវត្តិ" },
   report:    { icon: "📊", label: "របាយការណ៍" },
   finance:   { icon: "💼", label: "ហិរញ្ញវត្ថុ" },
-  // inventory, users, theme are admin-only — staff gets read-only view of inventory
+  inventory: { icon: "📦", label: "ស្តុក" },
+  users:     { icon: "👥", label: "អ្នកប្រើ" },
+  branches:  { icon: "🏪", label: "សាខា" },
+  theme:     { icon: "🎨", label: "រចនាប័ទ្ម" },
+  backup:    { icon: "💾", label: "Backup" },
 };
 
-// Permissions that only admin can have (never grant to staff)
-const ADMIN_ONLY_PERMS = new Set(["users", "theme", "inventory"]);
+// No admin-only perms — super admin controls ALL permissions
+const ADMIN_ONLY_PERMS = new Set([]); // empty: super admin decides everything
 
 const DEFAULT_PERMS_TPL = {
   pos: true, tables: true, menu: true,
   orders: true, report: true, finance: true,
-  // inventory, users, theme — admin-only (staff gets read-only inventory view)
+  inventory: false, users: false, branches: false, theme: false, backup: false,
 };
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
@@ -569,14 +573,13 @@ export default function CafeBloom() {
     // Global admin: access everything
     if (isGlobal) return true;
 
-    // Branch admin: can access most things EXCEPT theme (global-only)
+    // Branch admin: most things OK except global-only pages
     if (isBranch) {
-      if (p === "theme") return false;   // theme = global admin only
-      return true;                        // everything else OK
+      if (p === "theme" || p === "branches" || p === "backup") return false;
+      return true;
     }
 
-    // Staff: check permissions, block admin-only pages
-    if (ADMIN_ONLY_PERMS && ADMIN_ONLY_PERMS.has(p)) return false;
+    // Staff: check permissions object
     return !!currentUser.permissions?.[p];
   }, [currentUser]);
 
@@ -631,7 +634,6 @@ export default function CafeBloom() {
     // branches + theme: GLOBAL ADMIN ONLY
     { id:"branches",  label:"សាខា",         emoji:"🏪", globalOnly:true },
     { id:"theme",     label:"រចនាប័ទ្ម",   emoji:"🎨", globalOnly:true },
-    { id:"backup",    label:"Backup",       emoji:"💾", globalOnly:true },
   ];
 
   const NAV = ALL_NAV.filter(n => {
@@ -6181,53 +6183,66 @@ function Empty({ icon, label }) {
 
 
 function PermModal({ user, onSave, onClose }) {
-  // Default: all permissions ON (super admin can turn off what they want)
-  const allOn  = Object.fromEntries(Object.keys(PERM_LABELS).map(k => [k, true]));
+  const allOn = Object.fromEntries(Object.keys(PERM_LABELS).map(k => [k, true]));
   const initPerms = user.permissions && Object.keys(user.permissions).length > 0
     ? { ...allOn, ...user.permissions }
-    : allOn; // new user → all ON by default
+    : { ...DEFAULT_PERMS_TPL };
   const [perms, setPerms] = useState(initPerms);
   const toggle = (k) => setPerms(p => ({ ...p, [k]: !p[k] }));
   const setAll = (val) => setPerms(Object.fromEntries(Object.keys(PERM_LABELS).map(k => [k, val])));
-  const allEnabled = Object.values(perms).every(v => v);
+  const allEnabled  = Object.values(perms).every(v => v);
   const allDisabled = Object.values(perms).every(v => !v);
+
+  // Group permissions for display
+  const GROUPS = [
+    { label:"📱 Pages ចម្បង",  keys:["pos","tables","menu","orders","report","finance"] },
+    { label:"⚙️ Admin Pages",   keys:["inventory","users","branches","theme","backup"] },
+  ];
+
   return (
-    <Modal onClose={onClose} maxW={420}>
+    <Modal onClose={onClose} maxW={480}>
       <div style={{ fontWeight:700, fontSize:16, marginBottom:6, color:"#E8A84B" }}>🛡️ កំណត់សិទ្ធ</div>
-      <div style={{ fontSize:13, color:"#888", marginBottom:14 }}>👤 {user.name} (@{user.username})</div>
-      {/* Select all / none buttons */}
+      <div style={{ fontSize:13, color:"#888", marginBottom:12 }}>👤 {user.name} (@{user.username})</div>
+      {/* Select all / none */}
       <div style={{ display:"flex", gap:8, marginBottom:14 }}>
         <button onClick={() => setAll(true)} disabled={allEnabled}
-          style={{ flex:1, padding:"7px 0", borderRadius:8, border:"1px solid #27AE6055",
-            background: allEnabled?"#0A2A0A":"transparent", color: allEnabled?"#27AE60":"#555",
-            cursor: allEnabled?"default":"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700 }}>
+          style={{ flex:1, padding:"7px", borderRadius:8, border:"1px solid #27AE6044",
+            background:allEnabled?"#0A2A0A":"transparent", color:allEnabled?"#27AE60":"#555",
+            cursor:allEnabled?"default":"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700 }}>
           ✅ បើកទាំងអស់
         </button>
         <button onClick={() => setAll(false)} disabled={allDisabled}
-          style={{ flex:1, padding:"7px 0", borderRadius:8, border:"1px solid #8B1A1A55",
-            background: allDisabled?"#2A0A0A":"transparent", color: allDisabled?"#E74C3C":"#555",
-            cursor: allDisabled?"default":"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700 }}>
+          style={{ flex:1, padding:"7px", borderRadius:8, border:"1px solid #8B1A1A44",
+            background:allDisabled?"#2A0A0A":"transparent", color:allDisabled?"#E74C3C":"#555",
+            cursor:allDisabled?"default":"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700 }}>
           ❌ បិទទាំងអស់
         </button>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:20 }}>
-        {Object.entries(PERM_LABELS).map(([k, { icon, label }]) => {
-          const on = perms[k];
-          return (
-            <button key={k} onClick={() => toggle(k)} style={{
-              display:"flex", alignItems:"center", gap:8, padding:"10px 12px",
-              borderRadius:10, border:`1px solid ${on?"#27AE6055":"#2A2A2A"}`,
-              background: on?"#0A2A0A":"#111", cursor:"pointer", fontFamily:"inherit", textAlign:"left"
-            }}>
-              <span style={{ fontSize:18 }}>{icon}</span>
-              <div>
-                <div style={{ fontSize:12, fontWeight:700, color:on?"#27AE60":"#555" }}>{label}</div>
-                <div style={{ fontSize:10, color:on?"#5C9E5C":"#333" }}>{on?"✅ អនុញ្ញាត":"❌ បិទ"}</div>
-              </div>
-            </button>
-          );
-        })}
-      </div>
+      {/* Grouped permissions */}
+      {GROUPS.map(g => (
+        <div key={g.label} style={{ marginBottom:14 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"var(--text-dim)", marginBottom:6 }}>{g.label}</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+            {g.keys.map(k => {
+              const { icon, label } = PERM_LABELS[k];
+              const on = !!perms[k];
+              return (
+                <button key={k} onClick={() => toggle(k)} style={{
+                  display:"flex", alignItems:"center", gap:8, padding:"9px 10px",
+                  borderRadius:10, border:`1px solid ${on?"#27AE6055":"#2A2A2A"}`,
+                  background:on?"#0A2A0A":"#111", cursor:"pointer", fontFamily:"inherit", textAlign:"left"
+                }}>
+                  <span style={{ fontSize:16 }}>{icon}</span>
+                  <div>
+                    <div style={{ fontSize:11, fontWeight:700, color:on?"#27AE60":"#555" }}>{label}</div>
+                    <div style={{ fontSize:10, color:on?"#5C9E5C":"#333" }}>{on?"✅ អនុញ្ញាត":"❌ បិទ"}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
       <BtnRow onSave={() => onSave(user.user_id, perms)} onCancel={onClose} saveLabel="💾 រក្សាទុក" />
     </Modal>
   );
@@ -6261,168 +6276,240 @@ function RecForm({ data, prods, ings, onSave, onCancel }) {
 
 
 // ═══════════════════════════════════════════════════════════════════
-//  BACKUP PAGE — Download all branch data as JSON
+//  BACKUP PAGE — Backup & Restore all branch data
 // ═══════════════════════════════════════════════════════════════════
-function BackupPage({ branchList, notify }) {
+function BackupPage({ branchList, notify, setTheme }) {
   const [loading,    setLoading]    = useState(false);
+  const [restoring,  setRestoring]  = useState(false);
   const [lastBackup, setLastBackup] = useState(() => localStorage.getItem("cb_last_backup") || null);
   const [progress,   setProgress]   = useState([]);
-  const [autoSched,  setAutoSched]  = useState(() => localStorage.getItem("cb_auto_backup") === "true");
+  const [restoreLog, setRestoreLog] = useState([]);
+  const [showRestore,setShowRestore]= useState(false);
+  const fileRef = useRef(null);
 
+  const addLog = (msg, list, setList) => setList(p => [...p, msg]);
+
+  // ── BACKUP ────────────────────────────────────────────────────
   const doBackup = async () => {
-    setLoading(true);
-    setProgress([]);
+    setLoading(true); setProgress([]);
     const token = localStorage.getItem("pos_token");
     const hdr   = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",
-      ...(token ? {Authorization:"Bearer "+token} : {}) };
-    const snap  = { _created: new Date().toISOString(), _version: "1.0", branches: {} };
-
+      ...(token?{Authorization:"Bearer "+token}:{}) };
+    const snap  = { _created:new Date().toISOString(), _version:"1.0", branches:{} };
     try {
-      // 1. Load shared data
-      setProgress(p => [...p, "⏳ Loading shared data..."]);
+      addLog("⏳ Loading shared data...", progress, setProgress);
       const sharedR = await fetch(`${CLOUD_URL}/api/db?branch=branch_1`, { headers:hdr });
       const shared  = await sharedR.json();
       snap.shared   = {
-        categories: shared.categories || [],
-        products:   shared.products   || [],
-        options:    shared.options    || [],
-        users:      (shared.users||[]).map(({password:_,...u}) => u), // strip passwords
-        theme:      shared.theme      || {},
-        branches:   shared.branches   || [],
+        categories: shared.categories||[],
+        products:   shared.products||[],
+        options:    shared.options||[],
+        users:      (shared.users||[]).map(({password:_,...u})=>u),
+        theme:      shared.theme||{},
+        branches:   shared.branches||[],
       };
-      setProgress(p => [...p, "✅ Shared data loaded"]);
+      setProgress(p=>[...p.slice(0,-1),"✅ Shared data loaded"]);
 
-      // 2. Load each branch
-      const branches = Array.isArray(branchList) && branchList.length > 0
-        ? branchList.filter(b => b.active !== false)
-        : (shared.branches || []).filter(b => b.active !== false);
-
+      const branches = (branchList||[]).filter(b=>b.active!==false);
       for (const b of branches) {
-        setProgress(p => [...p, `⏳ Loading ${b.branch_name || b.branch_id}...`]);
+        setProgress(p=>[...p,`⏳ Loading ${b.branch_name||b.branch_id}...`]);
         try {
           const r    = await fetch(`${CLOUD_URL}/api/db?branch=${b.branch_id}`, { headers:hdr });
           const data = await r.json();
           snap.branches[b.branch_id] = {
-            branch_name: b.branch_name,
-            orders:      data.orders      || [],
-            logs:        data.logs        || [],
-            tables:      data.tables      || [],
-            ingredients: data.ingredients || [],
-            expenses:    data.expenses    || [],
-            recipes:     data.recipes     || [],
+            branch_name:  b.branch_name,
+            orders:       data.orders||[],
+            logs:         data.logs||[],
+            tables:       data.tables||[],
+            ingredients:  data.ingredients||[],
+            expenses:     data.expenses||[],
+            recipes:      data.recipes||[],
           };
-          setProgress(p => [...p.slice(0,-1), `✅ ${b.branch_name || b.branch_id} (${(data.orders||[]).length} orders)`]);
+          setProgress(p=>[...p.slice(0,-1),`✅ ${b.branch_name||b.branch_id} (${(data.orders||[]).length} orders)`]);
         } catch(e) {
-          setProgress(p => [...p.slice(0,-1), `❌ ${b.branch_id}: ${e.message}`]);
+          setProgress(p=>[...p.slice(0,-1),`❌ ${b.branch_id}: ${e.message}`]);
         }
       }
-
-      // 3. Download JSON
-      const json     = JSON.stringify(snap, null, 2);
-      const blob     = new Blob([json], {type:"application/json"});
-      const url      = URL.createObjectURL(blob);
-      const a        = document.createElement("a");
-      const dateStr  = new Date().toISOString().slice(0,10);
-      a.href         = url;
-      a.download     = `cafe-boom-backup-${dateStr}.json`;
-      a.click();
+      const json    = JSON.stringify(snap, null, 2);
+      const blob    = new Blob([json], {type:"application/json"});
+      const url     = URL.createObjectURL(blob);
+      const a       = document.createElement("a");
+      const dateStr = new Date().toISOString().slice(0,10);
+      a.href=url; a.download=`cafe-boom-backup-${dateStr}.json`; a.click();
       URL.revokeObjectURL(url);
-
       const now = new Date().toLocaleString("km-KH");
       setLastBackup(now);
       localStorage.setItem("cb_last_backup", now);
-      setProgress(p => [...p, `✅ Backup saved! (${(json.length/1024).toFixed(1)} KB)`]);
+      setProgress(p=>[...p,`✅ Backup saved! (${(json.length/1024).toFixed(1)} KB)`]);
       notify("✅ Backup រួចហើយ!");
     } catch(e) {
-      setProgress(p => [...p, `❌ Error: ${e.message}`]);
-      notify("❌ Backup failed: " + e.message);
+      setProgress(p=>[...p,`❌ Error: ${e.message}`]);
+      notify("❌ Backup failed");
     }
     setLoading(false);
   };
 
-  const toggleAuto = () => {
-    const next = !autoSched;
-    setAutoSched(next);
-    localStorage.setItem("cb_auto_backup", next);
-    notify(next ? "✅ Auto backup enabled (reminder only)" : "⭕ Auto backup disabled");
+  // ── RESTORE ───────────────────────────────────────────────────
+  const doRestore = async (file) => {
+    if (!file) return;
+    setRestoring(true); setRestoreLog([]);
+    const token = localStorage.getItem("pos_token");
+    const hdr   = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",
+      ...(token?{Authorization:"Bearer "+token}:{}) };
+    try {
+      const text = await file.text();
+      const snap = JSON.parse(text);
+      setRestoreLog(p=>[...p,`📂 Loaded: ${file.name}`]);
+      setRestoreLog(p=>[...p,`📅 Created: ${snap._created||"unknown"}`]);
+
+      // Restore shared data (theme, categories, products, options)
+      if (snap.shared) {
+        const tables = ["categories","products","options","theme"];
+        for (const t of tables) {
+          if (snap.shared[t]) {
+            try {
+              await fetch(`${CLOUD_URL}/api/db/${t}`, {
+                method:"POST", headers:hdr,
+                body:JSON.stringify(snap.shared[t])
+              });
+              setRestoreLog(p=>[...p,`✅ Restored shared: ${t}`]);
+            } catch(e) { setRestoreLog(p=>[...p,`❌ ${t}: ${e.message}`]); }
+          }
+        }
+        // Update theme in UI
+        if (snap.shared.theme && setTheme) setTheme(snap.shared.theme);
+      }
+
+      // Restore each branch
+      const branchTables = ["orders","logs","tables","ingredients","expenses","recipes"];
+      for (const [bid, bdata] of Object.entries(snap.branches||{})) {
+        setRestoreLog(p=>[...p,`⏳ Restoring ${bdata.branch_name||bid}...`]);
+        let ok = 0;
+        for (const t of branchTables) {
+          if (bdata[t]) {
+            try {
+              await fetch(`${CLOUD_URL}/api/db/${t}?branch=${bid}`, {
+                method:"POST", headers:hdr,
+                body:JSON.stringify(bdata[t])
+              });
+              ok++;
+            } catch(e) { setRestoreLog(p=>[...p,`  ❌ ${bid}/${t}: ${e.message}`]); }
+          }
+        }
+        setRestoreLog(p=>[...p.slice(0,-1),`✅ ${bdata.branch_name||bid}: ${ok}/${branchTables.length} tables`]);
+      }
+      setRestoreLog(p=>[...p,"✅ Restore complete! Reload page to see changes."]);
+      notify("✅ Restore រួចហើយ! សូម reload page");
+    } catch(e) {
+      setRestoreLog(p=>[...p,`❌ Error: ${e.message}`]);
+      notify("❌ Restore failed: "+e.message);
+    }
+    setRestoring(false);
   };
 
   return (
-    <div style={{ padding:"20px 16px 40px", maxWidth:600, margin:"0 auto" }}>
-      <div style={{ fontWeight:700, fontSize:20, color:"var(--accent)", marginBottom:6 }}>💾 Backup ទិន្នន័យ</div>
+    <div style={{ padding:"20px 16px 40px", maxWidth:620, margin:"0 auto" }}>
+      <div style={{ fontWeight:700, fontSize:20, color:"var(--accent)", marginBottom:6 }}>💾 Backup & Restore</div>
       <div style={{ fontSize:13, color:"var(--text-dim)", marginBottom:24 }}>
-        Download ទិន្នន័យទាំងអស់ — orders, ingredients, recipes, expenses ពីគ្រប់ branches
+        Download/Upload ទិន្នន័យទាំងអស់ — orders, ingredients, recipes, expenses ពីគ្រប់ branches
       </div>
 
-      {/* Last backup info */}
-      <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
-        <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:4 }}>⏰ Backup ចុងក្រោយ</div>
-        <div style={{ fontSize:14, fontWeight:700, color: lastBackup ? "#27AE60" : "#E74C3C" }}>
-          {lastBackup || "មិនទាន់ backup ទេ"}
+      {/* Last backup */}
+      <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12, padding:14, marginBottom:14, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <div style={{ fontSize:11, color:"var(--text-dim)" }}>⏰ Backup ចុងក្រោយ</div>
+          <div style={{ fontSize:14, fontWeight:700, color:lastBackup?"#27AE60":"#E74C3C", marginTop:2 }}>
+            {lastBackup || "មិនទាន់ backup ទេ"}
+          </div>
         </div>
+        {branchList && branchList.length > 0 && (
+          <div style={{ fontSize:11, color:"var(--text-dim)", textAlign:"right" }}>
+            {branchList.filter(b=>b.active!==false).length} branches
+          </div>
+        )}
       </div>
 
-      {/* Main backup button */}
-      <button onClick={doBackup} disabled={loading}
-        style={{ width:"100%", padding:16, borderRadius:14, border:"none", cursor:loading?"not-allowed":"pointer",
-          fontFamily:"inherit", fontSize:16, fontWeight:700,
-          background:loading?"var(--bg-card)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",
-          color:loading?"var(--text-dim)":"#fff", marginBottom:16, opacity:loading?0.7:1 }}>
-        {loading ? "⏳ កំពុង backup..." : "💾 Backup ឥឡូវ"}
-      </button>
-
-      {/* Progress log */}
-      {progress.length > 0 && (
-        <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12, padding:14, marginBottom:16 }}>
-          <div style={{ fontSize:12, fontWeight:700, color:"var(--accent)", marginBottom:8 }}>📋 Progress</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-            {progress.map((msg, i) => (
-              <div key={i} style={{ fontSize:12, color: msg.startsWith("✅")?"#27AE60":msg.startsWith("❌")?"#E74C3C":"var(--text-dim)" }}>
-                {msg}
-              </div>
+      {/* ── BACKUP section ── */}
+      <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:14 }}>
+        <div style={{ fontWeight:700, fontSize:14, color:"var(--accent)", marginBottom:10 }}>📤 Backup</div>
+        <button onClick={doBackup} disabled={loading}
+          style={{ width:"100%", padding:14, borderRadius:12, border:"none", cursor:loading?"not-allowed":"pointer",
+            fontFamily:"inherit", fontSize:15, fontWeight:700,
+            background:loading?"var(--bg-main)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",
+            color:loading?"var(--text-dim)":"#fff", marginBottom: progress.length?12:0, opacity:loading?0.7:1 }}>
+          {loading ? "⏳ កំពុង backup..." : "💾 Backup ឥឡូវ"}
+        </button>
+        {progress.length > 0 && (
+          <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+            {progress.map((msg,i) => (
+              <div key={i} style={{ fontSize:12, color:msg.startsWith("✅")?"#27AE60":msg.startsWith("❌")?"#E74C3C":"var(--text-dim)" }}>{msg}</div>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Branch list */}
-      {branchList && branchList.length > 0 && (
-        <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12, padding:14, marginBottom:16 }}>
-          <div style={{ fontSize:12, fontWeight:700, color:"var(--accent)", marginBottom:8 }}>🏪 Branches ដែល backup</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-            {branchList.filter(b=>b.active!==false).map(b => (
-              <div key={b.branch_id} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12 }}>
-                <div style={{ width:8, height:8, borderRadius:"50%", background:"#27AE60" }}/>
-                <span style={{ color:"var(--text-main)", fontWeight:600 }}>{b.branch_name || b.branch_id}</span>
-                <span style={{ color:"var(--text-dim)", fontSize:11 }}>({b.branch_id})</span>
-              </div>
-            ))}
-          </div>
+      {/* ── RESTORE section ── */}
+      <div style={{ background:"var(--bg-card)", border:"1px solid #E74C3C33", borderRadius:14, padding:16, marginBottom:14 }}>
+        <div style={{ fontWeight:700, fontSize:14, color:"#E74C3C", marginBottom:6 }}>📥 Restore</div>
+        <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:12, padding:"8px 12px", background:"#E74C3C11", borderRadius:8, border:"1px solid #E74C3C22" }}>
+          ⚠️ Restore នឹង <b style={{color:"#E74C3C"}}>overwrite</b> ទិន្នន័យ​បច្ចុប្បន្ន — ត្រូវ backup ជាមុនសិន!
         </div>
-      )}
 
-      {/* Auto backup reminder */}
-      <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12, padding:14 }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
-          <div>
-            <div style={{ fontSize:13, fontWeight:700, color:"var(--text-main)", marginBottom:2 }}>🔔 Reminder ប្រចាំថ្ងៃ</div>
-            <div style={{ fontSize:11, color:"var(--text-dim)" }}>Show reminder ពេល login ថ្ងៃ ប្រសិនបើ backup ច្រើន​ថ្ងៃ​ហើយ</div>
-          </div>
-          <button onClick={toggleAuto}
-            style={{ padding:"6px 16px", borderRadius:20, border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:700,
-              background: autoSched ? "linear-gradient(135deg,var(--accent-dk),var(--accent))" : "var(--bg-main)",
-              color: autoSched ? "#fff" : "var(--text-dim)" }}>
-            {autoSched ? "✅ ON" : "⭕ OFF"}
+        {!showRestore ? (
+          <button onClick={() => setShowRestore(true)}
+            style={{ width:"100%", padding:12, borderRadius:10, border:"1px solid #E74C3C44", background:"transparent",
+              cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, color:"#E74C3C" }}>
+            📥 Restore ពី Backup File
           </button>
-        </div>
+        ) : (
+          <div>
+            <input ref={fileRef} type="file" accept=".json" style={{ display:"none" }}
+              onChange={e => e.target.files[0] && doRestore(e.target.files[0])} />
+            <div style={{ display:"flex", gap:8, marginBottom:10 }}>
+              <button onClick={() => fileRef.current?.click()} disabled={restoring}
+                style={{ flex:1, padding:12, borderRadius:10, border:"1px solid #E74C3C44",
+                  background:restoring?"var(--bg-main)":"#E74C3C11", cursor:restoring?"not-allowed":"pointer",
+                  fontFamily:"inherit", fontSize:13, fontWeight:700, color:"#E74C3C", opacity:restoring?0.6:1 }}>
+                {restoring ? "⏳ កំពុង restore..." : "📂 ជ្រើស .json file"}
+              </button>
+              <button onClick={() => { setShowRestore(false); setRestoreLog([]); }}
+                style={{ padding:"12px 16px", borderRadius:10, border:"1px solid var(--border-col)",
+                  background:"transparent", cursor:"pointer", fontFamily:"inherit", fontSize:13, color:"var(--text-dim)" }}>
+                បោះបង់
+              </button>
+            </div>
+            {restoreLog.length > 0 && (
+              <div style={{ display:"flex", flexDirection:"column", gap:3, maxHeight:200, overflowY:"auto" }}>
+                {restoreLog.map((msg,i) => (
+                  <div key={i} style={{ fontSize:12, color:msg.startsWith("✅")?"#27AE60":msg.startsWith("❌")?"#E74C3C":"var(--text-dim)" }}>{msg}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Branches list */}
+      {branchList && branchList.length > 0 && (
+        <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12, padding:14, marginBottom:14 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:"var(--accent)", marginBottom:8 }}>🏪 Branches ដែល backup/restore</div>
+          <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+            {branchList.filter(b=>b.active!==false).map(b => (
+              <span key={b.branch_id} style={{ fontSize:12, padding:"3px 10px", borderRadius:20,
+                background:"var(--bg-main)", border:"1px solid var(--border-col)", color:"var(--text-main)" }}>
+                🏪 {b.branch_name||b.branch_id}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Instructions */}
-      <div style={{ marginTop:20, padding:14, background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12, fontSize:12, color:"var(--text-dim)", lineHeight:1.8 }}>
+      <div style={{ padding:14, background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:12, fontSize:12, color:"var(--text-dim)", lineHeight:1.9 }}>
         <div style={{ fontWeight:700, color:"var(--accent)", marginBottom:6 }}>📖 ការណែនាំ</div>
-        <div>• Backup file ជា <b>.json</b> — អាច restore វិញបាន</div>
-        <div>• រួមបញ្ចូល: orders, ingredients, recipes, expenses, settings</div>
-        <div>• Password hash មិន download ទេ (security)</div>
+        <div>• Backup file ជា <b style={{color:"var(--text-main)"}}>.json</b> — រក្សាទុក​ក្នុង Drive/Disk</div>
+        <div>• Restore: ជ្រើស file .json → data overwrite ភ្លាម</div>
+        <div>• Password hash មិន backup ទេ (security)</div>
         <div>• ណែនាំ backup ចន្លោះ ១ ថ្ងៃ ម្តង</div>
       </div>
     </div>
