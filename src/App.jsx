@@ -3804,6 +3804,9 @@ const CAT_EMOJIS = ["💰","⚡","🏛️","🏠","🧴","📦","🚗","💊","�
 function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalAdmin, isBranchAdmin, branchId, branchList, currentUser }) {
   const MON_KH = ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
   const [selMonth,   setSelMonth]   = useState(() => new Date().toISOString().slice(0,7));
+  const [finPeriod,  setFinPeriod]  = useState("month"); // "day" | "month" | "year"
+  const [selDay,     setSelDay]     = useState(() => new Date().toISOString().slice(0,10));
+  const [selYear,    setSelYear]    = useState(() => new Date().getFullYear().toString());
   const [editMode,   setEditMode]   = useState(false);
   const [catMode,    setCatMode]    = useState(false);
   const [draft,      setDraft]      = useState({});
@@ -3839,6 +3842,11 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const [y, m] = selMonth.split("-");
   const monthLabel = MON_KH[parseInt(m)-1] + " " + y;
 
+  // Period-aware label
+  const periodLabel = finPeriod === "day" ? selDay
+    : finPeriod === "year" ? ("ឆ្នាំ " + selYear)
+    : monthLabel;
+
   // Resolve which orders to use for revenue
   // Branch admin: always own branch only
   const sourceOrders = (() => {
@@ -3856,7 +3864,12 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   })();
 
   const monthOrders = sourceOrders.filter(o => {
-    try { return new Date(o.order_id).toISOString().slice(0,7) === selMonth; } catch { return false; }
+    try {
+      const d = new Date(o.order_id).toISOString();
+      if (finPeriod === "day")   return d.slice(0,10) === selDay;
+      if (finPeriod === "year")  return d.slice(0,4)  === selYear;
+      return d.slice(0,7) === selMonth;
+    } catch { return false; }
   });
   const revenue = monthOrders.reduce((s,o) => s + o.total + o.tax, 0);
 
@@ -3871,7 +3884,11 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   // Filter transactions for current view (month + branch)
   const viewBranchId = (!isAdmin || selBranch === "current") ? branchId : (selBranch === "all" ? null : selBranch);
   const monthTxns = expTxns.filter(t => {
-    const inMonth = t.date && t.date.slice(0,7) === selMonth;
+    const inMonth = t.date && (
+      finPeriod === "day"  ? t.date.slice(0,10) === selDay :
+      finPeriod === "year" ? t.date.slice(0,4)  === selYear :
+      t.date.slice(0,7) === selMonth
+    );
     const inBranch = viewBranchId === null ? true : (t.branch_id === viewBranchId);
     return inMonth && inBranch;
   });
@@ -3913,9 +3930,15 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     notify("🗑️ លុបចំណាយ រួចហើយ!");
   };
 
-  // orderMonths uses sourceOrders so dropdown reflects selected branch
+  // orderMonths / orderDays / orderYears for dropdowns
   const orderMonths = [...new Set((sourceOrders||[]).map(o => {
     try { return new Date(o.order_id).toISOString().slice(0,7); } catch { return null; }
+  }).filter(Boolean))].sort().reverse();
+  const orderDays = [...new Set((sourceOrders||[]).map(o => {
+    try { return new Date(o.order_id).toISOString().slice(0,10); } catch { return null; }
+  }).filter(Boolean))].sort().reverse();
+  const orderYears = [...new Set((sourceOrders||[]).map(o => {
+    try { return new Date(o.order_id).toISOString().slice(0,4); } catch { return null; }
   }).filter(Boolean))].sort().reverse();
   if (!orderMonths.includes(selMonth)) orderMonths.unshift(selMonth);
 
@@ -4056,7 +4079,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     const barExpW = totalExp>0 ? Math.min(100,(totalExp/Math.max(revenue,totalExp))*100) : 0;
 
     const html = "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-      +"<title>"+shopName+" - ហិរញ្ញវត្ថុ "+monthLabel+"</title>"
+      +"<title>"+shopName+" - ហិរញ្ញវត្ថុ "+periodLabel+"</title>"
       +"<style>@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');"
       +"*{box-sizing:border-box;margin:0;padding:0}"
       +"body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px}"
@@ -4078,7 +4101,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
         +"<div style=\'display:flex;align-items:center;gap:12px\'>"
         +(logoUrl?"<img src='"+logoUrl+"' style='width:44px;height:44px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px' onerror='this.style.display=none'/>":"")+"<div class='logo'>"+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
         +"</div>"
-        +"<div class='meta'><b>"+monthLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
+        +"<div class='meta'><b>"+periodLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
       +"</div>"
       +"<h2>📊 សង្ខេបហិរញ្ញវត្ថុ</h2>"
       +"<div class='kpi-grid'>"
@@ -4106,7 +4129,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
          +"<table><thead><tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr></thead>"
          +"<tbody>"+histRows+"</tbody></table>"
         :"")
-      +"<div class='footer'>"+shopName+" POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+monthLabel+"</div>"
+      +"<div class='footer'>"+shopName+" POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+periodLabel+"</div>"
       +"<script>window.onload=function(){window.print();}</script></body></html>";
 
     const win = window.open("","_blank","width=1100,height=800");
@@ -4156,16 +4179,46 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
           </div>
         )}
 
-        {/* Row 2: Month selector + print */}
+        {/* Row 2: Period toggle + date selector + print */}
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:12, color:"#888", flexShrink:0 }}>📆 ខែ:</span>
-          <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
-            style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
-            {orderMonths.map(mo => {
-              const [oy,om] = mo.split("-");
-              return <option key={mo} value={mo}>{MON_KH[parseInt(om)-1]} {oy}</option>;
-            })}
-          </select>
+          {/* Period toggle: day / month / year */}
+          <div style={{ display:"flex", gap:3, background:"var(--bg-card)", borderRadius:10, padding:3 }}>
+            {[["day","📅 ថ្ងៃ"],["month","📆 ខែ"],["year","📊 ឆ្នាំ"]].map(([p, lb]) => (
+              <button key={p} onClick={() => { setFinPeriod(p); setEditMode(false); setCatMode(false); }}
+                style={{ padding:"5px 12px", borderRadius:8, border:"none", cursor:"pointer", fontFamily:"inherit",
+                  fontSize:12, fontWeight:700,
+                  background: finPeriod===p ? "linear-gradient(135deg,var(--accent-dk),var(--accent))" : "transparent",
+                  color: finPeriod===p ? "#fff" : "#666" }}>
+                {lb}
+              </button>
+            ))}
+          </div>
+          {/* Date selector based on period */}
+          {finPeriod === "day" && (
+            <select value={selDay} onChange={e => { setSelDay(e.target.value); setEditMode(false); setCatMode(false); }}
+              style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
+              {orderDays.length > 0
+                ? orderDays.map(d => <option key={d} value={d}>{d}</option>)
+                : <option value={selDay}>{selDay}</option>}
+            </select>
+          )}
+          {finPeriod === "month" && (
+            <select value={selMonth} onChange={e => { setSelMonth(e.target.value); setEditMode(false); setCatMode(false); }}
+              style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
+              {orderMonths.map(mo => {
+                const [oy,om] = mo.split("-");
+                return <option key={mo} value={mo}>{MON_KH[parseInt(om)-1]} {oy}</option>;
+              })}
+            </select>
+          )}
+          {finPeriod === "year" && (
+            <select value={selYear} onChange={e => { setSelYear(e.target.value); setEditMode(false); setCatMode(false); }}
+              style={{ ...inputSt, fontSize:13, padding:"6px 12px" }}>
+              {orderYears.length > 0
+                ? orderYears.map(yr => <option key={yr} value={yr}>ឆ្នាំ {yr}</option>)
+                : <option value={selYear}>ឆ្នាំ {selYear}</option>}
+            </select>
+          )}
           {/* Branch label badge */}
           {isAdmin && selBranch !== "current" && (
             <span style={{ fontSize:11, padding:"3px 10px", borderRadius:12, background:"#E8A84B22", color:"var(--accent)", fontWeight:700, border:"1px solid #E8A84B33" }}>
@@ -4250,11 +4303,11 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
           <div style={{ background:"var(--bg-card)", border:"1px solid var(--border-col)", borderRadius:14, padding:16, marginBottom:16 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
               <div>
-                <div style={{ fontWeight:700, fontSize:14 }}>💸 ចំណាយប្រចាំខែ</div>
+                <div style={{ fontWeight:700, fontSize:14 }}>{finPeriod==="day"?"💸 ចំណាយប្រចាំថ្ងៃ":finPeriod==="year"?"💸 ចំណាយប្រចាំឆ្នាំ":"💸 ចំណាយប្រចាំខែ"}</div>
                 <div style={{ fontSize:11, color:"#888", marginTop:2 }}>{monthTxns.length} រាយការណ៍ · សរុប {fmt(totalExp)}</div>
               </div>
               <button
-                onClick={() => setTxnModal({ data: { id:"txn_"+Date.now(), date:selMonth+"-"+new Date().toISOString().slice(8,10), cat_id: expCats[0]?.id||"other", desc:"", amount:"", branch_id:branchId, _isNew:true } })}
+                onClick={() => setTxnModal({ data: { id:"txn_"+Date.now(), date:finPeriod==="day"?selDay:selMonth+"-"+new Date().toISOString().slice(8,10), cat_id: expCats[0]?.id||"other", desc:"", amount:"", branch_id:branchId, _isNew:true } })}
                 style={{ ...btnGold, padding:"8px 16px", fontSize:12 }}>
                 ➕ បន្ថែមចំណាយ
               </button>
