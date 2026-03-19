@@ -689,24 +689,16 @@ async function handler(req, res) {
     const body  = await readBody(req);
 
     if (SHARED_TABLES.has(table)) {
-      // ── Special handling for users: hash any plain-text passwords ──
+      // ── Special: hash plain-text passwords when saving users ──────
       let saveBody = body;
       if (table === "users" && Array.isArray(body)) {
-        // Load current users to compare existing password hashes
         const shared = await loadShared();
         const existing = shared.users || [];
         saveBody = body.map(u => {
           const old = existing.find(e => e.user_id === u.user_id);
           const pw  = u.password;
-          if (!pw) {
-            // No password field — keep old hash
-            return { ...u, password: old?.password || "" };
-          }
-          if (pw.startsWith("pbkdf2:")) {
-            // Already hashed — keep as-is
-            return u;
-          }
-          // Plain text — hash it now
+          if (!pw)                      return { ...u, password: old?.password || "" };
+          if (pw.startsWith("pbkdf2:")) return u;
           console.log(`[Users] Hashing password for: ${u.username}`);
           return { ...u, password: hashPassword(pw) };
         });
@@ -760,6 +752,48 @@ async function handler(req, res) {
       };
     }
     send(res, 200, result);
+    return;
+  }
+
+  // ── MIGRATE RECIPES: fix broken recipe→ingredient mappings per branch ─
+  // POST /api/migrate-recipes  (admin only, safe to run multiple times)
+  if (req.method === "POST" && url === "/api/migrate-recipes") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin") {
+      send(res, 403, { error:"Admin only" }); return;
+    }
+    // Load shared recipes (may still have some)
+    const sharedData = await loadShared();
+    const sharedRecipes = Array.isArray(sharedData.recipes) ? sharedData.recipes : [];
+
+    const branches = (await loadBranches()).filter(b => b.active);
+    const results  = [];
+    for (const b of branches) {
+      // Load branch data to get ingredients + existing recipes
+      const bd = await loadBranch(b.branch_id);
+      const ingIds = new Set((bd.ingredients||[]).map(i => Number(i.ingredient_id)));
+      const existing = Array.isArray(bd.recipes) ? bd.recipes : [];
+
+      // Filter existing branch recipes — remove rows whose ingredient_id is NOT in this branch
+      const validExisting = existing.filter(r => ingIds.has(Number(r.ingredient_id)));
+
+      // Also pull from shared recipes and merge if ingredient exists in this branch
+      const existingProductIngPairs = new Set(
+        validExisting.map(r => `${r.product_id}_${r.ingredient_id}`)
+      );
+      const fromShared = sharedRecipes.filter(r =>
+        ingIds.has(Number(r.ingredient_id)) &&
+        !existingProductIngPairs.has(`${r.product_id}_${r.ingredient_id}`)
+      );
+
+      const merged = [...validExisting, ...fromShared];
+      await saveBranchKey(b.branch_id, "recipes", merged);
+      broadcastBranchUpdate(b.branch_id, "recipes", merged);
+      results.push({ branch_id: b.branch_id, before: existing.length, after: merged.length,
+                     removed: existing.length - validExisting.length });
+      console.log(`[Migrate] ${b.branch_id}: ${existing.length} → ${merged.length} recipes (removed ${existing.length - validExisting.length} broken)`);
+    }
+    send(res, 200, { ok:true, results });
     return;
   }
 
