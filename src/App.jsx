@@ -190,13 +190,13 @@ const nextId = a => Math.max(0, ...a.map(x => Object.values(x)[0])) + 1;
 
 const fmtN = n => Number(n).toFixed(1);
 
-// Convert Khmer digits ០១២៣៤៥៦៧៨៩ → 0123456789, then parseFloat
-// Supports: "១.៥" → 1.5, "12" → 12, "១២៣" → 123, mixed "1២" → 12
+// Convert Khmer/Arabic-Indic digits → Arabic, then parseFloat
+// Supports: "១" → 1, "១.៥" → 1.5, "1" → 1, mixed "1២" → 12
 const parseKhNum = (s) => {
   if (s === null || s === undefined || s === "") return NaN;
   const str = String(s)
     .replace(/[០-៩]/g, d => "០១២៣៤៥៦៧៨៩".indexOf(d))
-    .replace(/[٠-٩]/g, d => d.charCodeAt(0) - 0x0660); // Arabic-Indic digits too
+    .replace(/[٠-٩]/g, d => d.charCodeAt(0) - 0x0660);
   return parseFloat(str);
 };
 // Format number with thousands separator: 1716.0 → "1,716.0"  or  "1,716"
@@ -938,7 +938,7 @@ export default function CafeBloom() {
         {page === "pos"       && <POSPage       {...shared} />}
         {page === "tables"    && <TablesPage    {...shared} />}
         {page === "menu"      && <MenuPage      {...shared} />}
-        {page === "inventory" && <InventoryPage {...shared} />}
+        {page === "inventory" && <InventoryPage {...shared} serverUrl={CLOUD_URL} />}
         {page === "orders"    && <OrdersPage    {...shared} />}
         {page === "report"    && <ReportPage    {...shared} />}
         {page === "finance"   && <FinancePage   {...shared} />}
@@ -1794,7 +1794,7 @@ function ProdForm({ prod, cats, onSave }) {
         </button>
       )}
       <input className="inp" placeholder="ឈ្មោះ​ផលិតផល" value={v.product_name} onChange={e=>setV({...v,product_name:e.target.value})} />
-      <input className="inp" type="text" inputMode="decimal" placeholder="តំលៃ (ឧ. 3.50 ឬ ៣.៥០)" value={v.base_price} onChange={e=>setV({...v,base_price:parseKhNum(e.target.value)||0})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="តំលៃ (1.50 ឬ ១.៥០)" value={v.base_price} onChange={e=>setV({...v,base_price:parseKhNum(e.target.value)||0})} />
       <EmojiDropdown value={v.emoji||""} onChange={em => setV(prev => ({...prev, emoji:em}))} label="Emoji (backup ពេលគ្មានរូបភាព)" />
       <select className="inp" value={v.category_id} onChange={e=>setV({...v,category_id:parseKhNum(e.target.value)||0})}>
         {cats.map(c=><option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
@@ -1812,7 +1812,7 @@ function OptForm({ opt, prods, onSave }) {
       <select className="inp" value={v.option_group} onChange={e=>setV({...v,option_group:e.target.value})}>
         {["size","sugar","milk","ice","other"].map(g=><option key={g} value={g}>{g}</option>)}
       </select>
-      <input className="inp" type="text" inputMode="decimal" placeholder="បន្ថែមតំលៃ (ឧ. 0.50)" value={v.additional_price||0} onChange={e=>setV({...v,additional_price:parseKhNum(e.target.value)||0})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="បន្ថែម (0.50 ឬ ០.៥០)" value={v.additional_price||0} onChange={e=>setV({...v,additional_price:parseKhNum(e.target.value)||0})} />
       <select className="inp" value={v.product_id||""} onChange={e=>setV({...v,product_id:e.target.value?parseKhNum(e.target.value)||null:null})}>
         <option value="">ទាំងអស់​ (all products)</option>
         {prods.map(p=><option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
@@ -2024,7 +2024,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
 // ═══════════════════════════════════════════════════════════════════
 
 
-function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser }) {
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser, serverUrl }) {
   // Staff: read-only view — cannot add/edit/delete/restock
   const canEdit = isAdmin;
   const [subTab, setSubTab] = useState("stock");
@@ -2036,6 +2036,28 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
   const [recSort, setRecSort] = useState("product");
   const [expandAll, setExpandAll] = useState(true);
   const [collapsed, setCollapsed] = useState({});
+  const [migBusy,   setMigBusy]   = useState(false);
+  const [migResult, setMigResult] = useState(null);
+
+  const runMigration = async () => {
+    setMigBusy(true); setMigResult(null);
+    try {
+      const token = localStorage.getItem("pos_token");
+      const apiUrl = serverUrl || window.CAFE_SERVER || CLOUD_URL;
+      const r = await fetch(`${apiUrl}/api/migrate-recipes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          ...(token ? { Authorization: "Bearer " + token } : {}),
+        },
+      });
+      const data = await r.json();
+      if (data.ok) { setMigResult(data.results); notify("✅ Migrate recipes រួចរាល់!"); }
+      else { notify("❌ " + (data.error || "មានបញ្ហា")); setMigResult([{branch_id:"error",before:0,after:0,removed:0}]); }
+    } catch (e) { notify("❌ " + e.message); }
+    setMigBusy(false);
+  };
 
   const saveIng = (data) => {
     if (modal.mode === "add") setIngs(p => [...p, { ...data, ingredient_id: nextId(p) }]);
@@ -2274,7 +2296,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
           );
           const totalMappings = recipes.length;
           const totalProds = new Set(recipes.map(r => r.product_id)).size;
-          const missingIng = recipes.filter(r => !ings.find(i => i.ingredient_id === r.ingredient_id)).length;
+          const missingIng = recipes.filter(r => !ings.find(i => Number(i.ingredient_id) === Number(r.ingredient_id))).length;
           return (
             <>
               {/* Summary bar */}
@@ -2297,14 +2319,14 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 <div style={{ background:"#E74C3C11",border:"1px solid #E74C3C44",borderRadius:10,padding:"12px 16px",marginBottom:12,fontSize:12,color:"#E74C3C" }}>
                   <div style={{fontWeight:700,marginBottom:6}}>⚠️ មាន {missingIng} mapping ដែល ingredient ត្រូវបានលុប</div>
                   <div style={{fontSize:11,color:"#E74C3C88"}}>
-                    {recipes.filter(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id)).map(r=>{
+                    {recipes.filter(r=>!ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id))).map(r=>{
                       const prod = prods.find(p=>p.product_id===r.product_id);
                       return <span key={r.recipe_id} style={{background:"#E74C3C22",borderRadius:6,padding:"2px 8px",marginRight:6,marginBottom:4,display:"inline-block"}}>
                         {prod?.product_name||"?"} → ID:{r.ingredient_id}
                       </span>;
                     })}
                   </div>
-                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>i.ingredient_id===r.ingredient_id)))}
+                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id))))}
                     style={{...btnSmall,marginTop:8,fontSize:11,color:"#E74C3C",borderColor:"#E74C3C44"}}>
                     🗑 លុប mappings ខូច​ទាំងអស់
                   </button>
@@ -2314,11 +2336,11 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 const pr = recipes.filter(r => r.product_id === prod.product_id);
                 const isCollapsed = collapsed[prod.product_id] !== undefined ? collapsed[prod.product_id] : !expandAll;
                 const totalCost = pr.reduce((sum,r) => {
-                  const ing = ings.find(i=>i.ingredient_id===r.ingredient_id);
+                  const ing = ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id));
                   return sum + (Number(r.quantity_required)*(ing?.cost_per_unit||0));
                 },0);
-                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>i.ingredient_id===r.ingredient_id); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
-                const hasMissing = pr.some(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id));
+                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id)); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
+                const hasMissing = pr.some(r=>!ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id)));
                 return (
                   <div key={prod.product_id} style={{ background:"var(--bg-card)",border:`1px solid ${hasMissing?"#E74C3C33":canMake?"#27AE6033":"#F39C1233"}`,borderRadius:12,marginBottom:10,overflow:"hidden" }}>
                     <div style={{ background:"var(--bg-header)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}
@@ -2337,7 +2359,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                     {!isCollapsed && (
                       <TableWrap headers={["#","ingredient + ប្រើ/serve","ស្តុក​នៅ","status / ចំនួន",""]}>
                         {pr.map((r,idx)=>{
-                          const ing=ings.find(i=>i.ingredient_id===r.ingredient_id);
+                          const ing=ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id));
                           const enough=ing&&Number(ing?.current_stock)>=Number(r.quantity_required);
                           const servings=ing?Math.floor(Number(ing?.current_stock)/Number(r.quantity_required)):0;
                           return (
@@ -2406,7 +2428,36 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         })()}
 
         {subTab === "sql" && (
-          <div style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
+          <div style={{ background: "var(--bg-main)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 20 }}>
+            {isAdmin && (
+              <div style={{ marginBottom:20, padding:"16px", background:"#120A00", border:"1px solid #E8A84B44", borderRadius:12 }}>
+                <div style={{ fontWeight:700, fontSize:13, color:"var(--accent)", marginBottom:6 }}>🔧 Migrate Recipes → Branch Data</div>
+                <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:12 }}>
+                  Fix recipe mappings ខ្វះ ingredient — remove broken rows, sync ទៅ branches ទាំងអស់
+                </div>
+                <button onClick={runMigration} disabled={migBusy}
+                  style={{ padding:"9px 20px", borderRadius:9, border:"none", cursor:migBusy?"not-allowed":"pointer",
+                    fontFamily:"inherit", fontSize:13, fontWeight:700,
+                    background: migBusy?"var(--bg-card)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",
+                    color: migBusy?"var(--text-dim)":"#fff", opacity:migBusy?0.7:1 }}>
+                  {migBusy ? "⏳ កំពុង migrate..." : "▶ Run Migration"}
+                </button>
+                {migResult && (
+                  <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:5 }}>
+                    {migResult.map(r => (
+                      <div key={r.branch_id} style={{ fontSize:12, display:"flex", gap:8, alignItems:"center" }}>
+                        <span style={{ color:"#27AE60", fontWeight:700, minWidth:80 }}>{r.branch_id}</span>
+                        <span style={{ color:"var(--text-dim)" }}>{r.before} →</span>
+                        <span style={{ color:"var(--accent)", fontWeight:700 }}>{r.after} recipes</span>
+                        {r.removed>0 && <span style={{ color:"#E74C3C", fontSize:11 }}>(-{r.removed} broken)</span>}
+                        <span style={{ color:"#27AE60" }}>✅</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:8 }}>📋 Reference SQL</div>
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
@@ -2461,9 +2512,9 @@ function IngForm({ ing, data, onSave, onCancel }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ឈ្មោះ​គ្រឿង" value={v.ingredient_name} onChange={e=>setV({...v,ingredient_name:e.target.value})} />
-      <input className="inp" type="text" inputMode="decimal" placeholder="ស្តុក (ឧ. 500 ឬ ៥០០)" value={v.current_stock} onChange={e=>setV({...v,current_stock:parseKhNum(e.target.value)||0})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="ស្តុក (500 ឬ ៥០០)" value={v.current_stock} onChange={e=>setV({...v,current_stock:parseKhNum(e.target.value)||0})} />
       <input className="inp" placeholder="ឯកតា (g/ml/pcs)" value={v.unit} onChange={e=>setV({...v,unit:e.target.value})} />
-      <input className="inp" type="text" inputMode="decimal" placeholder="ដែនកំណត់ (ឧ. 100 ឬ ១០០)" value={v.threshold} onChange={e=>setV({...v,threshold:parseKhNum(e.target.value)||0})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="ដែនកំណត់ (100 ឬ ១០០)" value={v.threshold} onChange={e=>setV({...v,threshold:parseKhNum(e.target.value)||0})} />
       <button className="btn-primary" onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
     </div>
   );
@@ -2481,7 +2532,7 @@ function RecipeForm({ rec, prods, ings, onSave }) {
         <option value="">ជ្រើស​គ្រឿង</option>
         {ings.map(i=><option key={i.ingredient_id} value={i.ingredient_id}>{i.ingredient_name}</option>)}
       </select>
-      <input className="inp" type="text" inputMode="decimal" placeholder="បរិមាណ (ឧ. 1 ឬ ១)" value={v.quantity} onChange={e=>setV({...v,quantity:parseKhNum(e.target.value)||0})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="បរិមាណ (1 ឬ ១)" value={v.quantity} onChange={e=>setV({...v,quantity:parseKhNum(e.target.value)||0})} />
       <input className="inp" placeholder="ឯកតា" value={v.unit||""} onChange={e=>setV({...v,unit:e.target.value})} />
       <div style={{ display:"flex", gap:8, marginTop:4 }}>
         {onCancel && <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>}
@@ -4794,7 +4845,7 @@ function ExpenseForm({ exp, onSave }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ប្រភេទ​ចំណាយ" value={v.category} onChange={e=>setV({...v,category:e.target.value})} />
-      <input className="inp" type="text" inputMode="decimal" placeholder="ចំនួន (USD) ឧ. 10 ឬ ១០" value={v.amount} onChange={e=>setV({...v,amount:parseKhNum(e.target.value)||0})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="ចំនួន USD (10 ឬ ១០)" value={v.amount} onChange={e=>setV({...v,amount:parseKhNum(e.target.value)||0})} />
       <input className="inp" placeholder="កំណត់​ចំណាំ" value={v.note||""} onChange={e=>setV({...v,note:e.target.value})} />
       <button className="btn-primary" onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
     </div>
@@ -6238,7 +6289,7 @@ function RecForm({ data, prods, ings, onSave, onCancel }) {
         </select>
       </F>
       <F label={`quantity_required${selIng ? ` (${selIng.unit})` : ""} *`}>
-        <input type="text" inputMode="decimal" value={f.quantity_required} onChange={e => s("quantity_required", e.target.value)} style={{ ...inputSt, width: "100%" }} />
+        <input type="text" inputMode="decimal" value={f.quantity_required} onChange={e => s("quantity_required", parseKhNum(e.target.value)||e.target.value)} style={{ ...inputSt, width: "100%" }} />
       </F>
       <BtnRow onSave={() => f.quantity_required && onSave(f)} onCancel={onCancel} />
     </div>
