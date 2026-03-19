@@ -11,7 +11,7 @@ const CLOUD_URL        = window.CAFE_SERVER      || "https://cafe-bloom-backend.
 const DEFAULT_BRANCH   = window.CAFE_BRANCH      || "branch_1";
 const BRANCH_NAME      = window.CAFE_BRANCH_NAME || "Cafe Bloom";
 
-// Async: fetch branch display name from API if branchList prop is empty
+// Async: fetch branch display name — never falls back to config.js
 async function resolveBranchName(branchId, branchList) {
   if (!branchId) return "";
   const fromProp = (branchList||[]).find(b => b.branch_id === branchId)?.branch_name;
@@ -20,7 +20,7 @@ async function resolveBranchName(branchId, branchList) {
     const token = localStorage.getItem("pos_token");
     const r = await fetch(`${CLOUD_URL}/api/branches`, {
       headers: {"Content-Type":"application/json","ngrok-skip-browser-warning":"true",
-        ...(token?{Authorization:"Bearer "+token}:{})}
+        ...(token ? {Authorization:"Bearer "+token} : {})}
     });
     const data = await r.json();
     if (Array.isArray(data)) {
@@ -28,11 +28,11 @@ async function resolveBranchName(branchId, branchList) {
       if (found) return found.branch_name;
     }
   } catch(e) {}
-  return branchId;
+  return branchId; // last resort: raw id
 }
 
-// Convert Khmer/Arabic-Indic digits → Arabic then parseFloat
-// "១" → 1, "1.5" → 1.5, "១.៥" → 1.5
+// Convert Khmer/Arabic-Indic digits → Arabic, then parseFloat
+// "១" → 1  |  "1.5" → 1.5  |  "១.៥" → 1.5
 const parseKhNum = (s) => {
   if (s === null || s === undefined || s === "") return NaN;
   const str = String(s)
@@ -272,9 +272,9 @@ const exportCSV = (rows, filename) => {
 
 // Print as PDF using browser print dialog (styled)
 const exportPDF = (title, dateLabel, tableHTML, shopName, branchName, userName) => {
-  const _shop = shopName || localStorage.getItem("cb_shop_name") || "Café Boom";
-  const _branch = branchName || "";
-  const _user = userName || "";
+  const _shop=shopName||localStorage.getItem("cb_shop_name")||"Café Bloom";
+  const _branch=branchName||"";
+  const _user=userName||"";
   const win = window.open("", "_blank", "width=900,height=700");
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
   <title>${_shop} — ${title}</title>
@@ -292,10 +292,7 @@ const exportPDF = (title, dateLabel, tableHTML, shopName, branchName, userName) 
     .footer{margin-top:24px;font-size:11px;color:#aaa;text-align:center}
     @media print{body{padding:12px}}
   </style></head><body>
-  <div style="display:flex;justify-content:space-between;border-bottom:3px solid #B8732A;margin-bottom:16px;padding-bottom:12px">
-    <div><div style="font-size:20px;font-weight:700;color:#B8732A">☕ ${_shop}</div><div style="font-size:11px;color:#888">${_branch}</div></div>
-    <div style="text-align:right;font-size:12px;color:#888"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_user?`<span style="color:#B8732A">👤 ${_user}</span>`:""}</div>
-  </div>
+  <div style="display:flex;justify-content:space-between;border-bottom:3px solid #B8732A;margin-bottom:16px;padding-bottom:12px"><div><div style="font-size:20px;font-weight:700;color:#B8732A">☕ ${_shop}</div><div style="font-size:11px;color:#888">${_branch}</div></div><div style="text-align:right;font-size:12px;color:#888"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_user?`<span style="color:#B8732A">👤 ${_user}</span>`:""}</div></div>
   <h2 style="font-size:15px;font-weight:700;color:#B8732A;margin:0 0 10px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A">${title}</h2>
   ${tableHTML}
   <div class="footer">${_shop} POS © ${new Date().getFullYear()}${_user?" · 👤 "+_user:""}</div>
@@ -1271,8 +1268,10 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 
     // 📲 Send Telegram notification (await + log result)
     // Use branch_id from currentUser for correct branch name in notification
-    const branchDisplayName = getBranchDisplayName(branchId, branchList) || branchId;
-    sendTelegramWithBranch(rec, branchDisplayName).then(() => {
+    // Resolve branch name async (fetch from API if branchList empty)
+    resolveBranchName(branchId, branchList).then(branchDisplayName => {
+      return sendTelegramWithBranch(rec, branchDisplayName);
+    }).then(() => {
       console.log('[Telegram] Notification sent for order:', rec.order_id);
     }).catch(e => {
       console.error('[Telegram] Failed to send:', e.message);
@@ -1575,8 +1574,8 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 //  TABLES PAGE
 // ═══════════════════════════════════════════════════════════════════
 function TablesPage({ tables, setTables, orders, isAdmin, isGlobalAdmin }) {
-  const busy = tables.filter(t => t.status==="busy").length;
-  const canManage = isAdmin||isGlobalAdmin;
+  const busy=tables.filter(t=>t.status==="busy").length;
+  const canManage=isAdmin||isGlobalAdmin;
   const [showAdd,setShowAdd]=useState(false);
   const [addLabel,setAddLabel]=useState("");
   const [addEmoji,setAddEmoji]=useState("🪑");
@@ -1588,7 +1587,7 @@ function TablesPage({ tables, setTables, orders, isAdmin, isGlobalAdmin }) {
   function addTable(){const label=addLabel.trim();if(!label)return;const nids=tables.map(t=>isNaN(t.table_id)?0:Number(t.table_id));const nid=isNaN(label)?label:Math.max(0,...nids)+1;setTables(prev=>[...prev,{table_id:nid,label:addEmoji+" "+label,status:"free"}]);setAddLabel("");setAddEmoji("🪑");setShowAdd(false);}
   function saveRename(tid){const label=editLabel.trim();if(!label){setEditTid(null);return;}setTables(prev=>prev.map(t=>t.table_id===tid?{...t,label}:t));setEditTid(null);}
   function deleteTable(tid){setTables(prev=>prev.filter(t=>t.table_id!==tid));setDelConfTid(null);}
-  const btnSm={background:"transparent",border:"1px solid #333",borderRadius:6,color:"#888",cursor:"pointer",fontFamily:"inherit",fontSize:11,padding:"3px 8px"};
+  const bSm={background:"transparent",border:"1px solid #333",borderRadius:6,color:"#888",cursor:"pointer",fontFamily:"inherit",fontSize:11,padding:"3px 8px"};
   return(
     <div style={{padding:"16px 14px 32px"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20,flexWrap:"wrap"}}>
@@ -1634,7 +1633,7 @@ function TablesPage({ tables, setTables, orders, isAdmin, isGlobalAdmin }) {
             <div style={{fontSize:32}}>{t.label?.match(/^\S+/)?.[0]||"🪑"}</div>
             {isEd?(<div style={{marginTop:6,marginBottom:6}}>
               <input className="inp" value={editLabel} onChange={e=>setEditLabel(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveRename(t.table_id);if(e.key==="Escape")setEditTid(null);}} autoFocus style={{width:"100%",fontSize:13,padding:"4px 8px",textAlign:"center",boxSizing:"border-box"}}/>
-              <div style={{display:"flex",gap:4,marginTop:4}}><button onClick={()=>saveRename(t.table_id)} style={{...btnSm,flex:1,color:"#27AE60",borderColor:"#27AE6044"}}>✓</button><button onClick={()=>setEditTid(null)} style={{...btnSm,flex:1}}>✕</button></div>
+              <div style={{display:"flex",gap:4,marginTop:4}}><button onClick={()=>saveRename(t.table_id)} style={{...bSm,flex:1,color:"#27AE60",borderColor:"#27AE6044"}}>✓</button><button onClick={()=>setEditTid(null)} style={{...bSm,flex:1}}>✕</button></div>
             </div>):(<div style={{fontWeight:700,fontSize:16,marginTop:6,marginBottom:4,display:"flex",alignItems:"center",justifyContent:"center",gap:4}}>{dn}{canManage&&<button onClick={()=>{setEditTid(t.table_id);setEditLabel(dn);}} style={{background:"transparent",border:"none",color:"#555",cursor:"pointer",fontSize:11}}>✏️</button>}</div>)}
             <div style={{fontSize:12,padding:"4px 14px",borderRadius:20,display:"inline-block",fontWeight:600,background:isBusy?"#8B1A1A22":"#1A4A1A22",color:isBusy?"#E74C3C":"#27AE60"}}>{isBusy?"🔴 មានអតិថិជន":"🟢 ទំនេរ"}</div>
             {isBusy&&tot>0&&<div style={{fontSize:13,color:"var(--accent)",fontWeight:700,marginTop:6}}>${tot.toFixed(2)}</div>}
@@ -1649,6 +1648,7 @@ function TablesPage({ tables, setTables, orders, isAdmin, isGlobalAdmin }) {
     </div>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  MENU PAGE
@@ -1824,7 +1824,7 @@ function OptForm({ opt, prods, onSave }) {
       <select className="inp" value={v.option_group} onChange={e=>setV({...v,option_group:e.target.value})}>
         {["size","sugar","milk","ice","other"].map(g=><option key={g} value={g}>{g}</option>)}
       </select>
-      <input className="inp" type="text" inputMode="decimal" placeholder="បន្ថែម (0.50)" value={v.additional_price||0} onChange={e=>setV({...v,additional_price:parseKhNum(e.target.value)||0})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="បន្ថែម" value={v.additional_price||0} onChange={e=>setV({...v,additional_price:parseKhNum(e.target.value)||0})} />
       <select className="inp" value={v.product_id||""} onChange={e=>setV({...v,product_id:e.target.value?parseKhNum(e.target.value)||null:null})}>
         <option value="">ទាំងអស់​ (all products)</option>
         {prods.map(p=><option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
@@ -2037,6 +2037,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
 
 
 function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser, serverUrl, branchId, branchList }) {
+  // Staff: read-only view — cannot add/edit/delete/restock
   const canEdit = isAdmin;
   const [subTab, setSubTab] = useState("stock");
   const [modal, setModal] = useState(null);
@@ -2056,7 +2057,8 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
       const token = localStorage.getItem("pos_token");
       const r = await fetch(`${serverUrl||CLOUD_URL}/api/migrate-recipes`, {
         method:"POST",
-        headers:{"Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{})},
+        headers:{"Content-Type":"application/json","ngrok-skip-browser-warning":"true",
+          ...(token?{Authorization:"Bearer "+token}:{})},
       });
       const data = await r.json();
       if (data.ok) { setMigResult(data.results); notify("✅ Migrate recipes រួចរាល់!"); }
@@ -2181,10 +2183,10 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                   </tr></thead>
                   <tbody>${rows}</tbody>
                 </table>`;
-                const _shop = localStorage.getItem("cb_shop_name") || "Café Boom";
-                const _branch = await resolveBranchName(branchId, branchList);
-                const _user = currentUser?.name || currentUser?.username || "";
-                exportPDF("📦 របាយការណ៍ស្តុក", date, tableHTML, _shop, _branch, _user);
+                const _s=localStorage.getItem("cb_shop_name")||"Café Boom";
+                const _b=await resolveBranchName(branchId,branchList);
+                const _u=currentUser?.name||currentUser?.username||"";
+                exportPDF("📦 របាយការណ៍ស្តុក",date,tableHTML,_s,_b,_u);
                 notify("✅ Print PDF រួចហើយ!");
               }}>
               🖨️ Print PDF
@@ -2621,9 +2623,9 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
   };
 
   const doExportPDF = async () => {
-    const _shop   = localStorage.getItem("cb_shop_name") || "Café Boom";
-    const _branch = await resolveBranchName(branchId, branchList);
-    const _user   = currentUser?.name || currentUser?.username || "";
+    const _s=localStorage.getItem("cb_shop_name")||"Café Boom";
+    const _b=await resolveBranchName(branchId,branchList);
+    const _u=currentUser?.name||currentUser?.username||"";
     const orderRows = filtered.map(o => `<tr>
       <td style="white-space:nowrap;font-size:11px">${o.ts}</td>
       <td>${o.table || "—"}</td>
@@ -2669,10 +2671,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
       .kpi .lbl{font-size:11px;color:#888}
       .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
     </style></head><body>
-    <div class="header">
-      <div><div class="logo">☕ ${_shop}<span>${_branch}</span></div></div>
-      <div class="meta"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_user?`<span style="color:#B8732A">👤 ${_user}</span>`:""}</div>
-    </div>
+    <div class="header"><div><div class="logo">☕ ${_s}<span>${_b}</span></div></div><div class="meta"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_u?`<span style="color:#B8732A">👤 ${_u}</span>`:""}</div></div>
 
     <h2>📊 សង្ខេប</h2>
     <div class="kpi-grid">
@@ -2692,7 +2691,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Progress</th><th>ស្ថានភាព</th></tr></thead>
     <tbody>${stockRows}</tbody></table>
 
-    <div class="footer">${_shop} POS © ${new Date().getFullYear()}${_user?" · 👤 "+_user:""}</div>
+    <div class="footer">${_s} POS © ${new Date().getFullYear()}${_u?" · 👤 "+_u:""}</div>
     \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
     </body></html>`);
     win.document.close();
@@ -2991,9 +2990,9 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
   };
 
   const doExportPDF = async () => {
-    const _shop   = localStorage.getItem("cb_shop_name") || "Café Boom";
-    const _branch = await resolveBranchName(branchId, branchList);
-    const _user   = currentUser?.name || currentUser?.username || "";
+    const _s=localStorage.getItem("cb_shop_name")||"Café Boom";
+    const _b=await resolveBranchName(branchId,branchList);
+    const _u=currentUser?.name||currentUser?.username||"";
     const prodCount = {};
     filtered.forEach(o => o.items.forEach(i => { prodCount[i.product_name] = (prodCount[i.product_name] || 0) + i.qty; }));
     const top = Object.entries(prodCount).sort((a, b) => b[1] - a[1]);
@@ -3078,10 +3077,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       .footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
       @media print{body{padding:16px 20px} .no-print{display:none}}
     </style></head><body>
-    <div class="header">
-      <div><div class="logo">☕ ${_shop}<span>${_branch}</span></div></div>
-      <div class="meta"><b>របាយការណ៍${period==="day"?"ប្រចាំថ្ងៃ":period==="month"?"ប្រចាំខែ":"ប្រចាំឆ្នាំ"}</b><br/>${periodLabel}<br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_user?`<span style="color:#B8732A">👤 ${_user}</span>`:""}</div>
-    </div>
+    <div class="header"><div><div class="logo">☕ ${_s}<span>${_b}</span></div></div><div class="meta"><b>របាយការណ៍${period==="day"?"ប្រចាំថ្ងៃ":period==="month"?"ប្រចាំខែ":"ប្រចាំឆ្នាំ"}</b><br/>${periodLabel}<br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_u?`<span style="color:#B8732A">👤 ${_u}</span>`:""}</div></div>
 
     <h2>📊 សង្ខេបទូទៅ</h2>
     <div class="kpi-grid">
@@ -4002,12 +3998,12 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
 
   // ── Print PDF ──────────────────────────────────────────────────────
   const doPrint = async () => {
-    const shopName = localStorage.getItem("cb_shop_name") || "Café Boom";
-    const userName = currentUser?.name || currentUser?.username || "";
-    const _all = (branches.length>0?branches:branchList)||[];
-    const branchLabel = selBranch==="all" ? "ទាំងអស់ (All branches)"
-      : (_all.find(b=>b.branch_id===(viewBranchId||branchId))?.branch_name
-         || await resolveBranchName(viewBranchId||branchId, branchList));
+    const shopName=localStorage.getItem("cb_shop_name")||"Café Boom";
+    const userName=currentUser?.name||currentUser?.username||"";
+    const _all=(branches.length>0?branches:branchList)||[];
+    const branchLabel=selBranch==="all"?"ទាំងអស់ (All branches)"
+      :(_all.find(b=>b.branch_id===(viewBranchId||branchId))?.branch_name
+        ||await resolveBranchName(viewBranchId||branchId,branchList));
 
     // Transaction detail rows (new system)
     const sortedTxns = [...monthTxns].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
