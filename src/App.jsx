@@ -677,17 +677,11 @@ export default function CafeBloom() {
   ];
 
   const NAV = ALL_NAV.filter(n => {
-    if (n.globalOnly)   return _isGA;              // theme/branches/backup: global admin only
-    if (n.requireAdmin) return _isGA || _isBA;     // users: any admin
-    if (n.alwaysShow)   return true;               // inventory: always visible
-    if (_isGA)          return true;               // super admin sees everything
-    if (_isBA) {
-      // Branch admin: check explicit permissions if set, else show all non-global
-      const perms = currentUser?.permissions;
-      if (perms && Object.keys(perms).length > 0) return !!perms[n.id];
-      return true; // no perms set → show all
-    }
-    return canAccess(n.id);                        // staff: check permissions
+    if (n.globalOnly)   return _isGA;        // theme: global admin only
+    if (n.requireAdmin) return _isGA || _isBA; // users: any admin
+    if (n.alwaysShow)   return true;           // inventory: always (read-only for staff)
+    if (_isGA || _isBA) return true;           // admin sees everything else
+    return canAccess(n.id);                    // staff: check permissions
   });
 
   const goPage = (id) => { setPage(id); setMenuOpen(false); };
@@ -4075,7 +4069,9 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       +".footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}"
       +"@media print{body{padding:14px}}</style></head><body>"
       +"<div class='header'>"
+        +"<div style=\'display:flex;align-items:center;gap:12px\'>"
         +(logoUrl?"<img src='"+logoUrl+"' style='width:44px;height:44px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px' onerror='this.style.display=none'/>":"")+"<div class='logo'>"+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
+        +"</div>"
         +"<div class='meta'><b>"+monthLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
       +"</div>"
       +"<h2>📊 សង្ខេបហិរញ្ញវត្ថុ</h2>"
