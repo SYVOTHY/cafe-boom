@@ -2927,6 +2927,99 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
   if (!allYears.includes(selYear)) allYears.unshift(selYear);
 
   // ── Export helpers ───────────────────────────────────────────────
+  // ── Print all-branches stock + ingredient usage today ───────────
+  const doPrintAllStock = async () => {
+    const _S = localStorage.getItem("cb_shop_name") || "Café Boom";
+    const _U = currentUser?.name || currentUser?.username || "";
+    const _L = localStorage.getItem("cb_shop_logo") || "";
+    const today = new Date().toISOString().slice(0,10);
+    const todayLabel = new Date().toLocaleDateString("km-KH", { weekday:"long", year:"numeric", month:"long", day:"numeric" });
+
+    // Ingredient usage today per branch (from today's orders)
+    const usageByBranch = {};
+    if (allOrders && allOrders.length > 0) {
+      const todayOrders = allOrders.filter(o => {
+        try { return new Date(o.order_id).toISOString().slice(0,10) === today; } catch { return false; }
+      });
+      todayOrders.forEach(o => {
+        const bid = o.branch_id || branchId;
+        if (!usageByBranch[bid]) usageByBranch[bid] = {};
+        (o.items||[]).forEach(item => {
+          const name = item.product_name;
+          usageByBranch[bid][name] = (usageByBranch[bid][name] || 0) + (item.qty || 1);
+        });
+      });
+    }
+
+    const fmt2 = (n) => Number(n||0) % 1 === 0 ? Number(n||0).toString() : Number(n||0).toFixed(1);
+
+    // Build stock rows per branch
+    const branchRows = Object.entries(allStock || {}).map(([bid, bd]) => {
+      const bName = bd.branch_name || bid;
+      const bIngs = bd.ingredients || [];
+      const bUsage = usageByBranch[bid] || {};
+      const ingRows = bIngs.map(i => {
+        const s = Number(i.current_stock||0);
+        const t = Number(i.threshold||0);
+        const pct = t > 0 ? Math.min(100, Math.round((s/t)*100)) : 100;
+        const status = s <= t ? "⚠️ ជិតអស់" : s <= t*1.5 ? "🔶 ប្រុង" : "✅ ល្អ";
+        const statusColor = s <= t ? "#E74C3C" : s <= t*1.5 ? "#F39C12" : "#27AE60";
+        const barColor = s <= t ? "#E74C3C" : s <= t*1.5 ? "#F39C12" : "#27AE60";
+        return `<tr>
+          <td>${i.ingredient_name}</td>
+          <td style="font-weight:700;color:${s<=t?"#E74C3C":"#27AE60"}">${fmt2(s)} ${i.unit||""}</td>
+          <td style="color:#888">${fmt2(t)} ${i.unit||""}</td>
+          <td><div style="background:#eee;border-radius:4px;height:8px;width:80px;overflow:hidden"><div style="width:${Math.min(100,pct)}%;height:100%;background:${barColor}"></div></div></td>
+          <td style="color:${statusColor};font-weight:600">${status}</td>
+        </tr>`;
+      }).join("");
+      const lowCount = bIngs.filter(i => Number(i.current_stock||0) <= Number(i.threshold||0)).length;
+      return `
+        <h3 style="font-size:14px;font-weight:700;color:#B8732A;margin:20px 0 8px;padding:6px 12px;background:#fff7f0;border-left:4px solid #B8732A;border-radius:0 6px 6px 0">
+          🏪 ${bName} ${lowCount > 0 ? `<span style="color:#E74C3C;font-size:12px">(⚠️ ${lowCount} ជិតអស់)</span>` : '<span style="color:#27AE60;font-size:12px">✅ ល្អ</span>'}
+        </h3>
+        <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Progress</th><th>ស្ថានភាព</th></tr></thead>
+        <tbody>${ingRows || "<tr><td colspan=5 style='color:#888;text-align:center'>គ្មានទិន្នន័យ</td></tr>"}</tbody></table>`;
+    }).join("");
+
+    const logoHtml = _L ? `<img src="${_L}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>` : "";
+    const win = window.open("","_blank","width=900,height=700");
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+    <title>${_S} — ស្ថានភាពស្តុក ${today}</title>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:24px 32px;font-size:13px}
+      .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #B8732A;margin-bottom:20px;padding-bottom:14px}
+      .logo-area{display:flex;align-items:center;gap:12px}
+      .shop-name{font-size:20px;font-weight:700;color:#B8732A}
+      .shop-sub{font-size:11px;color:#888}
+      .meta{text-align:right;font-size:12px;color:#888}
+      table{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:12px}
+      th{background:#B8732A;color:#fff;padding:7px 10px;text-align:left;font-size:11px}
+      td{padding:6px 10px;border-bottom:1px solid #f0ece8}
+      tr:nth-child(even) td{background:#fdf9f6}
+      .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
+      @media print{body{padding:14px}}
+    </style></head><body>
+    <div class="header">
+      <div class="logo-area">
+        ${logoHtml}
+        <div><div class="shop-name">☕ ${_S}</div><div class="shop-sub">🧂 ស្ថានភាពស្តុក + ការប្រើប្រាស់</div></div>
+      </div>
+      <div class="meta">
+        <b>${todayLabel}</b><br/>
+        🌐 ទាំងអស់ — ${Object.keys(allStock||{}).length} សាខា<br/>
+        ${_U ? `<span style="color:#B8732A">👤 ${_U}</span>` : ""}
+      </div>
+    </div>
+    ${branchRows || "<p style='color:#888'>គ្មានទិន្នន័យស្តុក</p>"}
+    <div class="footer">${_S} POS © ${new Date().getFullYear()} · ស្ថានភាពស្តុក ${today}${_U?" · 👤 "+_U:""}</div>
+    <script>window.onload=function(){window.print();}</script>
+    </body></html>`);
+    win.document.close();
+  };
+
   const doExportCSV = () => {
     // Sheet 1: Summary KPI
     const prodCount = {};
@@ -3631,10 +3724,18 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
                   </span>
                 )}
               </div>
-              {reportMode === "all"
-                ? <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🌐 ទាំងអស់</span>
-                : <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🏪 {branchId}</span>
-              }
+              <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                {reportMode === "all"
+                  ? <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🌐 ទាំងអស់</span>
+                  : <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🏪 {branchId}</span>
+                }
+                {reportMode === "all" && allStock && (
+                  <button onClick={doPrintAllStock}
+                    style={{ ...btnSmall, fontSize:11, color:"#E8A84B", borderColor:"#E8A84B44", padding:"5px 12px" }}>
+                    🖨️ Print ស្តុក + គ្រឿងផ្សំ
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* ── Mode: branch (own branch only) ── */}
@@ -4099,7 +4200,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       +"@media print{body{padding:14px}}</style></head><body>"
       +"<div class='header'>"
         +"<div style=\'display:flex;align-items:center;gap:12px\'>"
-        +(logoUrl?"<img src='"+logoUrl+"' style='width:44px;height:44px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px' onerror='this.style.display=none'/>":"")+"<div class='logo'>"+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
+        +(logoUrl?"<img src='"+logoUrl+"' style='width:44px;height:44px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px' onerror='this.style.display=none'/>":"")+"<div class='logo'>"+shopName+" <span>💼 ហិរញ្ញវត្ថុ · "+periodLabel+" · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
         +"</div>"
         +"<div class='meta'><b>"+periodLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
       +"</div>"
