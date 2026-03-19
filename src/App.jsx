@@ -233,16 +233,19 @@ const PERM_LABELS = {
   orders:    { icon: "📋", label: "ប្រវត្តិ" },
   report:    { icon: "📊", label: "របាយការណ៍" },
   finance:   { icon: "💼", label: "ហិរញ្ញវត្ថុ" },
-  // inventory, users, theme are admin-only — staff gets read-only view of inventory
+  inventory: { icon: "📦", label: "ស្តុក" },
+  users:     { icon: "👥", label: "អ្នកប្រើ" },
+  branches:  { icon: "🏪", label: "សាខា" },
+  theme:     { icon: "🎨", label: "រចនាប័ទ្ម" },
+  backup:    { icon: "💾", label: "Backup" },
 };
 
 // Permissions that only admin can have (never grant to staff)
 const ADMIN_ONLY_PERMS = new Set([]); // Super admin controls all
 
 const DEFAULT_PERMS_TPL = {
-  pos: false, tables: false, menu: false,
-  orders: false, report: false, finance: false,
-  // inventory, users, theme — admin-only (staff gets read-only inventory view)
+  pos: true, tables: true, menu: true, orders: true, report: true, finance: true,
+  inventory: false, users: false, branches: false, theme: false, backup: false,
 };
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
@@ -283,8 +286,18 @@ const exportPDF = (title, dateLabel, tableHTML, shopName, branchName, userName) 
     .footer{margin-top:24px;font-size:11px;color:#aaa;text-align:center}
     @media print{body{padding:12px}}
   </style></head><body>
-  <h1>☕ Café Bloom — ${title}</h1>
-  <div class="sub">${dateLabel} · បោះពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
+  <div style="display:flex;justify-content:space-between;border-bottom:3px solid #B8732A;margin-bottom:16px;padding-bottom:12px">
+    <div>
+      <div style="font-size:20px;font-weight:700;color:#B8732A">☕ ${_S}</div>
+      <div style="font-size:11px;color:#888">${_B}</div>
+    </div>
+    <div style="text-align:right;font-size:12px;color:#888">
+      <b>${dateLabel}</b><br/>
+      បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
+      ${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}
+    </div>
+  </div>
+  <h2 style="font-size:15px;font-weight:700;color:#B8732A;margin:0 0 10px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A">${title}</h2>
   ${tableHTML}
   <div class="footer">${_S} POS © ${new Date().getFullYear()}${_U?" · 👤 "+_U:""}</div>
   \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
@@ -650,7 +663,7 @@ export default function CafeBloom() {
     { id:"users",     label:"អ្នកប្រើ",    emoji:"👥", requireAdmin:true },
     // branches + theme: GLOBAL ADMIN ONLY
     { id:"branches",  label:"សាខា",         emoji:"🏪", globalOnly:true },
-    { id:"backup",    label:"Backup",       emoji:"������", globalOnly:true },
+    { id:"backup",    label:"Backup",       emoji:"💾", globalOnly:true },
     { id:"theme",     label:"រចនាប័ទ្ម",   emoji:"🎨", globalOnly:true },
   ];
 
@@ -2634,10 +2647,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
       .kpi .lbl{font-size:11px;color:#888}
       .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
     </style></head><body>
-    <div class="header">
-      <div class="logo">☕ Café Boom<span>ប្រវត្តិការបញ្ជាទិញ</span></div>
-      <div class="meta"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
-    </div>
+    <div class="header"><div><div class="logo">☕ ${_S}<span>${_B}</span></div></div><div class="meta"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
 
     <h2>📊 សង្ខេប</h2>
     <div class="kpi-grid">
@@ -3043,14 +3053,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       .footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
       @media print{body{padding:16px 20px} .no-print{display:none}}
     </style></head><body>
-    <div class="header">
-      <div><div class="logo">☕ Café Boom<span>POS System</span></div></div>
-      <div class="meta">
-        <b>របាយការណ៍${period === "day" ? "ប្រចាំថ្ងៃ" : period === "month" ? "ប្រចាំខែ" : "ប្រចាំឆ្នាំ"}</b><br/>
-        ${periodLabel}<br/>
-        បោះពុម្ព: ${new Date().toLocaleString("km-KH")}
-      </div>
-    </div>
+    <div class="header"><div><div class="logo">☕ ${_S}<span>${_B}</span></div></div><div class="meta"><b>របាយការណ៍${period==="day"?"ប្រចាំថ្ងៃ":period==="month"?"ប្រចាំខែ":"ប្រចាំឆ្នាំ"}</b><br/>${periodLabel}<br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
 
     <h2>📊 សង្ខេបទូទៅ</h2>
     <div class="kpi-grid">
@@ -4050,7 +4053,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       +".footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}"
       +"@media print{body{padding:14px}}</style></head><body>"
       +"<div class='header'>"
-        +"<div class='logo'>☕ "+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+"</span></div>"
+        +"<div class='logo'>☕ "+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+"+(userName?" · 👤 "+userName:"")+"</span></div>"
         +"<div class='meta'><b>"+monthLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
       +"</div>"
       +"<h2>📊 សង្ខេបហិរញ្ញវត្ថុ</h2>"
@@ -5028,6 +5031,21 @@ function SelfResetPasswordModal({ currentUser, onClose, notify }) {
 }
 
 function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalAdmin, isBranchAdmin, branchId }) {
+  // Apply default permissions to all staff (super admin only)
+  const applyDefaultPermsToAll = () => {
+    const defPerms = {
+      pos: true, tables: true, menu: true, orders: true, report: true, finance: true,
+      inventory: false, users: false, branches: false, theme: false, backup: false,
+    };
+    let count = 0;
+    setUsers(prev => prev.map(u => {
+      if (u.role === "admin") return u;
+      if (u.user_id === currentUser?.user_id) return u;
+      count++;
+      return { ...u, permissions: { ...defPerms, ...(u.permissions||{}) } };
+    }));
+    notify(`✅ បានកំណត់សិទ្ធ default ទៅ staff ទាំងអស់!`);
+  };
   const [modal, setModal] = useState(null);
   const [delConf, setDelConf] = useState(null);
   const [permModal, setPermModal] = useState(null); // user to edit perms
@@ -5163,6 +5181,12 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
             }
           })}
             style={btnGold}>➕ បន្ថែម User</button>
+          {isGlobalAdmin && (
+            <button onClick={applyDefaultPermsToAll}
+              style={{ ...btnGhost, fontSize:12, padding:"9px 16px", border:"1px solid var(--accent)", color:"var(--accent)" }}>
+              🛡️ Set Default Perms → Staff ទាំងអស់
+            </button>
+          )}
         </div>
 
         {/* Branch filter tabs — Super Admin only */}
