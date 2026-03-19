@@ -689,22 +689,34 @@ async function handler(req, res) {
     const body  = await readBody(req);
 
     if (SHARED_TABLES.has(table)) {
-      // Hash plain-text passwords when saving users
-      let saveBody = body;
+      // Special handling for users: restore passwords (client doesn't have them)
       if (table === "users" && Array.isArray(body)) {
-        const shared = await loadShared();
-        const existing = shared.users || [];
-        saveBody = body.map(u => {
-          const old = existing.find(e => e.user_id === u.user_id);
-          const pw  = u.password;
-          if (!pw)                      return { ...u, password: old?.password || "" };
-          if (pw.startsWith("pbkdf2:")) return u;
-          console.log(`[Users] Hashing password for: ${u.username}`);
-          return { ...u, password: hashPassword(pw) };
+        const existing = await loadShared();
+        const existingUsers = existing.users || [];
+        const merged = body.map(u => {
+          const old = existingUsers.find(e => e.user_id === u.user_id);
+          if (!old) return u; // new user - keep as-is
+          // Restore password from existing record if client didn't send one
+          const pw = u.password;
+          if (!pw || pw === "") {
+            return { ...u, password: old.password };
+          }
+          // If plain text (not hashed), hash it
+          if (typeof pw === "string" && !pw.startsWith("pbkdf2:")) {
+            return { ...u, password: hashPassword(pw) };
+          }
+          return u; // already hashed
         });
+        await saveSharedKey("users", merged);
+        // Broadcast without passwords
+        const safeMerged = merged.map(({ password:_, ...u }) => u);
+        broadcastSharedUpdate("users", safeMerged);
+        console.log(`[SHARED] Saved: users (${merged.length} rows, passwords preserved)`);
+        send(res, 200, { ok:true });
+        return;
       }
-      await saveSharedKey(table, saveBody);
-      broadcastSharedUpdate(table, saveBody);
+      await saveSharedKey(table, body);
+      broadcastSharedUpdate(table, body);
       console.log(`[SHARED] Saved: ${table}`);
       send(res, 200, { ok:true });
       return;
@@ -752,37 +764,6 @@ async function handler(req, res) {
       };
     }
     send(res, 200, result);
-    return;
-  }
-
-  // ── MIGRATE RECIPES: fix broken recipe→ingredient mappings per branch ─
-  if (req.method === "POST" && url === "/api/migrate-recipes") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin") {
-      send(res, 403, { error:"Admin only" }); return;
-    }
-    const sharedData = await loadShared();
-    const sharedRecipes = Array.isArray(sharedData.recipes) ? sharedData.recipes : [];
-    const branches = (await loadBranches()).filter(b => b.active);
-    const results  = [];
-    for (const b of branches) {
-      const bd = await loadBranch(b.branch_id);
-      const ingIds = new Set((bd.ingredients||[]).map(i => Number(i.ingredient_id)));
-      const existing = Array.isArray(bd.recipes) ? bd.recipes : [];
-      const validExisting = existing.filter(r => ingIds.has(Number(r.ingredient_id)));
-      const existingPairs = new Set(validExisting.map(r => `${r.product_id}_${r.ingredient_id}`));
-      const fromShared = sharedRecipes.filter(r =>
-        ingIds.has(Number(r.ingredient_id)) &&
-        !existingPairs.has(`${r.product_id}_${r.ingredient_id}`)
-      );
-      const merged = [...validExisting, ...fromShared];
-      await saveBranchKey(b.branch_id, "recipes", merged);
-      broadcastBranchUpdate(b.branch_id, "recipes", merged);
-      const removed = existing.length - validExisting.length;
-      results.push({ branch_id: b.branch_id, before: existing.length, after: merged.length, removed });
-      console.log(`[Migrate] ${b.branch_id}: ${existing.length}→${merged.length} (removed ${removed} broken)`);
-    }
-    send(res, 200, { ok:true, results });
     return;
   }
 
