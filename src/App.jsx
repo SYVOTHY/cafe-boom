@@ -11,6 +11,20 @@ const CLOUD_URL        = window.CAFE_SERVER      || "https://cafe-bloom-backend.
 const DEFAULT_BRANCH   = window.CAFE_BRANCH      || "branch_1";
 const BRANCH_NAME      = window.CAFE_BRANCH_NAME || "Cafe Bloom";
 
+// Read print info — shopName, branch display name, printer's name
+// Works even when branchList hasn't loaded yet
+function getPrintInfo(branchId, branchList, currentUser) {
+  const shopName = localStorage.getItem("cb_shop_name") || "Café Boom";
+  // Try branchList first, then window config, then raw id
+  const branchName = (branchList||[]).find(b=>b.branch_id===branchId)?.branch_name
+    || window.CAFE_BRANCH_NAME
+    || branchId
+    || "";
+  // User name from currentUser prop
+  const userName = currentUser?.name || currentUser?.username || "";
+  return { shopName, branchName, userName };
+}
+
 // ── Telegram Notification ─────────────────────────────────────────
 const TG_TOKEN   = "8503740689:AAEN1Hk9HEbMNWjsArqjzZb_WgTHo55-ZkU";
 const TG_CHAT_ID = "-5197630379";
@@ -2601,14 +2615,14 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     </style></head><body>
     <div class="header">
       <div>
-        <div class="logo">☕ ${localStorage.getItem("cb_shop_name")||"Café Boom"}
-          <span>${(branchList||[]).find(b=>b.branch_id===branchId)?.branch_name||branchId||""}</span>
+        <div class="logo">☕ ${getPrintInfo(branchId,branchList,currentUser).shopName}
+          <span>${getPrintInfo(branchId,branchList,currentUser).branchName || "ប្រវត្តិការបញ្ជាទិញ"}</span>
         </div>
       </div>
       <div class="meta">
         <b>${dateLabel}</b><br/>
         បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
-        <span style="color:#B8732A">👤 ${currentUser?.name||currentUser?.username||""}</span>
+        ${getPrintInfo(branchId,branchList,currentUser).userName ? `<span style="color:#B8732A">👤 ${getPrintInfo(branchId,branchList,currentUser).userName}</span>` : ""}
       </div>
     </div>
 
@@ -2630,7 +2644,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Progress</th><th>ស្ថានភាព</th></tr></thead>
     <tbody>${stockRows}</tbody></table>
 
-    <div class="footer">${localStorage.getItem("cb_shop_name")||"Café Boom"} POS © ${new Date().getFullYear()} · បោះពុម្ព​ដោយ: ${currentUser?.name||currentUser?.username||""}</div>
+    <div class="footer">${getPrintInfo(branchId,branchList,currentUser).shopName} POS © ${new Date().getFullYear()}${getPrintInfo(branchId,branchList,currentUser).userName ? " · 👤 "+getPrintInfo(branchId,branchList,currentUser).userName : ""}</div>
     \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
     </body></html>`);
     win.document.close();
@@ -3015,15 +3029,15 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     </style></head><body>
     <div class="header">
       <div>
-        <div class="logo">☕ ${localStorage.getItem("cb_shop_name")||"Café Boom"}
-          <span>${(branchList||[]).find(b=>b.branch_id===branchId)?.branch_name||branchId||""}</span>
+        <div class="logo">☕ ${getPrintInfo(branchId,branchList,currentUser).shopName}
+          <span>${getPrintInfo(branchId,branchList,currentUser).branchName}</span>
         </div>
       </div>
       <div class="meta">
         <b>របាយការណ៍${period === "day" ? "ប្រចាំថ្ងៃ" : period === "month" ? "ប្រចាំខែ" : "ប្រចាំឆ្នាំ"}</b><br/>
         ${periodLabel}<br/>
         បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
-        <span style="color:#B8732A">👤 ${currentUser?.name||currentUser?.username||""}</span>
+        ${getPrintInfo(branchId,branchList,currentUser).userName ? `<span style="color:#B8732A">👤 ${getPrintInfo(branchId,branchList,currentUser).userName}</span>` : ""}
       </div>
     </div>
 
