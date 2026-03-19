@@ -3936,12 +3936,13 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const doPrint = () => {
     const shopName = localStorage.getItem("cb_shop_name") || "Cafe Bloom";
 
-    // Resolve branch display name — use branchList (from shared props) which has all branch names
+    // Resolve branch display name correctly for all cases
     const allBranches = (branches.length > 0 ? branches : branchList) || [];
-    const resolvedBranchId = viewBranchId || branchId;
-    const branchLabel = resolvedBranchId
-      ? (allBranches.find(b => b.branch_id === resolvedBranchId)?.branch_name || resolvedBranchId)
-      : (selBranch === "all" ? "ទាំងអស់" : branchId);
+    const branchLabel = (() => {
+      if (selBranch === "all") return "ទាំងអស់ (All branches)";
+      const bid = viewBranchId || branchId;
+      return allBranches.find(b => b.branch_id === bid)?.branch_name || bid;
+    })();
 
     // Transaction detail rows (new system)
     const sortedTxns = [...monthTxns].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
