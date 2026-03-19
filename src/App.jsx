@@ -677,11 +677,17 @@ export default function CafeBloom() {
   ];
 
   const NAV = ALL_NAV.filter(n => {
-    if (n.globalOnly)   return _isGA;        // theme: global admin only
-    if (n.requireAdmin) return _isGA || _isBA; // users: any admin
-    if (n.alwaysShow)   return true;           // inventory: always (read-only for staff)
-    if (_isGA || _isBA) return true;           // admin sees everything else
-    return canAccess(n.id);                    // staff: check permissions
+    if (n.globalOnly)   return _isGA;              // theme/branches/backup: global admin only
+    if (n.requireAdmin) return _isGA || _isBA;     // users: any admin
+    if (n.alwaysShow)   return true;               // inventory: always visible
+    if (_isGA)          return true;               // super admin sees everything
+    if (_isBA) {
+      // Branch admin: check explicit permissions if set, else show all non-global
+      const perms = currentUser?.permissions;
+      if (perms && Object.keys(perms).length > 0) return !!perms[n.id];
+      return true; // no perms set → show all
+    }
+    return canAccess(n.id);                        // staff: check permissions
   });
 
   const goPage = (id) => { setPage(id); setMenuOpen(false); };
