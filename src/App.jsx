@@ -4069,7 +4069,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       +".footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}"
       +"@media print{body{padding:14px}}</style></head><body>"
       +"<div class='header'>"
-        +(logoUrl?"<img src='"+logoUrl+"' style='width:44px;height:44px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px' onerror='this.style.display="none"'/>":"")+"<div class='logo'>"+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
+        +(logoUrl?"<img src='"+logoUrl+"' style='width:44px;height:44px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px' onerror='this.style.display=none'/>":"")+"<div class='logo'>"+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
         +"<div class='meta'><b>"+monthLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
       +"</div>"
       +"<h2>📊 សង្ខេបហិរញ្ញវត្ថុ</h2>"
