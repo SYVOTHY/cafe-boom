@@ -265,10 +265,11 @@ const exportCSV = (rows, filename) => {
 };
 
 // Print as PDF using browser print dialog (styled)
-const exportPDF = (title, dateLabel, tableHTML, shopName, branchName, userName) => {
+const exportPDF = (title, dateLabel, tableHTML, shopName, branchName, userName, logoUrl) => {
   const _S=shopName||localStorage.getItem("cb_shop_name")||"Café Boom";
   const _B=branchName||"";
   const _U=userName||"";
+  const _L=logoUrl||localStorage.getItem("cb_shop_logo")||"";
   const win = window.open("", "_blank", "width=900,height=700");
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
   <title>${_S} — ${title}</title>
@@ -286,10 +287,13 @@ const exportPDF = (title, dateLabel, tableHTML, shopName, branchName, userName) 
     .footer{margin-top:24px;font-size:11px;color:#aaa;text-align:center}
     @media print{body{padding:12px}}
   </style></head><body>
-  <div style="display:flex;justify-content:space-between;border-bottom:3px solid #B8732A;margin-bottom:16px;padding-bottom:12px">
-    <div>
-      <div style="font-size:20px;font-weight:700;color:#B8732A">☕ ${_S}</div>
-      <div style="font-size:11px;color:#888">${_B}</div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #B8732A;margin-bottom:16px;padding-bottom:12px">
+    <div style="display:flex;align-items:center;gap:12px">
+      ${_L?`<img src="${_L}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`:""}
+      <div>
+        <div style="font-size:20px;font-weight:700;color:#B8732A">${_S}</div>
+        <div style="font-size:11px;color:#888">${_B}</div>
+      </div>
     </div>
     <div style="text-align:right;font-size:12px;color:#888">
       <b>${dateLabel}</b><br/>
@@ -607,7 +611,12 @@ export default function CafeBloom() {
     if (isGlobal) return true;
 
     if (isBranch) {
+      // Global-only pages: always deny for branch admin
       if (p==="theme"||p==="branches"||p==="backup") return false;
+      // If branch admin has explicit permissions set, respect them
+      const perms = currentUser.permissions;
+      if (perms && Object.keys(perms).length > 0) return !!perms[p];
+      // Default: allow all non-global pages
       return true;
     }
     return !!currentUser.permissions?.[p];
@@ -2170,7 +2179,11 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                   </tr></thead>
                   <tbody>${rows}</tbody>
                 </table>`;
-                exportPDF("📦 របាយការណ៍ស្តុក", date, tableHTML);
+                const _s=localStorage.getItem("cb_shop_name")||"Café Boom";
+                const _b=await resolveBranchName(branchId,branchList);
+                const _u=currentUser?.name||currentUser?.username||"";
+                const _logo=localStorage.getItem("cb_shop_logo")||"";
+                exportPDF("📦 របាយការណ៍ស្តុក",date,tableHTML,_s,_b,_u,_logo);
                 notify("✅ Print PDF រួចហើយ!");
               }}>
               🖨️ Print PDF
@@ -2602,6 +2615,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     const _S=localStorage.getItem("cb_shop_name")||"Café Boom";
     const _B=await resolveBranchName(branchId,branchList);
     const _U=currentUser?.name||currentUser?.username||"";
+    const _L=localStorage.getItem("cb_shop_logo")||"";
     const orderRows = filtered.map(o => `<tr>
       <td style="white-space:nowrap;font-size:11px">${o.ts}</td>
       <td>${o.table || "—"}</td>
@@ -2626,7 +2640,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
 
     const win = window.open("", "_blank", "width=1000,height=750");
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-    <title>Café Boom — ប្រវត្តិ ${dateLabel}</title>
+    <title>${_S} — ប្រវត្តិ ${dateLabel}</title>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
       *{box-sizing:border-box;margin:0;padding:0}
@@ -2647,7 +2661,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
       .kpi .lbl{font-size:11px;color:#888}
       .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
     </style></head><body>
-    <div class="header"><div><div class="logo">☕ ${_S}<span>${_B}</span></div></div><div class="meta"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
+    <div class="header" style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">${_L?`<img src="${_L}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`:""}<div><div class="logo">☕ ${_S}<span>${_B}</span></div></div></div><div class="meta" style="text-align:right"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
 
     <h2>📊 សង្ខេប</h2>
     <div class="kpi-grid">
@@ -2969,6 +2983,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     const _S=localStorage.getItem("cb_shop_name")||"Café Boom";
     const _B=await resolveBranchName(branchId,branchList);
     const _U=currentUser?.name||currentUser?.username||"";
+    const _L=localStorage.getItem("cb_shop_logo")||"";
     const prodCount = {};
     filtered.forEach(o => o.items.forEach(i => { prodCount[i.product_name] = (prodCount[i.product_name] || 0) + i.qty; }));
     const top = Object.entries(prodCount).sort((a, b) => b[1] - a[1]);
@@ -3053,7 +3068,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       .footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
       @media print{body{padding:16px 20px} .no-print{display:none}}
     </style></head><body>
-    <div class="header"><div><div class="logo">☕ ${_S}<span>${_B}</span></div></div><div class="meta"><b>របាយការណ៍${period==="day"?"ប្រចាំថ្ងៃ":period==="month"?"ប្រចាំខែ":"ប្រចាំឆ្នាំ"}</b><br/>${periodLabel}<br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
+    <div class="header" style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">${_L?`<img src="${_L}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`:""}<div><div class="logo">☕ ${_S}<span>${_B}</span></div></div></div><div class="meta" style="text-align:right"><b>របាយការណ៍${period==="day"?"ប្រចាំថ្ងៃ":period==="month"?"ប្រចាំខែ":"ប្រចាំឆ្នាំ"}</b><br/>${periodLabel}<br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
 
     <h2>📊 សង្ខេបទូទៅ</h2>
     <div class="kpi-grid">
@@ -3976,6 +3991,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const doPrint = async () => {
     const shopName=localStorage.getItem("cb_shop_name")||"Café Boom";
     const userName=currentUser?.name||currentUser?.username||"";
+    const logoUrl=localStorage.getItem("cb_shop_logo")||"";
     const _all=(branches.length>0?branches:branchList)||[];
     const branchLabel=selBranch==="all"?"តាមអស់ (All branches)"
       :(_all.find(b=>b.branch_id===(viewBranchId||branchId))?.branch_name
@@ -4053,7 +4069,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       +".footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}"
       +"@media print{body{padding:14px}}</style></head><body>"
       +"<div class='header'>"
-        +"<div class='logo'>☕ "+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
+        +(logoUrl?"<img src='"+logoUrl+"' style='width:44px;height:44px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px' onerror='this.style.display="none"'/>":"")+"<div class='logo'>"+shopName+" <span>💼 ហិរញ្ញវត្ថុប្រចាំខែ · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
         +"<div class='meta'><b>"+monthLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
       +"</div>"
       +"<h2>📊 សង្ខេបហិរញ្ញវត្ថុ</h2>"
@@ -5324,7 +5340,7 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
                     }}>
                     {u.active ? "✅ Active" : "⛔ Inactive"}
                   </button>
-                  {u.role !== "admin" && (
+                  {!(u.role === "admin" && u.branch_id === "all") && (
                     <button onClick={() => setPermModal(u)}
                       style={{ ...btnSmall, fontSize: 12, color: "#5BA3E0", borderColor: "#5BA3E033" }}
                       title="កំណត់សិទ្ធ">🛡️</button>
