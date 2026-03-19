@@ -11,17 +11,13 @@ const CLOUD_URL        = window.CAFE_SERVER      || "https://cafe-bloom-backend.
 const DEFAULT_BRANCH   = window.CAFE_BRANCH      || "branch_1";
 const BRANCH_NAME      = window.CAFE_BRANCH_NAME || "Cafe Bloom";
 
-// Read print info — shopName, branch display name, printer's name
-// Works even when branchList hasn't loaded yet
+// Get correct print info — branch name from DB branchList, NOT from config.js
+// config.js CAFE_BRANCH_NAME is always the host branch (branch_1), never use it here
 function getPrintInfo(branchId, branchList, currentUser) {
-  const shopName = localStorage.getItem("cb_shop_name") || "Café Boom";
-  // Try branchList first, then window config, then raw id
-  const branchName = (branchList||[]).find(b=>b.branch_id===branchId)?.branch_name
-    || window.CAFE_BRANCH_NAME
-    || branchId
-    || "";
-  // User name from currentUser prop
-  const userName = currentUser?.name || currentUser?.username || "";
+  const shopName   = localStorage.getItem("cb_shop_name") || "Café Boom";
+  // Only use branchList (from DB) — never fall back to window.CAFE_BRANCH_NAME
+  const branchName = (branchList||[]).find(b => b.branch_id === branchId)?.branch_name || branchId || "";
+  const userName   = currentUser?.name || currentUser?.username || "";
   return { shopName, branchName, userName };
 }
 
@@ -2499,7 +2495,17 @@ function RecipeForm({ rec, prods, ings, onSave }) {
 //  ORDERS PAGE
 // ═══════════════════════════════════════════════════════════════════
 
-function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
+function OrdersPage({ orders, ings, currentUser, branchId, branchList: branchListProp }) {
+  // Load branchList from API if prop is empty (happens when not yet fetched)
+  const [branchListLocal, setBranchListLocal] = useState(branchListProp || []);
+  const branchList = (branchListProp && branchListProp.length > 0) ? branchListProp : branchListLocal;
+  useEffect(() => {
+    if (branchList.length > 0) return;
+    const token = localStorage.getItem("pos_token");
+    fetch(`${CLOUD_URL}/api/branches`, {
+      headers: { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) }
+    }).then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setBranchListLocal(d); }).catch(()=>{});
+  }, []);
   const [filterType, setFilterType] = useState("all");   // all | day | month
   const [selDate, setSelDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [selMonth, setSelMonth] = useState(() => new Date().toISOString().slice(0, 7));
@@ -2616,13 +2622,13 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     <div class="header">
       <div>
         <div class="logo">☕ ${getPrintInfo(branchId,branchList,currentUser).shopName}
-          <span>${getPrintInfo(branchId,branchList,currentUser).branchName || "ប្រវត្តិការបញ្ជាទិញ"}</span>
+          <span>${getPrintInfo(branchId,branchList,currentUser).branchName}</span>
         </div>
       </div>
       <div class="meta">
         <b>${dateLabel}</b><br/>
         បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
-        ${getPrintInfo(branchId,branchList,currentUser).userName ? `<span style="color:#B8732A">👤 ${getPrintInfo(branchId,branchList,currentUser).userName}</span>` : ""}
+        ${getPrintInfo(branchId,branchList,currentUser).userName ? '<span style="color:#B8732A">👤 '+getPrintInfo(branchId,branchList,currentUser).userName+'</span>' : ""}
       </div>
     </div>
 
@@ -3037,7 +3043,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
         <b>របាយការណ៍${period === "day" ? "ប្រចាំថ្ងៃ" : period === "month" ? "ប្រចាំខែ" : "ប្រចាំឆ្នាំ"}</b><br/>
         ${periodLabel}<br/>
         បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
-        ${getPrintInfo(branchId,branchList,currentUser).userName ? `<span style="color:#B8732A">👤 ${getPrintInfo(branchId,branchList,currentUser).userName}</span>` : ""}
+        ${getPrintInfo(branchId,branchList,currentUser).userName ? '<span style="color:#B8732A">👤 '+getPrintInfo(branchId,branchList,currentUser).userName+'</span>' : ""}
       </div>
     </div>
 
