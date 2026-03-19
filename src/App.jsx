@@ -928,7 +928,7 @@ export default function CafeBloom() {
         {page === "pos"       && <POSPage       {...shared} />}
         {page === "tables"    && <TablesPage    {...shared} />}
         {page === "menu"      && <MenuPage      {...shared} />}
-        {page === "inventory" && <InventoryPage {...shared} />}
+        {page === "inventory" && <InventoryPage {...shared} serverUrl={CLOUD_URL} />}
         {page === "orders"    && <OrdersPage    {...shared} />}
         {page === "report"    && <ReportPage    {...shared} />}
         {page === "finance"   && <FinancePage   {...shared} />}
@@ -2014,7 +2014,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
 // ═══════════════════════════════════════════════════════════════════
 
 
-function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser }) {
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser, serverUrl }) {
   // Staff: read-only view — cannot add/edit/delete/restock
   const canEdit = isAdmin;
   const [subTab, setSubTab] = useState("stock");
@@ -2026,6 +2026,36 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
   const [recSort, setRecSort] = useState("product");
   const [expandAll, setExpandAll] = useState(true);
   const [collapsed, setCollapsed] = useState({});
+  // Migration state
+  const [migBusy,   setMigBusy]   = useState(false);
+  const [migResult, setMigResult] = useState(null);
+
+  const runMigration = async () => {
+    setMigBusy(true); setMigResult(null);
+    try {
+      const token = localStorage.getItem("pos_token");
+      const apiUrl = serverUrl || window.CAFE_SERVER || CLOUD_URL;
+      const r = await fetch(`${apiUrl}/api/migrate-recipes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          ...(token ? { Authorization: "Bearer " + token } : {}),
+        },
+      });
+      const data = await r.json();
+      if (data.ok) {
+        setMigResult(data.results);
+        notify("✅ Migrate recipes រួចរាល់!");
+      } else {
+        notify("❌ " + (data.error || "មានបញ្ហា"));
+        setMigResult([{ branch_id: "error", before: 0, after: 0, removed: 0 }]);
+      }
+    } catch (e) {
+      notify("❌ " + e.message);
+    }
+    setMigBusy(false);
+  };
 
   const saveIng = (data) => {
     if (modal.mode === "add") setIngs(p => [...p, { ...data, ingredient_id: nextId(p) }]);
@@ -2396,7 +2426,37 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         })()}
 
         {subTab === "sql" && (
-          <div style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
+          <div style={{ background: "var(--bg-main)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 20 }}>
+            {isAdmin && (
+              <div style={{ marginBottom:20, padding:"16px", background:"#120A00", border:"1px solid #E8A84B44", borderRadius:12 }}>
+                <div style={{ fontWeight:700, fontSize:13, color:"var(--accent)", marginBottom:6 }}>🔧 Migrate Recipes → Branch Data</div>
+                <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:12 }}>
+                  Fix recipe mappings ខ្វះ ingredient — remove broken rows, sync ទៅ branches ទាំងអស់
+                </div>
+                <button onClick={runMigration} disabled={migBusy}
+                  style={{ padding:"9px 20px", borderRadius:9, border:"none", cursor: migBusy?"not-allowed":"pointer",
+                    fontFamily:"inherit", fontSize:13, fontWeight:700,
+                    background: migBusy ? "var(--bg-card)" : "linear-gradient(135deg,var(--accent-dk),var(--accent))",
+                    color: migBusy ? "var(--text-dim)" : "#fff", opacity: migBusy ? 0.7 : 1 }}>
+                  {migBusy ? "⏳ កំពុង migrate..." : "▶ Run Migration"}
+                </button>
+                {migResult && (
+                  <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:5 }}>
+                    {migResult.map(r => (
+                      <div key={r.branch_id} style={{ fontSize:12, display:"flex", gap:8, alignItems:"center" }}>
+                        <span style={{ color:"#27AE60", fontWeight:700, minWidth:80 }}>{r.branch_id}</span>
+                        <span style={{ color:"var(--text-dim)" }}>{r.before} recipes</span>
+                        <span style={{ color:"var(--text-dim)" }}>→</span>
+                        <span style={{ color:"var(--accent)", fontWeight:700 }}>{r.after} recipes</span>
+                        {r.removed > 0 && <span style={{ color:"#E74C3C", fontSize:11 }}>(-{r.removed} broken)</span>}
+                        <span style={{ color:"#27AE60", fontSize:11 }}>✅</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:8, fontWeight:600 }}>📋 Reference SQL</div>
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
