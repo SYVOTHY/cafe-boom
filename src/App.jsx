@@ -189,6 +189,16 @@ function runTransaction(ingredients, recipes, productId, qty) {
 const nextId = a => Math.max(0, ...a.map(x => Object.values(x)[0])) + 1;
 
 const fmtN = n => Number(n).toFixed(1);
+
+// Convert Khmer/Arabic-Indic digits → Arabic, then parseFloat
+// "១" → 1, "១.៥" → 1.5, "1" → 1
+const parseKhNum = (s) => {
+  if (s === null || s === undefined || s === "") return NaN;
+  const str = String(s)
+    .replace(/[០-៩]/g, d => "០១២៣៤៥៦៧៨៩".indexOf(d))
+    .replace(/[٠-٩]/g, d => d.charCodeAt(0) - 0x0660);
+  return parseFloat(str);
+};
 // Format number with thousands separator: 1716.0 → "1,716.0"  or  "1,716"
 const fmtStock = (n, decimals = 1) => {
   const num = Number(n);
@@ -928,7 +938,7 @@ export default function CafeBloom() {
         {page === "pos"       && <POSPage       {...shared} />}
         {page === "tables"    && <TablesPage    {...shared} />}
         {page === "menu"      && <MenuPage      {...shared} />}
-        {page === "inventory" && <InventoryPage {...shared} />}
+        {page === "inventory" && <InventoryPage {...shared} serverUrl={CLOUD_URL} />}
         {page === "orders"    && <OrdersPage    {...shared} />}
         {page === "report"    && <ReportPage    {...shared} />}
         {page === "finance"   && <FinancePage   {...shared} />}
@@ -1453,7 +1463,7 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
                   min="1"
                   value={item.qty}
                   onChange={e => {
-                    const v = parseInt(e.target.value, 10);
+                    const v = parseKhNum(e.target.value);
                     if (isNaN(v) || v < 1) return;
                     setCart(p => p.map(i => i.key === item.key ? { ...i, qty: v } : i));
                   }}
@@ -1538,91 +1548,191 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 // ═══════════════════════════════════════════════════════════════════
 //  TABLES PAGE
 // ═══════════════════════════════════════════════════════════════════
-function TablesPage({ tables, setTables, orders }) {
+function TablesPage({ tables, setTables, orders, currentUser, isAdmin, isGlobalAdmin }) {
   const busy = tables.filter(t => t.status === "busy").length;
+  const canManage = isAdmin || isGlobalAdmin;
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [addLabel,   setAddLabel]   = useState("");
+  const [addEmoji,   setAddEmoji]   = useState("🪑");
+  const [editTid,    setEditTid]    = useState(null);
+  const [editLabel,  setEditLabel]  = useState("");
+  const [delConfTid, setDelConfTid] = useState(null);
+  const TABLE_EMOJIS = ["🪑","🛋️","🏮","🌿","⭐","🎯","💎","🏠","🌸","🍽️","☕","🎪"];
 
   function toggleTable(tid) {
     setTables(prev => prev.map(t => t.table_id === tid
-      ? { ...t, status: t.status === "busy" ? "free" : "busy" }
-      : t
-    ));
+      ? { ...t, status: t.status === "busy" ? "free" : "busy" } : t));
   }
+  function addTable() {
+    const label = addLabel.trim();
+    if (!label) return;
+    if (tables.find(t => String(t.table_id) === label)) return;
+    const numericIds = tables.map(t => isNaN(t.table_id) ? 0 : Number(t.table_id));
+    const nextId = isNaN(label) ? label : Math.max(0, ...numericIds) + 1;
+    setTables(prev => [...prev, { table_id: nextId, label: addEmoji + " " + label, status: "free" }]);
+    setAddLabel(""); setAddEmoji("🪑"); setShowAdd(false);
+  }
+  function saveRename(tid) {
+    const label = editLabel.trim();
+    if (!label) { setEditTid(null); return; }
+    setTables(prev => prev.map(t => t.table_id === tid ? { ...t, label } : t));
+    setEditTid(null);
+  }
+  function deleteTable(tid) {
+    setTables(prev => prev.filter(t => t.table_id !== tid));
+    setDelConfTid(null);
+  }
+  const btnSm = { background:"transparent", border:"1px solid #333", borderRadius:6, color:"#888", cursor:"pointer", fontFamily:"inherit", fontSize:11, padding:"3px 8px" };
 
   return (
     <div style={{ padding:"16px 14px 32px" }}>
-      {/* Header */}
-      <div style={{ marginBottom:20 }}>
-        <div style={{ fontWeight:700, fontSize:20, display:"flex", alignItems:"center", gap:8 }}>
-          🪑 គ្រប់គ្រងតុ
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20, flexWrap:"wrap" }}>
+        <div style={{ flex:1 }}>
+          <div style={{ fontWeight:700, fontSize:20 }}>🪑 គ្រប់គ្រងតុ</div>
+          <div style={{ fontSize:12, color:"var(--text-dim)", marginTop:4 }}>{busy} / {tables.length} តុ កំពុងប្រើ</div>
         </div>
-        <div style={{ fontSize:12, color:"#555", marginTop:4 }}>
-          {busy} / {tables.length} តុ កំពុងប្រើ
-        </div>
+        {canManage && (
+          <button onClick={() => setShowAdd(true)}
+            style={{ padding:"9px 20px", borderRadius:10, border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, background:"linear-gradient(135deg,var(--accent-dk),var(--accent))", color:"#fff" }}>
+            ➕ បន្ថែមតុ
+          </button>
+        )}
       </div>
 
-      {/* Table grid */}
+      {showAdd && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"var(--bg-card)", border:"1px solid var(--accent)", borderRadius:18, padding:28, width:340, maxWidth:"92vw" }}>
+            <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)", marginBottom:16 }}>➕ បន្ថែមតុថ្មី</div>
+            <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:6 }}>រូបភាព</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+              {TABLE_EMOJIS.map(e => (
+                <button key={e} onClick={() => setAddEmoji(e)}
+                  style={{ fontSize:20, padding:"4px 6px", borderRadius:8, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    background:addEmoji===e?"#E8A84B33":"transparent", outline:addEmoji===e?"2px solid var(--accent)":"none" }}>
+                  {e}
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:6 }}>ឈ្មោះ / លេខ *</div>
+            <input className="inp" placeholder="ឧ. 1 ឬ VIP ឬ Terrace"
+              value={addLabel} onChange={e => setAddLabel(e.target.value)}
+              onKeyDown={e => e.key==="Enter" && addTable()} autoFocus
+              style={{ width:"100%", marginBottom:10, boxSizing:"border-box" }} />
+            {addLabel.trim() && (
+              <div style={{ marginBottom:12, padding:"8px 12px", borderRadius:8, background:"var(--bg-main)", border:"1px solid var(--accent)", fontSize:13, color:"var(--accent)" }}>
+                Preview: {addEmoji} {addLabel.trim()}
+              </div>
+            )}
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => { setShowAdd(false); setAddLabel(""); }}
+                style={{ flex:1, padding:9, borderRadius:10, border:"1px solid #333", background:"transparent", color:"var(--text-dim)", cursor:"pointer", fontFamily:"inherit" }}>
+                បោះបង់
+              </button>
+              <button onClick={addTable} disabled={!addLabel.trim()}
+                style={{ flex:1, padding:9, borderRadius:10, border:"none", cursor:"pointer", fontFamily:"inherit", fontWeight:700,
+                  background:addLabel.trim()?"linear-gradient(135deg,var(--accent-dk),var(--accent))":"#333",
+                  color:addLabel.trim()?"#fff":"#555" }}>
+                ✅ បង្កើតតុ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {delConfTid !== null && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"var(--bg-card)", borderRadius:16, padding:24, maxWidth:300, width:"90%", textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>🗑️</div>
+            <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>លុបតុ {delConfTid}?</div>
+            <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:18 }}>action នេះ មិនអាចត្រឡប់វិញ</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => setDelConfTid(null)} style={{ flex:1, padding:9, borderRadius:10, border:"1px solid #333", background:"transparent", color:"var(--text-dim)", cursor:"pointer", fontFamily:"inherit" }}>បោះបង់</button>
+              <button onClick={() => deleteTable(delConfTid)} style={{ flex:1, padding:9, borderRadius:10, border:"none", background:"#8B1A1A", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>🗑️ លុប</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:14 }}>
         {tables.map(t => {
           const isBusy = t.status === "busy";
-          // Only show TODAY's orders for this table (not all history)
           const todayStr = new Date().toISOString().slice(0, 10);
           const tableOrders = (orders||[]).filter(o => {
             const matchTable = String(o.table) === String(t.table_id) || o.table === t.table_id;
             const orderDate = o.ts ? o.ts.slice(0, 10) : new Date(o.order_id).toISOString().slice(0, 10);
-            const isToday = orderDate === todayStr || o.ts?.includes(todayStr) || String(o.order_id).length === 13 && new Date(o.order_id).toISOString().slice(0,10) === todayStr;
-            return matchTable && isToday;
+            return matchTable && (orderDate === todayStr || o.ts?.includes(todayStr));
           });
           const tableTotal = isBusy ? tableOrders.reduce((s,o) => s + (o.total||0) + (o.tax||0), 0) : 0;
+          const displayName = t.label || ("តុ " + t.table_id);
+          const isEditing = editTid === t.table_id;
           return (
             <div key={t.table_id} style={{
-              background:"var(--bg-card)",
-              border:`2px solid ${isBusy ? "#8B1A1A" : "#1A4A1A"}`,
-              borderRadius:16, padding:22, textAlign:"center",
-              boxShadow: isBusy ? "0 0 20px #8B1A1A22" : "0 0 20px #1A4A1A22",
-              transition:"all .2s",
+              background:"var(--bg-card)", border:`2px solid ${isBusy?"#8B1A1A":"#1A4A1A"}`,
+              borderRadius:16, padding:18, textAlign:"center",
+              boxShadow:isBusy?"0 0 20px #8B1A1A22":"0 0 20px #1A4A1A22",
+              transition:"all .2s", position:"relative",
             }}>
-              <div style={{ fontSize:34 }}>🪑</div>
-              <div style={{ fontWeight:700, fontSize:18, marginTop:8, marginBottom:6 }}>
-                តុ {t.table_id}
-              </div>
-              <div style={{
-                fontSize:12, padding:"4px 14px", borderRadius:20,
-                display:"inline-block", fontWeight:600,
-                background: isBusy ? "#8B1A1A22" : "#1A4A1A22",
-                color: isBusy ? "#E74C3C" : "#27AE60",
-              }}>
+              {canManage && !isBusy && (
+                <button onClick={() => setDelConfTid(t.table_id)} title="លុបតុ"
+                  style={{ position:"absolute", top:8, right:8, background:"transparent", border:"none", color:"#444", cursor:"pointer", fontSize:14, padding:"2px 4px" }}>
+                  ✕
+                </button>
+              )}
+              <div style={{ fontSize:32 }}>{t.label?.match(/^\S+/)?.[0] || "🪑"}</div>
+              {isEditing ? (
+                <div style={{ marginTop:6, marginBottom:6 }}>
+                  <input className="inp" value={editLabel} onChange={e => setEditLabel(e.target.value)}
+                    onKeyDown={e => { if(e.key==="Enter") saveRename(t.table_id); if(e.key==="Escape") setEditTid(null); }}
+                    autoFocus style={{ width:"100%", fontSize:13, padding:"4px 8px", textAlign:"center", boxSizing:"border-box" }} />
+                  <div style={{ display:"flex", gap:4, marginTop:4 }}>
+                    <button onClick={() => saveRename(t.table_id)} style={{ ...btnSm, flex:1, color:"#27AE60", borderColor:"#27AE6044" }}>✓</button>
+                    <button onClick={() => setEditTid(null)} style={{ ...btnSm, flex:1 }}>✕</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontWeight:700, fontSize:16, marginTop:6, marginBottom:4, display:"flex", alignItems:"center", justifyContent:"center", gap:4 }}>
+                  {displayName}
+                  {canManage && (
+                    <button onClick={() => { setEditTid(t.table_id); setEditLabel(displayName); }} title="ប្តូរឈ្មោះ"
+                      style={{ background:"transparent", border:"none", color:"#555", cursor:"pointer", fontSize:11 }}>✏️</button>
+                  )}
+                </div>
+              )}
+              <div style={{ fontSize:12, padding:"4px 14px", borderRadius:20, display:"inline-block", fontWeight:600,
+                background:isBusy?"#8B1A1A22":"#1A4A1A22", color:isBusy?"#E74C3C":"#27AE60" }}>
                 {isBusy ? "🔴 មានអតិថិជន" : "🟢 ទំនេរ"}
               </div>
               {isBusy && tableTotal > 0 && (
-                <div style={{ fontSize:13, color:"#E8A84B", fontWeight:700, marginTop:6 }}>
-                  ${tableTotal.toFixed(2)}
-                </div>
+                <div style={{ fontSize:13, color:"var(--accent)", fontWeight:700, marginTop:6 }}>${tableTotal.toFixed(2)}</div>
               )}
-              <button
-                onClick={() => toggleTable(t.table_id)}
-                style={{
-                  marginTop:12, width:"100%", padding:"7px",
-                  borderRadius:8, border:"1px solid rgba(255,255,255,.1)",
-                  background:"rgba(255,255,255,.05)", color: isBusy ? "#E74C3C" : "#27AE60",
-                  cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:600,
-                  transition:"all .15s",
-                }}
-              >
+              <button onClick={() => toggleTable(t.table_id)}
+                style={{ marginTop:10, width:"100%", padding:"7px", borderRadius:8, border:"1px solid rgba(255,255,255,.1)",
+                  background:"rgba(255,255,255,.05)", color:isBusy?"#E74C3C":"#27AE60",
+                  cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:600 }}>
                 {isBusy ? "✓ ចេញ" : "ចូល"}
               </button>
             </div>
           );
         })}
+        {canManage && (
+          <div onClick={() => setShowAdd(true)}
+            style={{ background:"var(--bg-card)", border:"2px dashed #333", borderRadius:16, padding:18, textAlign:"center",
+              cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center",
+              gap:8, opacity:0.6, transition:"opacity .2s", minHeight:160 }}
+            onMouseEnter={e=>e.currentTarget.style.opacity=1}
+            onMouseLeave={e=>e.currentTarget.style.opacity=0.6}>
+            <div style={{ fontSize:32 }}>➕</div>
+            <div style={{ fontSize:13, color:"var(--text-dim)", fontWeight:600 }}>បន្ថែមតុ</div>
+          </div>
+        )}
       </div>
-
-      {/* Legend */}
       <div style={{ marginTop:20, display:"flex", gap:16, flexWrap:"wrap" }}>
-        {[["#27AE60","ទំ"],["#E74C3C","កំពុងប្រើ"],["#F39C12","បានRA"],["#3498DB","សំអាត"]].map(([color,label]) => (
-          <div key={label} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#555" }}>
-            <div style={{ width:10, height:10, borderRadius:"50%", background:color }} />
-            {label}
+        {[["#27AE60","ទំនេរ"],["#E74C3C","កំពុងប្រើ"]].map(([c,l]) => (
+          <div key={l} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"var(--text-dim)" }}>
+            <div style={{ width:10, height:10, borderRadius:"50%", background:c }} />{l}
           </div>
         ))}
+        {canManage && <div style={{ fontSize:12, color:"var(--text-dim)", marginLeft:"auto" }}>💡 ✕ លុបតុ · ✏️ ប្តូរឈ្មោះ</div>}
       </div>
     </div>
   );
@@ -1784,9 +1894,9 @@ function ProdForm({ prod, cats, onSave }) {
         </button>
       )}
       <input className="inp" placeholder="ឈ្មោះ​ផលិតផល" value={v.product_name} onChange={e=>setV({...v,product_name:e.target.value})} />
-      <input className="inp" type="number" placeholder="តំលៃ" value={v.base_price} onChange={e=>setV({...v,base_price:+e.target.value})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="តំលៃ (1.50 ឬ ១.៥០)" value={v.base_price} onChange={e=>setV({...v,base_price:parseKhNum(e.target.value)||0})} />
       <EmojiDropdown value={v.emoji||""} onChange={em => setV(prev => ({...prev, emoji:em}))} label="Emoji (backup ពេលគ្មានរូបភាព)" />
-      <select className="inp" value={v.category_id} onChange={e=>setV({...v,category_id:+e.target.value})}>
+      <select className="inp" value={v.category_id} onChange={e=>setV({...v,category_id:parseKhNum(e.target.value)||0})}>
         {cats.map(c=><option key={c.category_id} value={c.category_id}>{c.category_name}</option>)}
       </select>
       <button className="btn-primary" onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
@@ -1802,8 +1912,8 @@ function OptForm({ opt, prods, onSave }) {
       <select className="inp" value={v.option_group} onChange={e=>setV({...v,option_group:e.target.value})}>
         {["size","sugar","milk","ice","other"].map(g=><option key={g} value={g}>{g}</option>)}
       </select>
-      <input className="inp" type="number" placeholder="បន្ថែម​តំលៃ" value={v.additional_price||0} onChange={e=>setV({...v,additional_price:+e.target.value})} />
-      <select className="inp" value={v.product_id||""} onChange={e=>setV({...v,product_id:e.target.value?+e.target.value:null})}>
+      <input className="inp" type="text" inputMode="decimal" placeholder="បន្ថែម (0.50 ឬ ០.៥០)" value={v.additional_price||0} onChange={e=>setV({...v,additional_price:parseKhNum(e.target.value)||0})} />
+      <select className="inp" value={v.product_id||""} onChange={e=>setV({...v,product_id:e.target.value?parseKhNum(e.target.value)||null:null})}>
         <option value="">ទាំងអស់​ (all products)</option>
         {prods.map(p=><option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
       </select>
@@ -2014,7 +2124,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
 // ═══════════════════════════════════════════════════════════════════
 
 
-function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser }) {
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser, serverUrl }) {
   // Staff: read-only view — cannot add/edit/delete/restock
   const canEdit = isAdmin;
   const [subTab, setSubTab] = useState("stock");
@@ -2026,6 +2136,28 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
   const [recSort, setRecSort] = useState("product");
   const [expandAll, setExpandAll] = useState(true);
   const [collapsed, setCollapsed] = useState({});
+  const [migBusy,   setMigBusy]   = useState(false);
+  const [migResult, setMigResult] = useState(null);
+
+  const runMigration = async () => {
+    setMigBusy(true); setMigResult(null);
+    try {
+      const token = localStorage.getItem("pos_token");
+      const apiUrl = serverUrl || window.CAFE_SERVER || CLOUD_URL;
+      const r = await fetch(`${apiUrl}/api/migrate-recipes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          ...(token ? { Authorization: "Bearer " + token } : {}),
+        },
+      });
+      const data = await r.json();
+      if (data.ok) { setMigResult(data.results); notify("✅ Migrate recipes រួចរាល់!"); }
+      else { notify("❌ " + (data.error || "មានបញ្ហា")); setMigResult([{branch_id:"error",before:0,after:0,removed:0}]); }
+    } catch (e) { notify("❌ " + e.message); }
+    setMigBusy(false);
+  };
 
   const saveIng = (data) => {
     if (modal.mode === "add") setIngs(p => [...p, { ...data, ingredient_id: nextId(p) }]);
@@ -2052,7 +2184,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
           <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>📦 បំពេញស្តុក</div>
           <div style={{ color: "#E8A84B", marginBottom: 16 }}>{restock.ingredient_name}</div>
           <label style={{ fontSize: 12, color: "#777", display: "block", marginBottom: 6 }}>ចំនួន ({restock.unit})</label>
-          <input type="number" id="ramt" defaultValue={500} style={{ ...inputSt, width: "100%", marginBottom: 16 }} />
+          <input type="text" inputMode="decimal" id="ramt" defaultValue={500} style={{ ...inputSt, width: "100%", marginBottom: 16 }} />
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={() => setRestock(null)} style={{ ...btnGhost, flex: 1 }}>បោះបង់</button>
             <button onClick={() => doRestock(restock.ingredient_id, document.getElementById("ramt").value)}
@@ -2264,7 +2396,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
           );
           const totalMappings = recipes.length;
           const totalProds = new Set(recipes.map(r => r.product_id)).size;
-          const missingIng = recipes.filter(r => !ings.find(i => i.ingredient_id === r.ingredient_id)).length;
+          const missingIng = recipes.filter(r => !ings.find(i => Number(i.ingredient_id) === Number(r.ingredient_id))).length;
           return (
             <>
               {/* Summary bar */}
@@ -2287,14 +2419,14 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 <div style={{ background:"#E74C3C11",border:"1px solid #E74C3C44",borderRadius:10,padding:"12px 16px",marginBottom:12,fontSize:12,color:"#E74C3C" }}>
                   <div style={{fontWeight:700,marginBottom:6}}>⚠️ មាន {missingIng} mapping ដែល ingredient ត្រូវបានលុប</div>
                   <div style={{fontSize:11,color:"#E74C3C88"}}>
-                    {recipes.filter(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id)).map(r=>{
+                    {recipes.filter(r=>!ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id))).map(r=>{
                       const prod = prods.find(p=>p.product_id===r.product_id);
                       return <span key={r.recipe_id} style={{background:"#E74C3C22",borderRadius:6,padding:"2px 8px",marginRight:6,marginBottom:4,display:"inline-block"}}>
                         {prod?.product_name||"?"} → ID:{r.ingredient_id}
                       </span>;
                     })}
                   </div>
-                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>i.ingredient_id===r.ingredient_id)))}
+                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id))))}
                     style={{...btnSmall,marginTop:8,fontSize:11,color:"#E74C3C",borderColor:"#E74C3C44"}}>
                     🗑 លុប mappings ខូច​ទាំងអស់
                   </button>
@@ -2304,11 +2436,11 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 const pr = recipes.filter(r => r.product_id === prod.product_id);
                 const isCollapsed = collapsed[prod.product_id] !== undefined ? collapsed[prod.product_id] : !expandAll;
                 const totalCost = pr.reduce((sum,r) => {
-                  const ing = ings.find(i=>i.ingredient_id===r.ingredient_id);
+                  const ing = ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id));
                   return sum + (Number(r.quantity_required)*(ing?.cost_per_unit||0));
                 },0);
-                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>i.ingredient_id===r.ingredient_id); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
-                const hasMissing = pr.some(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id));
+                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id)); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
+                const hasMissing = pr.some(r=>!ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id)));
                 return (
                   <div key={prod.product_id} style={{ background:"var(--bg-card)",border:`1px solid ${hasMissing?"#E74C3C33":canMake?"#27AE6033":"#F39C1233"}`,borderRadius:12,marginBottom:10,overflow:"hidden" }}>
                     <div style={{ background:"var(--bg-header)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}
@@ -2327,7 +2459,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                     {!isCollapsed && (
                       <TableWrap headers={["#","ingredient + ប្រើ/serve","ស្តុក​នៅ","status / ចំនួន",""]}>
                         {pr.map((r,idx)=>{
-                          const ing=ings.find(i=>i.ingredient_id===r.ingredient_id);
+                          const ing=ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id));
                           const enough=ing&&Number(ing?.current_stock)>=Number(r.quantity_required);
                           const servings=ing?Math.floor(Number(ing?.current_stock)/Number(r.quantity_required)):0;
                           return (
@@ -2396,7 +2528,34 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         })()}
 
         {subTab === "sql" && (
-          <div style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
+          <div style={{ background: "var(--bg-main)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 20 }}>
+            {isAdmin && (
+              <div style={{ marginBottom:20, padding:16, background:"#120A00", border:"1px solid #E8A84B44", borderRadius:12 }}>
+                <div style={{ fontWeight:700, fontSize:13, color:"var(--accent)", marginBottom:6 }}>🔧 Migrate Recipes → Branch Data</div>
+                <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:12 }}>Fix recipe mappings ខ្វះ ingredient — remove broken rows, sync ទៅ branches ទាំងអស់</div>
+                <button onClick={runMigration} disabled={migBusy}
+                  style={{ padding:"9px 20px", borderRadius:9, border:"none", cursor:migBusy?"not-allowed":"pointer",
+                    fontFamily:"inherit", fontSize:13, fontWeight:700,
+                    background:migBusy?"var(--bg-card)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",
+                    color:migBusy?"var(--text-dim)":"#fff", opacity:migBusy?0.7:1 }}>
+                  {migBusy ? "⏳ កំពុង migrate..." : "▶ Run Migration"}
+                </button>
+                {migResult && (
+                  <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:5 }}>
+                    {migResult.map(r => (
+                      <div key={r.branch_id} style={{ fontSize:12, display:"flex", gap:8, alignItems:"center" }}>
+                        <span style={{ color:"#27AE60", fontWeight:700, minWidth:80 }}>{r.branch_id}</span>
+                        <span style={{ color:"var(--text-dim)" }}>{r.before} →</span>
+                        <span style={{ color:"var(--accent)", fontWeight:700 }}>{r.after}</span>
+                        {r.removed>0 && <span style={{ color:"#E74C3C", fontSize:11 }}>(-{r.removed} broken)</span>}
+                        <span style={{ color:"#27AE60" }}>✅</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:8 }}>📋 Reference SQL</div>
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
@@ -2451,9 +2610,9 @@ function IngForm({ ing, data, onSave, onCancel }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ឈ្មោះ​គ្រឿង" value={v.ingredient_name} onChange={e=>setV({...v,ingredient_name:e.target.value})} />
-      <input className="inp" type="number" placeholder="ស្តុក​បច្ចុប្បន្ន" value={v.current_stock} onChange={e=>setV({...v,current_stock:+e.target.value})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="ស្តុក (500 ឬ ៥០០)" value={v.current_stock} onChange={e=>setV({...v,current_stock:parseKhNum(e.target.value)||0})} />
       <input className="inp" placeholder="ឯកតា (g/ml/pcs)" value={v.unit} onChange={e=>setV({...v,unit:e.target.value})} />
-      <input className="inp" type="number" placeholder="ដែន​កំណត់​ (threshold)" value={v.threshold} onChange={e=>setV({...v,threshold:+e.target.value})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="ដែនកំណត់ (100 ឬ ១០០)" value={v.threshold} onChange={e=>setV({...v,threshold:parseKhNum(e.target.value)||0})} />
       <button className="btn-primary" onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
     </div>
   );
@@ -2467,11 +2626,11 @@ function RecipeForm({ rec, prods, ings, onSave }) {
         <option value="">ជ្រើស​ផលិតផល</option>
         {prods.map(p=><option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
       </select>
-      <select className="inp" value={v.ingredient_id} onChange={e=>setV({...v,ingredient_id:+e.target.value})}>
+      <select className="inp" value={v.ingredient_id} onChange={e=>setV({...v,ingredient_id:parseKhNum(e.target.value)||0})}>
         <option value="">ជ្រើស​គ្រឿង</option>
         {ings.map(i=><option key={i.ingredient_id} value={i.ingredient_id}>{i.ingredient_name}</option>)}
       </select>
-      <input className="inp" type="number" placeholder="បរិមាណ" value={v.quantity} onChange={e=>setV({...v,quantity:+e.target.value})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="បរិមាណ (1 ឬ ១)" value={v.quantity} onChange={e=>setV({...v,quantity:parseKhNum(e.target.value)||0})} />
       <input className="inp" placeholder="ឯកតា" value={v.unit||""} onChange={e=>setV({...v,unit:e.target.value})} />
       <div style={{ display:"flex", gap:8, marginTop:4 }}>
         {onCancel && <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>}
@@ -3753,7 +3912,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const [allOrders,  setAllOrders]  = useState(null); // null = not loaded yet
   const [loadingAll, setLoadingAll] = useState(false);
 
-  // Load branches for all admins — needed for correct branch name in print
+  // Load branches for all admins
   useEffect(() => {
     if (!isAdmin) return;
     if (branches.length === 0) {
@@ -3935,8 +4094,6 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   // ── Print PDF ──────────────────────────────────────────────────────
   const doPrint = () => {
     const shopName = localStorage.getItem("cb_shop_name") || "Cafe Bloom";
-
-    // Resolve branch display name correctly for all cases
     const allBranches = (branches.length > 0 ? branches : branchList) || [];
     const branchLabel = (() => {
       if (selBranch === "all") return "ទាំងអស់ (All branches)";
@@ -4334,7 +4491,7 @@ function ExpenseTxnModal({ data, expCats, branchId, branches, isAdmin, selMonth,
         {/* Amount */}
         <div>
           <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>💵 ចំនួនទឹកប្រាក់ ($) *</div>
-          <input className="inp" type="number" step="0.01" min="0" placeholder="0.00"
+          <input className="inp" type="text" inputMode="decimal" placeholder="0.00"
             value={v.amount} onChange={e=>s("amount",e.target.value)} style={{ width:"100%" }} />
         </div>
 
@@ -4789,7 +4946,7 @@ function ExpenseForm({ exp, onSave }) {
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ប្រភេទ​ចំណាយ" value={v.category} onChange={e=>setV({...v,category:e.target.value})} />
-      <input className="inp" type="number" placeholder="ចំនួន​ (USD)" value={v.amount} onChange={e=>setV({...v,amount:+e.target.value})} />
+      <input className="inp" type="text" inputMode="decimal" placeholder="ចំនួន USD (10 ឬ ១០)" value={v.amount} onChange={e=>setV({...v,amount:parseKhNum(e.target.value)||0})} />
       <input className="inp" placeholder="កំណត់​ចំណាំ" value={v.note||""} onChange={e=>setV({...v,note:e.target.value})} />
       <button className="btn-primary" onClick={()=>onSave(v)}>💾 រក្សា​ទុក</button>
     </div>
