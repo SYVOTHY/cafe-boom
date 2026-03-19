@@ -11,14 +11,11 @@ const CLOUD_URL        = window.CAFE_SERVER      || "https://cafe-bloom-backend.
 const DEFAULT_BRANCH   = window.CAFE_BRANCH      || "branch_1";
 const BRANCH_NAME      = window.CAFE_BRANCH_NAME || "Cafe Bloom";
 
-// Resolve branch display name — fetch from API if branchList empty
-// Returns Promise<string>
+// Async helper — fetch branch name from API if branchList prop is empty
 async function resolveBranchName(branchId, branchList) {
   if (!branchId) return "";
-  // Try prop first
   const fromProp = (branchList||[]).find(b => b.branch_id === branchId)?.branch_name;
   if (fromProp) return fromProp;
-  // Fetch from API
   try {
     const token = localStorage.getItem("pos_token");
     const r = await fetch(`${CLOUD_URL}/api/branches`, {
@@ -31,7 +28,7 @@ async function resolveBranchName(branchId, branchList) {
       if (found) return found.branch_name;
     }
   } catch(e) {}
-  return branchId; // fallback to raw id
+  return branchId;
 }
 
 // ── Telegram Notification ─────────────────────────────────────────
@@ -264,28 +261,40 @@ const exportCSV = (rows, filename) => {
 };
 
 // Print as PDF using browser print dialog (styled)
-const exportPDF = (title, dateLabel, tableHTML) => {
+const exportPDF = (title, dateLabel, tableHTML, shopName, branchName, userName) => {
+  const _shop   = shopName   || localStorage.getItem("cb_shop_name") || "Café Bloom";
+  const _branch = branchName || "";
+  const _user   = userName   || "";
   const win = window.open("", "_blank", "width=900,height=700");
   win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-  <title>${title}</title>
+  <title>${_shop} — ${title}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:'Kantumruy Pro',sans-serif;color:#111;padding:24px;font-size:13px}
-    h1{font-size:20px;font-weight:700;margin-bottom:4px;color:#B8732A}
-    .sub{font-size:12px;color:#666;margin-bottom:20px}
-    table{width:100%;border-collapse:collapse;margin-top:12px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;padding-bottom:12px;border-bottom:3px solid #B8732A}
+    .logo{font-size:20px;font-weight:700;color:#B8732A}
+    .logo span{font-size:11px;color:#888;display:block;font-weight:400;margin-top:2px}
+    .meta{text-align:right;font-size:12px;color:#888}
+    h2{font-size:15px;font-weight:700;color:#B8732A;margin:16px 0 8px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A}
+    table{width:100%;border-collapse:collapse;margin-top:8px}
     th{background:#B8732A;color:#fff;padding:8px 10px;text-align:left;font-size:12px}
     td{padding:7px 10px;border-bottom:1px solid #eee;font-size:12px}
     tr:nth-child(even) td{background:#fafafa}
-    .total{margin-top:16px;text-align:right;font-size:14px;font-weight:700;color:#B8732A}
-    .footer{margin-top:24px;font-size:11px;color:#aaa;text-align:center}
+    .footer{margin-top:24px;font-size:11px;color:#aaa;text-align:center;padding-top:10px;border-top:1px solid #eee}
     @media print{body{padding:12px}}
   </style></head><body>
-  <h1>☕ Café Bloom — ${title}</h1>
-  <div class="sub">${dateLabel} · បោះពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
+  <div class="header">
+    <div><div class="logo">☕ ${_shop}<span>${_branch}</span></div></div>
+    <div class="meta">
+      <b>${dateLabel}</b><br/>
+      បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
+      ${_user ? `<span style="color:#B8732A">👤 ${_user}</span>` : ""}
+    </div>
+  </div>
+  <h2>${title}</h2>
   ${tableHTML}
-  <div class="footer">Café Bloom POS © ${new Date().getFullYear()}</div>
+  <div class="footer">${_shop} POS © ${new Date().getFullYear()}${_user ? " · 👤 "+_user : ""}</div>
   \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
   </body></html>`);
   win.document.close();
@@ -951,7 +960,7 @@ export default function CafeBloom() {
         {page === "pos"       && <POSPage       {...shared} />}
         {page === "tables"    && <TablesPage    {...shared} />}
         {page === "menu"      && <MenuPage      {...shared} />}
-        {page === "inventory" && <InventoryPage {...shared} />}
+        {page === "inventory" && <InventoryPage {...shared} serverUrl={CLOUD_URL} />}
         {page === "orders"    && <OrdersPage    {...shared} />}
         {page === "report"    && <ReportPage    {...shared} />}
         {page === "finance"   && <FinancePage   {...shared} />}
@@ -1561,91 +1570,151 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 // ═══════════════════════════════════════════════════════════════════
 //  TABLES PAGE
 // ═══════════════════════════════════════════════════════════════════
-function TablesPage({ tables, setTables, orders }) {
+function TablesPage({ tables, setTables, orders, currentUser, isAdmin, isGlobalAdmin }) {
   const busy = tables.filter(t => t.status === "busy").length;
+  const canManage = isAdmin || isGlobalAdmin;
+  const [showAdd,    setShowAdd]    = useState(false);
+  const [addLabel,   setAddLabel]   = useState("");
+  const [addEmoji,   setAddEmoji]   = useState("🪑");
+  const [editTid,    setEditTid]    = useState(null);
+  const [editLabel,  setEditLabel]  = useState("");
+  const [delConfTid, setDelConfTid] = useState(null);
+  const TABLE_EMOJIS = ["🪑","🛋️","🏮","🌿","⭐","🎯","💎","🏠","🌸","🍽️","☕","🎪"];
 
   function toggleTable(tid) {
     setTables(prev => prev.map(t => t.table_id === tid
-      ? { ...t, status: t.status === "busy" ? "free" : "busy" }
-      : t
-    ));
+      ? { ...t, status: t.status === "busy" ? "free" : "busy" } : t));
   }
+  function addTable() {
+    const label = addLabel.trim();
+    if (!label) return;
+    const numericIds = tables.map(t => isNaN(t.table_id) ? 0 : Number(t.table_id));
+    const nextId = isNaN(label) ? label : Math.max(0, ...numericIds) + 1;
+    setTables(prev => [...prev, { table_id: nextId, label: addEmoji+" "+label, status:"free" }]);
+    setAddLabel(""); setAddEmoji("🪑"); setShowAdd(false);
+  }
+  function saveRename(tid) {
+    const label = editLabel.trim();
+    if (!label) { setEditTid(null); return; }
+    setTables(prev => prev.map(t => t.table_id===tid ? {...t,label} : t));
+    setEditTid(null);
+  }
+  function deleteTable(tid) {
+    setTables(prev => prev.filter(t => t.table_id !== tid));
+    setDelConfTid(null);
+  }
+  const btnSm = { background:"transparent", border:"1px solid #333", borderRadius:6, color:"#888", cursor:"pointer", fontFamily:"inherit", fontSize:11, padding:"3px 8px" };
 
   return (
     <div style={{ padding:"16px 14px 32px" }}>
-      {/* Header */}
-      <div style={{ marginBottom:20 }}>
-        <div style={{ fontWeight:700, fontSize:20, display:"flex", alignItems:"center", gap:8 }}>
-          🪑 គ្រប់គ្រងតុ
+      <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20, flexWrap:"wrap" }}>
+        <div style={{ flex:1 }}>
+          <div style={{ fontWeight:700, fontSize:20 }}>🪑 គ្រប់គ្រងតុ</div>
+          <div style={{ fontSize:12, color:"var(--text-dim)", marginTop:4 }}>{busy} / {tables.length} តុ កំពុងប្រើ</div>
         </div>
-        <div style={{ fontSize:12, color:"#555", marginTop:4 }}>
-          {busy} / {tables.length} តុ កំពុងប្រើ
-        </div>
+        {canManage && (
+          <button onClick={() => setShowAdd(true)}
+            style={{ padding:"9px 20px", borderRadius:10, border:"none", cursor:"pointer", fontFamily:"inherit", fontSize:13, fontWeight:700, background:"linear-gradient(135deg,var(--accent-dk),var(--accent))", color:"#fff" }}>
+            ➕ បន្ថែមតុ
+          </button>
+        )}
       </div>
 
-      {/* Table grid */}
+      {showAdd && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"var(--bg-card)", border:"1px solid var(--accent)", borderRadius:18, padding:28, width:340, maxWidth:"92vw" }}>
+            <div style={{ fontWeight:700, fontSize:16, color:"var(--accent)", marginBottom:16 }}>➕ បន្ថែមតុថ្មី</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:14 }}>
+              {TABLE_EMOJIS.map(e => (
+                <button key={e} onClick={() => setAddEmoji(e)}
+                  style={{ fontSize:20, padding:"4px 6px", borderRadius:8, border:"none", cursor:"pointer", fontFamily:"inherit",
+                    background:addEmoji===e?"#E8A84B33":"transparent", outline:addEmoji===e?"2px solid var(--accent)":"none" }}>{e}</button>
+              ))}
+            </div>
+            <input className="inp" placeholder="ឈ្មោះ / លេខ (ឧ. 1, VIP, Terrace)"
+              value={addLabel} onChange={e => setAddLabel(e.target.value)}
+              onKeyDown={e => e.key==="Enter" && addTable()} autoFocus
+              style={{ width:"100%", marginBottom:10, boxSizing:"border-box" }} />
+            {addLabel.trim() && <div style={{ marginBottom:12, padding:"8px 12px", borderRadius:8, background:"var(--bg-main)", border:"1px solid var(--accent)", fontSize:13, color:"var(--accent)" }}>Preview: {addEmoji} {addLabel.trim()}</div>}
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => { setShowAdd(false); setAddLabel(""); }} style={{ flex:1, padding:9, borderRadius:10, border:"1px solid #333", background:"transparent", color:"var(--text-dim)", cursor:"pointer", fontFamily:"inherit" }}>បោះបង់</button>
+              <button onClick={addTable} disabled={!addLabel.trim()} style={{ flex:1, padding:9, borderRadius:10, border:"none", cursor:"pointer", fontFamily:"inherit", fontWeight:700, background:addLabel.trim()?"linear-gradient(135deg,var(--accent-dk),var(--accent))":"#333", color:addLabel.trim()?"#fff":"#555" }}>✅ បង្កើត</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {delConfTid !== null && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.7)", zIndex:500, display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{ background:"var(--bg-card)", borderRadius:16, padding:24, maxWidth:300, width:"90%", textAlign:"center" }}>
+            <div style={{ fontSize:36, marginBottom:8 }}>🗑️</div>
+            <div style={{ fontWeight:700, fontSize:15, marginBottom:6 }}>លុបតុ {delConfTid}?</div>
+            <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:18 }}>មិនអាចត្រឡប់វិញ</div>
+            <div style={{ display:"flex", gap:8 }}>
+              <button onClick={() => setDelConfTid(null)} style={{ flex:1, padding:9, borderRadius:10, border:"1px solid #333", background:"transparent", color:"var(--text-dim)", cursor:"pointer", fontFamily:"inherit" }}>បោះបង់</button>
+              <button onClick={() => deleteTable(delConfTid)} style={{ flex:1, padding:9, borderRadius:10, border:"none", background:"#8B1A1A", color:"#fff", cursor:"pointer", fontFamily:"inherit", fontWeight:700 }}>🗑️ លុប</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:14 }}>
         {tables.map(t => {
           const isBusy = t.status === "busy";
-          // Only show TODAY's orders for this table (not all history)
           const todayStr = new Date().toISOString().slice(0, 10);
           const tableOrders = (orders||[]).filter(o => {
             const matchTable = String(o.table) === String(t.table_id) || o.table === t.table_id;
             const orderDate = o.ts ? o.ts.slice(0, 10) : new Date(o.order_id).toISOString().slice(0, 10);
-            const isToday = orderDate === todayStr || o.ts?.includes(todayStr) || String(o.order_id).length === 13 && new Date(o.order_id).toISOString().slice(0,10) === todayStr;
-            return matchTable && isToday;
+            return matchTable && (orderDate === todayStr || o.ts?.includes(todayStr));
           });
-          const tableTotal = isBusy ? tableOrders.reduce((s,o) => s + (o.total||0) + (o.tax||0), 0) : 0;
+          const tableTotal = isBusy ? tableOrders.reduce((s,o) => s+(o.total||0)+(o.tax||0),0) : 0;
+          const displayName = t.label || ("តុ "+t.table_id);
+          const isEditing = editTid === t.table_id;
           return (
-            <div key={t.table_id} style={{
-              background:"var(--bg-card)",
-              border:`2px solid ${isBusy ? "#8B1A1A" : "#1A4A1A"}`,
-              borderRadius:16, padding:22, textAlign:"center",
-              boxShadow: isBusy ? "0 0 20px #8B1A1A22" : "0 0 20px #1A4A1A22",
-              transition:"all .2s",
-            }}>
-              <div style={{ fontSize:34 }}>🪑</div>
-              <div style={{ fontWeight:700, fontSize:18, marginTop:8, marginBottom:6 }}>
-                តុ {t.table_id}
-              </div>
-              <div style={{
-                fontSize:12, padding:"4px 14px", borderRadius:20,
-                display:"inline-block", fontWeight:600,
-                background: isBusy ? "#8B1A1A22" : "#1A4A1A22",
-                color: isBusy ? "#E74C3C" : "#27AE60",
-              }}>
-                {isBusy ? "🔴 មានអតិថិជន" : "🟢 ទំនេរ"}
-              </div>
-              {isBusy && tableTotal > 0 && (
-                <div style={{ fontSize:13, color:"#E8A84B", fontWeight:700, marginTop:6 }}>
-                  ${tableTotal.toFixed(2)}
+            <div key={t.table_id} style={{ background:"var(--bg-card)", border:`2px solid ${isBusy?"#8B1A1A":"#1A4A1A"}`, borderRadius:16, padding:18, textAlign:"center", boxShadow:isBusy?"0 0 20px #8B1A1A22":"0 0 20px #1A4A1A22", transition:"all .2s", position:"relative" }}>
+              {canManage && !isBusy && <button onClick={() => setDelConfTid(t.table_id)} style={{ position:"absolute", top:8, right:8, background:"transparent", border:"none", color:"#444", cursor:"pointer", fontSize:14, padding:"2px 4px" }}>✕</button>}
+              <div style={{ fontSize:32 }}>{t.label?.match(/^\S+/)?.[0]||"🪑"}</div>
+              {isEditing ? (
+                <div style={{ marginTop:6, marginBottom:6 }}>
+                  <input className="inp" value={editLabel} onChange={e=>setEditLabel(e.target.value)}
+                    onKeyDown={e=>{if(e.key==="Enter")saveRename(t.table_id);if(e.key==="Escape")setEditTid(null);}}
+                    autoFocus style={{ width:"100%", fontSize:13, padding:"4px 8px", textAlign:"center", boxSizing:"border-box" }}/>
+                  <div style={{ display:"flex", gap:4, marginTop:4 }}>
+                    <button onClick={()=>saveRename(t.table_id)} style={{...btnSm,flex:1,color:"#27AE60",borderColor:"#27AE6044"}}>✓</button>
+                    <button onClick={()=>setEditTid(null)} style={{...btnSm,flex:1}}>✕</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontWeight:700, fontSize:16, marginTop:6, marginBottom:4, display:"flex", alignItems:"center", justifyContent:"center", gap:4 }}>
+                  {displayName}
+                  {canManage && <button onClick={()=>{setEditTid(t.table_id);setEditLabel(displayName);}} style={{ background:"transparent",border:"none",color:"#555",cursor:"pointer",fontSize:11 }}>✏️</button>}
                 </div>
               )}
-              <button
-                onClick={() => toggleTable(t.table_id)}
-                style={{
-                  marginTop:12, width:"100%", padding:"7px",
-                  borderRadius:8, border:"1px solid rgba(255,255,255,.1)",
-                  background:"rgba(255,255,255,.05)", color: isBusy ? "#E74C3C" : "#27AE60",
-                  cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:600,
-                  transition:"all .15s",
-                }}
-              >
-                {isBusy ? "✓ ចេញ" : "ចូល"}
+              <div style={{ fontSize:12, padding:"4px 14px", borderRadius:20, display:"inline-block", fontWeight:600, background:isBusy?"#8B1A1A22":"#1A4A1A22", color:isBusy?"#E74C3C":"#27AE60" }}>
+                {isBusy?"🔴 មានអតិថិជន":"🟢 ទំនេរ"}
+              </div>
+              {isBusy && tableTotal>0 && <div style={{ fontSize:13, color:"var(--accent)", fontWeight:700, marginTop:6 }}>${tableTotal.toFixed(2)}</div>}
+              <button onClick={()=>toggleTable(t.table_id)} style={{ marginTop:10, width:"100%", padding:"7px", borderRadius:8, border:"1px solid rgba(255,255,255,.1)", background:"rgba(255,255,255,.05)", color:isBusy?"#E74C3C":"#27AE60", cursor:"pointer", fontFamily:"inherit", fontSize:12, fontWeight:600 }}>
+                {isBusy?"✓ ចេញ":"ចូល"}
               </button>
             </div>
           );
         })}
+        {canManage && (
+          <div onClick={()=>setShowAdd(true)} style={{ background:"var(--bg-card)",border:"2px dashed #333",borderRadius:16,padding:18,textAlign:"center",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,opacity:0.6,transition:"opacity .2s",minHeight:160 }}
+            onMouseEnter={e=>e.currentTarget.style.opacity=1} onMouseLeave={e=>e.currentTarget.style.opacity=0.6}>
+            <div style={{ fontSize:32 }}>➕</div>
+            <div style={{ fontSize:13, color:"var(--text-dim)", fontWeight:600 }}>បន្ថែមតុ</div>
+          </div>
+        )}
       </div>
-
-      {/* Legend */}
       <div style={{ marginTop:20, display:"flex", gap:16, flexWrap:"wrap" }}>
-        {[["#27AE60","ទំ"],["#E74C3C","កំពុងប្រើ"],["#F39C12","បានRA"],["#3498DB","សំអាត"]].map(([color,label]) => (
-          <div key={label} style={{ display:"flex", alignItems:"center", gap:6, fontSize:12, color:"#555" }}>
-            <div style={{ width:10, height:10, borderRadius:"50%", background:color }} />
-            {label}
+        {[["#27AE60","ទំនេរ"],["#E74C3C","កំពុងប្រើ"]].map(([c,l])=>(
+          <div key={l} style={{ display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--text-dim)" }}>
+            <div style={{ width:10,height:10,borderRadius:"50%",background:c }}/>{l}
           </div>
         ))}
+        {canManage && <div style={{ fontSize:12,color:"var(--text-dim)",marginLeft:"auto" }}>💡 ✕ លុបតុ · ✏️ ប្តូរឈ្មោះ</div>}
       </div>
     </div>
   );
@@ -2037,7 +2106,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
 // ═══════════════════════════════════════════════════════════════════
 
 
-function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser }) {
+function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs, isAdmin, currentUser, serverUrl, branchId, branchList }) {
   // Staff: read-only view — cannot add/edit/delete/restock
   const canEdit = isAdmin;
   const [subTab, setSubTab] = useState("stock");
@@ -2049,6 +2118,25 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
   const [recSort, setRecSort] = useState("product");
   const [expandAll, setExpandAll] = useState(true);
   const [collapsed, setCollapsed] = useState({});
+  const [migBusy,   setMigBusy]   = useState(false);
+  const [migResult, setMigResult] = useState(null);
+
+  const runMigration = async () => {
+    setMigBusy(true); setMigResult(null);
+    try {
+      const token = localStorage.getItem("pos_token");
+      const apiUrl = serverUrl || window.CAFE_SERVER || CLOUD_URL;
+      const r = await fetch(`${apiUrl}/api/migrate-recipes`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",
+          ...(token ? { Authorization:"Bearer "+token } : {}) },
+      });
+      const data = await r.json();
+      if (data.ok) { setMigResult(data.results); notify("✅ Migrate recipes រួចរាល់!"); }
+      else { notify("❌ "+(data.error||"មានបញ្ហា")); setMigResult([{branch_id:"error",before:0,after:0,removed:0}]); }
+    } catch(e) { notify("❌ "+e.message); }
+    setMigBusy(false);
+  };
 
   const saveIng = (data) => {
     if (modal.mode === "add") setIngs(p => [...p, { ...data, ingredient_id: nextId(p) }]);
@@ -2130,7 +2218,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
               📊 Export CSV
             </button>
             <button style={{ ...btnSmall, color:"#E8A84B", borderColor:"#E8A84B44", fontSize:12, padding:"7px 14px" }}
-              onClick={() => {
+              onClick={async () => {
                 const date = new Date().toLocaleDateString("km-KH");
                 const rows = ings.map(i => {
                   const usedTotal = (logs||[]).filter(l => l.ingredient === i.ingredient_name)
@@ -2166,7 +2254,10 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                   </tr></thead>
                   <tbody>${rows}</tbody>
                 </table>`;
-                exportPDF("📦 របាយការណ៍ស្តុក", date, tableHTML);
+                const shopName   = localStorage.getItem("cb_shop_name") || "Café Boom";
+                const branchName = await resolveBranchName(branchId, branchList);
+                const userName   = currentUser?.name || currentUser?.username || "";
+                exportPDF("📦 របាយការណ៍ស្តុក", date, tableHTML, shopName, branchName, userName);
                 notify("✅ Print PDF រួចហើយ!");
               }}>
               🖨️ Print PDF
@@ -2287,7 +2378,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
           );
           const totalMappings = recipes.length;
           const totalProds = new Set(recipes.map(r => r.product_id)).size;
-          const missingIng = recipes.filter(r => !ings.find(i => i.ingredient_id === r.ingredient_id)).length;
+          const missingIng = recipes.filter(r => !ings.find(i => Number(i.ingredient_id) === Number(r.ingredient_id))).length;
           return (
             <>
               {/* Summary bar */}
@@ -2310,14 +2401,14 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 <div style={{ background:"#E74C3C11",border:"1px solid #E74C3C44",borderRadius:10,padding:"12px 16px",marginBottom:12,fontSize:12,color:"#E74C3C" }}>
                   <div style={{fontWeight:700,marginBottom:6}}>⚠️ មាន {missingIng} mapping ដែល ingredient ត្រូវបានលុប</div>
                   <div style={{fontSize:11,color:"#E74C3C88"}}>
-                    {recipes.filter(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id)).map(r=>{
+                    {recipes.filter(r=>!ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id))).map(r=>{
                       const prod = prods.find(p=>p.product_id===r.product_id);
                       return <span key={r.recipe_id} style={{background:"#E74C3C22",borderRadius:6,padding:"2px 8px",marginRight:6,marginBottom:4,display:"inline-block"}}>
                         {prod?.product_name||"?"} → ID:{r.ingredient_id}
                       </span>;
                     })}
                   </div>
-                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>i.ingredient_id===r.ingredient_id)))}
+                  <button onClick={()=>setRecipes(p=>p.filter(r=>ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id))))}
                     style={{...btnSmall,marginTop:8,fontSize:11,color:"#E74C3C",borderColor:"#E74C3C44"}}>
                     🗑 លុប mappings ខូច​ទាំងអស់
                   </button>
@@ -2327,11 +2418,11 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 const pr = recipes.filter(r => r.product_id === prod.product_id);
                 const isCollapsed = collapsed[prod.product_id] !== undefined ? collapsed[prod.product_id] : !expandAll;
                 const totalCost = pr.reduce((sum,r) => {
-                  const ing = ings.find(i=>i.ingredient_id===r.ingredient_id);
+                  const ing = ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id));
                   return sum + (Number(r.quantity_required)*(ing?.cost_per_unit||0));
                 },0);
-                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>i.ingredient_id===r.ingredient_id); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
-                const hasMissing = pr.some(r=>!ings.find(i=>i.ingredient_id===r.ingredient_id));
+                const canMake = pr.length>0 && pr.every(r=>{ const ing=ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id)); return ing && Number(ing?.current_stock)>=Number(r.quantity_required); });
+                const hasMissing = pr.some(r=>!ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id)));
                 return (
                   <div key={prod.product_id} style={{ background:"var(--bg-card)",border:`1px solid ${hasMissing?"#E74C3C33":canMake?"#27AE6033":"#F39C1233"}`,borderRadius:12,marginBottom:10,overflow:"hidden" }}>
                     <div style={{ background:"var(--bg-header)",padding:"10px 16px",display:"flex",alignItems:"center",gap:10,cursor:"pointer" }}
@@ -2350,7 +2441,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                     {!isCollapsed && (
                       <TableWrap headers={["#","ingredient + ប្រើ/serve","ស្តុក​នៅ","status / ចំនួន",""]}>
                         {pr.map((r,idx)=>{
-                          const ing=ings.find(i=>i.ingredient_id===r.ingredient_id);
+                          const ing=ings.find(i=>Number(i.ingredient_id)===Number(r.ingredient_id));
                           const enough=ing&&Number(ing?.current_stock)>=Number(r.quantity_required);
                           const servings=ing?Math.floor(Number(ing?.current_stock)/Number(r.quantity_required)):0;
                           return (
@@ -2419,7 +2510,34 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         })()}
 
         {subTab === "sql" && (
-          <div style={{ background: "var(--bg-main)", border: "1px solid #1A181C", borderRadius: 14, padding: 20 }}>
+          <div style={{ background: "var(--bg-main)", border: "1px solid var(--border-col)", borderRadius: 14, padding: 20 }}>
+            {isAdmin && (
+              <div style={{ marginBottom:20, padding:16, background:"#120A00", border:"1px solid #E8A84B44", borderRadius:12 }}>
+                <div style={{ fontWeight:700, fontSize:13, color:"var(--accent)", marginBottom:6 }}>🔧 Migrate Recipes → Branch Data</div>
+                <div style={{ fontSize:12, color:"var(--text-dim)", marginBottom:12 }}>Fix recipe mappings ខ្វះ ingredient — remove broken rows, sync ទៅ branches ទាំងអស់</div>
+                <button onClick={runMigration} disabled={migBusy}
+                  style={{ padding:"9px 20px", borderRadius:9, border:"none", cursor:migBusy?"not-allowed":"pointer",
+                    fontFamily:"inherit", fontSize:13, fontWeight:700,
+                    background:migBusy?"var(--bg-card)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",
+                    color:migBusy?"var(--text-dim)":"#fff", opacity:migBusy?0.7:1 }}>
+                  {migBusy ? "⏳ កំពុង migrate..." : "▶ Run Migration"}
+                </button>
+                {migResult && (
+                  <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:5 }}>
+                    {migResult.map(r => (
+                      <div key={r.branch_id} style={{ fontSize:12, display:"flex", gap:8, alignItems:"center" }}>
+                        <span style={{ color:"#27AE60", fontWeight:700, minWidth:80 }}>{r.branch_id}</span>
+                        <span style={{ color:"var(--text-dim)" }}>{r.before} →</span>
+                        <span style={{ color:"var(--accent)", fontWeight:700 }}>{r.after}</span>
+                        {r.removed>0 && <span style={{ color:"#E74C3C", fontSize:11 }}>(-{r.removed} broken)</span>}
+                        <span style={{ color:"#27AE60" }}>✅</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:8 }}>📋 Reference SQL</div>
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
@@ -2577,7 +2695,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
   };
 
   const doExportPDF = async () => {
-    const shopName   = localStorage.getItem("cb_shop_name") || "Café Boom";
+    const shopName   = localStorage.getItem("cb_shop_name") || "Café Bloom";
     const branchName = await resolveBranchName(branchId, branchList);
     const userName   = currentUser?.name || currentUser?.username || "";
     const orderRows = filtered.map(o => `<tr>
@@ -2627,11 +2745,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     </style></head><body>
     <div class="header">
       <div><div class="logo">☕ ${shopName}<span>${branchName}</span></div></div>
-      <div class="meta">
-        <b>${dateLabel}</b><br/>
-        បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
-        ${userName ? `<span style="color:#B8732A">👤 ${userName}</span>` : ""}
-      </div>
+      <div class="meta"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${userName?`<span style="color:#B8732A">👤 ${userName}</span>`:""}</div>
     </div>
 
     <h2>📊 សង្ខេប</h2>
@@ -2652,7 +2766,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Progress</th><th>ស្ថានភាព</th></tr></thead>
     <tbody>${stockRows}</tbody></table>
 
-    <div class="footer">${shopName} POS © ${new Date().getFullYear()}${userName ? " · 👤 "+userName : ""}</div>
+    <div class="footer">Café Boom POS © ${new Date().getFullYear()}</div>
     \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
     </body></html>`);
     win.document.close();
@@ -3040,12 +3154,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     </style></head><body>
     <div class="header">
       <div><div class="logo">☕ ${shopName}<span>${branchName}</span></div></div>
-      <div class="meta">
-        <b>របាយការណ៍${period === "day" ? "ប្រចាំថ្ងៃ" : period === "month" ? "ប្រចាំខែ" : "ប្រចាំឆ្នាំ"}</b><br/>
-        ${periodLabel}<br/>
-        បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
-        ${userName ? `<span style="color:#B8732A">👤 ${userName}</span>` : ""}
-      </div>
+      <div class="meta"><b>របាយការណ៍${period === "day" ? "ប្រចាំថ្ងៃ" : period === "month" ? "ប្រចាំខែ" : "ប្រចាំឆ្នាំ"}</b><br/>${periodLabel}<br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${userName?`<span style="color:#B8732A">👤 ${userName}</span>`:""}</div>
     </div>
 
     <h2>📊 សង្ខេបទូទៅ</h2>
@@ -3787,9 +3896,9 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const [allOrders,  setAllOrders]  = useState(null); // null = not loaded yet
   const [loadingAll, setLoadingAll] = useState(false);
 
-  // Load branches + all-orders when admin switches away from "current"
+  // Load branches for all admins
   useEffect(() => {
-    if (!isGlobalAdmin) return;
+    if (!isAdmin) return;
     if (branches.length === 0) {
       const token = localStorage.getItem("pos_token");
       const hdr = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
@@ -3970,16 +4079,10 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   const doPrint = async () => {
     const shopName = localStorage.getItem("cb_shop_name") || "Café Boom";
     const userName = currentUser?.name || currentUser?.username || "";
-    // Resolve branch label — fetch if needed
-    const _resolveLabel = async (bid) => {
-      if (!bid) return "";
-      const fromState = (branches.length>0?branches:branchList||[]).find(b=>b.branch_id===bid)?.branch_name;
-      if (fromState) return fromState;
-      return await resolveBranchName(bid, branchList);
-    };
-    const branchLabel = selBranch === "all"
-      ? "ទាំងអស់ (All branches)"
-      : await _resolveLabel(viewBranchId || branchId);
+    const _allBranches = (branches.length>0?branches:branchList)||[];
+    const branchLabel = selBranch==="all" ? "ទាំងអស់ (All branches)"
+      : (_allBranches.find(b=>b.branch_id===(viewBranchId||branchId))?.branch_name
+         || await resolveBranchName(viewBranchId||branchId, branchList));
 
     // Transaction detail rows (new system)
     const sortedTxns = [...monthTxns].sort((a,b)=>(a.date||"").localeCompare(b.date||""));
@@ -4082,7 +4185,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
          +"<table><thead><tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr></thead>"
          +"<tbody>"+histRows+"</tbody></table>"
         :"")
-      +"<div class='footer'>"+shopName+" POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+monthLabel+(userName?" &middot; 👤 "+userName:"")+"</div>"
+      +"<div class='footer'>"+shopName+" POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+monthLabel+"</div>"
       +"<script>window.onload=function(){window.print();}</script></body></html>";
 
     const win = window.open("","_blank","width=1100,height=800");
