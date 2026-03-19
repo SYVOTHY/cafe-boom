@@ -240,8 +240,9 @@ const PERM_LABELS = {
 const ADMIN_ONLY_PERMS = new Set([]); // Super admin controls all
 
 const DEFAULT_PERMS_TPL = {
-  pos: true, tables: true, menu: true, orders: true, report: true, finance: true,
-  inventory: false, users: false, branches: false, theme: false, backup: false,
+  pos: false, tables: false, menu: false,
+  orders: false, report: false, finance: false,
+  // inventory, users, theme — admin-only (staff gets read-only inventory view)
 };
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
@@ -285,7 +286,7 @@ const exportPDF = (title, dateLabel, tableHTML, shopName, branchName, userName) 
   <h1>☕ Café Bloom — ${title}</h1>
   <div class="sub">${dateLabel} · បោះពុម្ព: ${new Date().toLocaleString("km-KH")}</div>
   ${tableHTML}
-  <div class="footer">${_S} POS © ${new Date().getFullYear()}${_U?" · ������ "+_U:""}</div>
+  <div class="footer">${_S} POS © ${new Date().getFullYear()}${_U?" · 👤 "+_U:""}</div>
   \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
   </body></html>`);
   win.document.close();
@@ -2412,7 +2413,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
           <div style={{ background:"var(--bg-main)", border:"1px solid var(--border-col)", borderRadius:14, padding:20 }}>
             {isAdmin && (
               <div style={{ marginBottom:20,padding:16,background:"#120A00",border:"1px solid #E8A84B44",borderRadius:12 }}>
-                <div style={{ fontWeight:700,fontSize:13,color:"var(--accent)",marginBottom:6 }}>������ Migrate Recipes</div>
+                <div style={{ fontWeight:700,fontSize:13,color:"var(--accent)",marginBottom:6 }}>▶ Migrate Recipes</div>
                 <div style={{ fontSize:12,color:"var(--text-dim)",marginBottom:12 }}>Fix broken recipe→ingredient mappings across all branches</div>
                 <button onClick={runMigration} disabled={migBusy} style={{ padding:"9px 20px",borderRadius:9,border:"none",cursor:migBusy?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:migBusy?"var(--bg-card)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",color:migBusy?"var(--text-dim)":"#fff",opacity:migBusy?0.7:1 }}>
                   {migBusy?"⏳ កំពុង migrate...":"▶ Run Migration"}
@@ -2427,7 +2428,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                 </div>)}
               </div>
             )}
-            <div style={{ fontSize:11,color:"var(--text-dim)",marginBottom:8 }}>������ Reference SQL</div>
+            <div style={{ fontSize:11,color:"var(--text-dim)",marginBottom:8 }}>≡ Reference SQL</div>
             <SqlBlock code={`-- Auto-deduction Transaction
 START TRANSACTION;
 
@@ -6225,7 +6226,7 @@ function PermModal({ user, onSave, onClose }) {
   const isAllOn=Object.values(perms).every(v=>v);
   const isAllOff=Object.values(perms).every(v=>!v);
   const GROUPS=[
-    {label:"������ Pages ចំប័ង",keys:["pos","tables","menu","orders","report","finance"]},
+    {label:"📱 Pages ចំប័ង",keys:["pos","tables","menu","orders","report","finance"]},
     {label:"⚙️ Admin Pages",keys:["inventory","users","branches","theme","backup"]},
   ];
   return (
