@@ -4466,19 +4466,19 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     let histRows = "";
 
     if (finPeriod === "day") {
-      // Daily view: show all days that have orders OR expenses in selected month
+      // Daily view: show ALL days in selected month (never skip)
       histTitle = "📅 ប្រវត្តិប្រចាំថ្ងៃ (ខែ " + monthLabel + ")";
       histHeaders = "<tr><th>ថ្ងៃ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr>";
-      const allDays = [...new Set([
-        ...(sourceOrders||[]).map(o => { try { return new Date(o.order_id).toISOString().slice(0,10); } catch { return null; } }).filter(Boolean),
-        ...(Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).map(t=>t.date?.slice(0,10)).filter(Boolean),
-        selDay,
-      ])].filter(d => d.slice(0,7) === selMonth).sort().reverse();
-      histRows = allDays.map(day => {
+      const [dy, dm] = selDay.split("-");
+      const daysInMonth = new Date(parseInt(dy), parseInt(dm), 0).getDate();
+      const allDaysInMonth = Array.from({length: daysInMonth}, (_, i) =>
+        dy + "-" + dm + "-" + String(i+1).padStart(2,"0")
+      );
+      histRows = allDaysInMonth.map(day => {
         const rev2 = (sourceOrders||[]).filter(o=>{ try{return new Date(o.order_id).toISOString().slice(0,10)===day;}catch{return false;} }).reduce((s,o)=>s+o.total+o.tax,0);
-        const exp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,10)===day&&(!viewBranchId||t.branch_id===viewBranchId)).reduce((s,t)=>s+Number(t.amount||0),0);
+        const exp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,10)===day).reduce((s,t)=>s+Number(t.amount||0),0);
         const pnl2 = rev2 - exp2;
-        return "<tr"+(day===selDay?" style='background:#fff7f0'":'')+">"
+        return "<tr"+(day===selDay?" style='background:#fff7f0;font-weight:700'":'')+">"
           +"<td>"+day+"</td>"
           +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
           +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
@@ -4486,28 +4486,27 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       }).join("");
 
     } else if (finPeriod === "year") {
-      // Yearly view: show all months in selected year
+      // Yearly view: show ALL 12 months in selected year (never skip)
       histTitle = "📅 ប្រវត្តិប្រចាំខែ (ឆ្នាំ " + selYear + ")";
       histHeaders = "<tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr>";
       const allMonthsInYear = Array.from({length:12}, (_,i) => selYear + "-" + String(i+1).padStart(2,"0"));
       histRows = allMonthsInYear.map(mo => {
         const [ey,em] = mo.split("-");
         const rev2 = (sourceOrders||[]).filter(o=>{ try{return new Date(o.order_id).toISOString().slice(0,7)===mo;}catch{return false;} }).reduce((s,o)=>s+o.total+o.tax,0);
-        const txnExp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,7)===mo&&(!viewBranchId||t.branch_id===viewBranchId)).reduce((s,t)=>s+Number(t.amount||0),0);
+        const txnExp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,7)===mo).reduce((s,t)=>s+Number(t.amount||0),0);
         const legRec = monthlyRecords.find(e=>e.month===mo);
         const legExp2 = legRec ? expCats.reduce((s,c)=>s+Number((legRec.items||{})[c.id]||0),0) : 0;
         const exp2 = txnExp2 + legExp2;
         const pnl2 = rev2 - exp2;
-        if (rev2===0 && exp2===0) return ""; // skip empty months
-        return "<tr"+(mo===selMonth?" style='background:#fff7f0'":'')+">"
+        return "<tr"+(mo===selMonth?" style='background:#fff7f0;font-weight:700'":'')+">"
           +"<td>"+MON_KH[parseInt(em)-1]+" "+ey+"</td>"
           +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
           +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
           +"<td style='font-weight:700;color:"+(pnl2>=0?"#27ae60":"#c0392b")+"'>"+(pnl2>=0?"+":"")+fmt(pnl2)+"</td></tr>";
-      }).filter(Boolean).join("");
+      }).join("");
 
     } else {
-      // Monthly view: show last 12 months
+      // Monthly view: show last 12 months — ALL branches (no branch filter)
       histTitle = "📅 ប្រវត្តិប្រចាំខែ (១២ ខែចុងក្រោយ)";
       histHeaders = "<tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr>";
       const allMonths = [...new Set([
@@ -4517,12 +4516,13 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       histRows = allMonths.map(mo => {
         const [ey,em] = mo.split("-");
         const rev2 = (sourceOrders||[]).filter(o=>{ try{return new Date(o.order_id).toISOString().slice(0,7)===mo;}catch{return false;} }).reduce((s,o)=>s+o.total+o.tax,0);
-        const txnExp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,7)===mo&&(!viewBranchId||t.branch_id===viewBranchId)).reduce((s,t)=>s+Number(t.amount||0),0);
+        // All branches — no viewBranchId filter
+        const txnExp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,7)===mo).reduce((s,t)=>s+Number(t.amount||0),0);
         const legRec = monthlyRecords.find(e=>e.month===mo);
         const legExp2 = legRec ? expCats.reduce((s,c)=>s+Number((legRec.items||{})[c.id]||0),0) : 0;
         const exp2 = txnExp2 + legExp2;
         const pnl2 = rev2 - exp2;
-        return "<tr"+(mo===selMonth?" style='background:#fff7f0'":'')+">"
+        return "<tr"+(mo===selMonth?" style='background:#fff7f0;font-weight:700'":'')+">"
           +"<td>"+MON_KH[parseInt(em)-1]+" "+ey+"</td>"
           +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
           +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
