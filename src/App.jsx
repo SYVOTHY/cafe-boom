@@ -6978,12 +6978,13 @@ function BackupPage({ branchList, notify, setTheme }) {
           const d=await r.json();
           snap.branches[b.branch_id]={
             branch_name:b.branch_name,
-            orders:d.orders||[],
-            logs:d.logs||[],
+            // Stamp branch_id into every order/log so restore is idempotent
+            orders:(d.orders||[]).map(o=>o?{...o,branch_id:b.branch_id}:o),
+            logs:(d.logs||[]).map(l=>l?{...l,branch_id:b.branch_id}:l),
             tables:d.tables||[],
             ingredients:d.ingredients||[],
             expenses:d.expenses||[],
-            recipes:d.recipes||[],  // per-branch recipes
+            recipes:d.recipes||[],
           };
           setProgress(p=>[...p.slice(0,-1),`✅ ${b.branch_name||b.branch_id} (${(d.orders||[]).length} orders, ${(d.recipes||[]).length} recipes)`]);
         }catch(e){setProgress(p=>[...p.slice(0,-1),`❌ ${b.branch_id}: ${e.message}`]);}
@@ -7038,18 +7039,30 @@ function BackupPage({ branchList, notify, setTheme }) {
       for(const[bid,bd]of Object.entries(snap.branches||{})){
         setRestoreLog(p=>[...p,`⏳ Restoring ${bd.branch_name||bid}...`]);
         let ok=0,fail=0;
+
+        // Build patched branch data — always stamp branch_id into orders & logs
+        // so allOrders filter (o.branch_id === bid) works correctly after restore
+        const patchedBd = { ...bd };
+        if(Array.isArray(bd.orders)){
+          patchedBd.orders = bd.orders.map(o => o ? { ...o, branch_id: bid } : o);
+        }
+        if(Array.isArray(bd.logs)){
+          patchedBd.logs = bd.logs.map(l => l ? { ...l, branch_id: bid } : l);
+        }
+
         for(const t of["orders","logs","tables","ingredients","expenses","recipes"]){
-          if(bd[t]){
+          if(patchedBd[t]){
             try{
-              await fetch(`${CLOUD_URL}/api/db/${t}?branch=${bid}`,{method:"POST",headers:hdr,body:JSON.stringify(bd[t])});
+              await fetch(`${CLOUD_URL}/api/db/${t}?branch=${bid}`,{method:"POST",headers:hdr,body:JSON.stringify(patchedBd[t])});
               ok++;
+              setRestoreLog(p=>[...p, `  ✅ ${t} (${Array.isArray(patchedBd[t])?patchedBd[t].length+" rows":"ok"})`]);
             }catch(e){
               setRestoreLog(p=>[...p,`  ❌ ${bid}/${t}: ${e.message}`]);
               fail++;
             }
           }
         }
-        setRestoreLog(p=>[...p.slice(0,-1),`${fail>0?"⚠️":"✅"} ${bd.branch_name||bid}: ${ok}/6 tables${fail>0?` (${fail} failed)`:""}`]);
+        setRestoreLog(p=>[...p,`${fail>0?"⚠️":"✅"} ${bd.branch_name||bid}: ${ok}/6 tables${fail>0?` (${fail} failed)`:""}`]);
       }
       setRestoreLog(p=>[...p,"✅ Restore complete! Reload page to see changes."]);
       notify("✅ Restore រួចហើយ! សូម reload page");
