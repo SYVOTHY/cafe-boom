@@ -2786,6 +2786,20 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     const _B=await resolveBranchName(branchId,branchList);
     const _U=currentUser?.name||currentUser?.username||"";
     const _L=localStorage.getItem("cb_shop_logo")||"";
+
+    // Period label — matches ReportPage style
+    const MON_KH=["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
+    const periodLbl = filterType==="day"
+      ? new Date(selDate+"T12:00:00").toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"})
+      : filterType==="month"
+        ? MON_KH[parseInt(selMonth.split("-")[1])-1]+" "+selMonth.split("-")[0]
+        : "ទាំងអស់";
+    // Sub-label: 🏪 BranchName · period  (same format as report page)
+    const scopeLbl = "🏪 " + _B + " · " + periodLbl;
+    const logoHtml = _L
+      ? `<img src="${_L}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`
+      : `<div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#B8732A,#E8A84B);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;font-weight:700;flex-shrink:0">🏪</div>`;
+
     const orderRows = filtered.map(o => `<tr>
       <td style="white-space:nowrap;font-size:11px">${o.ts}</td>
       <td>${o.table || "—"}</td>
@@ -2810,14 +2824,15 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
 
     const win = window.open("", "_blank", "width=1000,height=750");
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-    <title>${_S} — ប្រវត្តិ ${dateLabel}</title>
+    <title>${_S} — ប្រវត្តិ ${periodLbl}</title>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
       *{box-sizing:border-box;margin:0;padding:0}
       body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px}
-      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #B8732A}
-      .logo{font-size:20px;font-weight:700;color:#B8732A}
-      .logo span{font-size:11px;color:#888;display:block;font-weight:400}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #B8732A;margin-bottom:20px;padding-bottom:14px}
+      .logo-left{display:flex;align-items:center;gap:12px}
+      .shop-name{font-size:20px;font-weight:700;color:#B8732A}
+      .shop-sub{font-size:12px;color:#888;margin-top:3px}
       .meta{text-align:right;font-size:12px;color:#888}
       h2{font-size:14px;font-weight:700;color:#B8732A;margin:18px 0 8px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A}
       table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:12px}
@@ -2829,15 +2844,32 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
       .kpi{background:#fff7f0;border:1px solid #e8d8c8;border-radius:8px;padding:10px 12px}
       .kpi .val{font-size:18px;font-weight:700;color:#B8732A;margin-top:2px}
       .kpi .lbl{font-size:11px;color:#888}
+      .sig-box{margin-top:36px;padding-top:14px;border-top:1px dashed #ccc;display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+      .sig-item{font-size:12px;color:#555;line-height:2.2}
+      .sig-line{border-bottom:1px solid #555;display:inline-block;width:180px;margin-left:6px}
       .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
+      @media print{body{padding:14px}}
     </style></head><body>
-    <div class="header" style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">${_L?`<img src="${_L}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`:`<div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#B8732A,#E8A84B);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">🏪</div>`}<div><div class="logo">${_S}<span>${_B}</span></div></div></div><div class="meta" style="text-align:right"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
+    <div class="header">
+      <div class="logo-left">
+        ${logoHtml}
+        <div>
+          <div class="shop-name">${_S}</div>
+          <div class="shop-sub">${scopeLbl}</div>
+        </div>
+      </div>
+      <div class="meta">
+        <b>ប្រវត្តិ${filterType==="day"?"ប្រចាំថ្ងៃ":filterType==="month"?"ប្រចាំខែ":""}</b><br/>
+        បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
+        ${_U?`<span style="color:#B8732A">👤 ${_U}</span>`:""}
+      </div>
+    </div>
 
     <h2>📊 សង្ខេប</h2>
     <div class="kpi-grid">
       <div class="kpi"><div class="lbl">💰 ចំណូលសរុប</div><div class="val">${fmt(totalRev)}</div></div>
       <div class="kpi"><div class="lbl">🛒 ការបញ្ជាទិញ</div><div class="val">${filtered.length} លើក</div></div>
-      <div class="kpi"><div class="lbl">☕ មុខម្ហូប</div><div class="val">${totalItems} ចាន</div></div>
+      <div class="kpi"><div class="lbl">📦 មុខម្ហូប</div><div class="val">${totalItems} ចាន</div></div>
       <div class="kpi"><div class="lbl">📊 មធ្យម/Order</div><div class="val">${fmt(filtered.length ? totalRev / filtered.length : 0)}</div></div>
     </div>
 
@@ -2851,7 +2883,13 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
     <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Progress</th><th>ស្ថានភាព</th></tr></thead>
     <tbody>${stockRows}</tbody></table>
 
-    <div class="footer">Café Boom POS © ${new Date().getFullYear()}</div>
+    <div class="sig-box">
+      <div class="sig-item">ឈ្មោះ ៖ <span class="sig-line">&nbsp;</span></div>
+      <div class="sig-item">ថ្ងៃខែ ៖ <span class="sig-line">&nbsp;</span></div>
+      <div class="sig-item">ស៊ីញ៉េ ទទួល ៖ <span class="sig-line">&nbsp;</span></div>
+    </div>
+
+    <div class="footer">${_S} POS © ${new Date().getFullYear()} · ប្រវត្តិ ${periodLbl}${_U?" · 👤 "+_U:""}</div>
     \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
     </body></html>`);
     win.document.close();
@@ -3146,7 +3184,9 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
         <tbody>${ingRows || "<tr><td colspan=5 style='color:#888;text-align:center'>គ្មានទិន្នន័យ</td></tr>"}</tbody></table>`;
     }).join("");
 
-    const logoHtml = _L ? `<img src="${_L}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>` : "";
+    const logoHtml = _L
+      ? `<img src="${_L}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`
+      : `<div style="width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#B8732A,#E8A84B);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;flex-shrink:0">🏪</div>`;
     const win = window.open("","_blank","width=900,height=700");
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
     <title>${_S} — ស្ថានភាពស្តុក ${today}</title>
@@ -3154,30 +3194,43 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
       *{box-sizing:border-box;margin:0;padding:0}
       body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:24px 32px;font-size:13px}
-      .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #B8732A;margin-bottom:20px;padding-bottom:14px}
-      .logo-area{display:flex;align-items:center;gap:12px}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #B8732A;margin-bottom:20px;padding-bottom:14px}
+      .logo-left{display:flex;align-items:center;gap:12px}
       .shop-name{font-size:20px;font-weight:700;color:#B8732A}
-      .shop-sub{font-size:11px;color:#888}
+      .shop-sub{font-size:12px;color:#888;margin-top:3px}
       .meta{text-align:right;font-size:12px;color:#888}
       table{width:100%;border-collapse:collapse;margin-bottom:8px;font-size:12px}
       th{background:#B8732A;color:#fff;padding:7px 10px;text-align:left;font-size:11px}
       td{padding:6px 10px;border-bottom:1px solid #f0ece8}
       tr:nth-child(even) td{background:#fdf9f6}
+      .sig-box{margin-top:36px;padding-top:14px;border-top:1px dashed #ccc;display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+      .sig-item{font-size:12px;color:#555;line-height:2.2}
+      .sig-line{border-bottom:1px solid #555;display:inline-block;width:180px;margin-left:6px}
       .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
       @media print{body{padding:14px}}
     </style></head><body>
     <div class="header">
-      <div class="logo-area">
+      <div class="logo-left">
         ${logoHtml}
-        <div><div class="shop-name">${_S}</div><div class="shop-sub">🧂 ស្ថានភាពស្តុក + ការប្រើប្រាស់</div></div>
+        <div>
+          <div class="shop-name">${_S}</div>
+          <div class="shop-sub">🏪 ទាំងអស់ ${Object.keys(allStock||{}).length} សាខា · ${todayLabel}</div>
+        </div>
       </div>
       <div class="meta">
-        <b>${todayLabel}</b><br/>
-        🌐 ទាំងអស់ — ${Object.keys(allStock||{}).length} សាខា<br/>
+        <b>ស្ថានភាពស្តុក</b><br/>
+        បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
         ${_U ? `<span style="color:#B8732A">👤 ${_U}</span>` : ""}
       </div>
     </div>
     ${branchRows || "<p style='color:#888'>គ្មានទិន្នន័យស្តុក</p>"}
+
+    <div class="sig-box">
+      <div class="sig-item">ឈ្មោះ ៖ <span class="sig-line">&nbsp;</span></div>
+      <div class="sig-item">ថ្ងៃខែ ៖ <span class="sig-line">&nbsp;</span></div>
+      <div class="sig-item">ស៊ីញ៉េ ទទួល ៖ <span class="sig-line">&nbsp;</span></div>
+    </div>
+
     <div class="footer">${_S} POS © ${new Date().getFullYear()} · ស្ថានភាពស្តុក ${today}${_U?" · 👤 "+_U:""}</div>
     <script>window.onload=function(){window.print();}</script>
     </body></html>`);
@@ -3478,7 +3531,10 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       .kpi{background:#fff7f0;border:1px solid #e8d8c8;border-radius:8px;padding:10px 12px;text-align:center}
       .kpi-val{font-size:18px;font-weight:700;margin-bottom:3px}
       .kpi-lbl{font-size:11px;color:#888}
-      .footer{margin-top:28px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
+      .sig-box{margin-top:36px;padding-top:14px;border-top:1px dashed #ccc;display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+      .sig-item{font-size:12px;color:#555;line-height:2.2}
+      .sig-line{border-bottom:1px solid #555;display:inline-block;width:180px;margin-left:6px}
+      .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
       @media print{body{padding:14px}.kpi-grid{grid-template-columns:repeat(4,1fr)}}
     </style></head><body>
     <div class="header">
@@ -3501,6 +3557,13 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     ${userHtml}
     ${topHtml}
     ${stockHtml}
+
+    <div class="sig-box">
+      <div class="sig-item">ឈ្មោះ ៖ <span class="sig-line">&nbsp;</span></div>
+      <div class="sig-item">ថ្ងៃខែ ៖ <span class="sig-line">&nbsp;</span></div>
+      <div class="sig-item">ស៊ីញ៉េ ទទួល ៖ <span class="sig-line">&nbsp;</span></div>
+    </div>
+
     <div class="footer">${_S} POS © ${new Date().getFullYear()} · ${periodLabel}${_U?" · 👤 "+_U:""}</div>
     <script>window.onload=()=>{window.print();}</script>
     </body></html>`);
@@ -4532,13 +4595,22 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
 
     const barExpW = totalExp>0 ? Math.min(100,(totalExp/Math.max(revenue,totalExp))*100) : 0;
 
+    // Logo HTML
+    const logoHtmlFin = logoUrl
+      ? "<img src='"+logoUrl+"' style='width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid #B8732A' onerror='this.style.display=none'/>"
+      : "<div style='width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#B8732A,#E8A84B);display:flex;align-items:center;justify-content:center;color:#fff;font-size:22px;flex-shrink:0'>🏪</div>";
+    // Sub-label: 🏪 branchName · period
+    const finScopeLabel = "🏪 "+branchLabel+" · "+periodLabel;
+
     const html = "<!DOCTYPE html><html><head><meta charset='utf-8'>"
       +"<title>"+shopName+" - ហិរញ្ញវត្ថុ "+periodLabel+"</title>"
       +"<style>@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');"
       +"*{box-sizing:border-box;margin:0;padding:0}"
       +"body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px}"
-      +".header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid #B8732A}"
-      +".logo{font-size:20px;font-weight:700;color:#B8732A}.logo span{font-size:11px;color:#888;display:block;font-weight:400}"
+      +".header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #B8732A;margin-bottom:20px;padding-bottom:14px}"
+      +".logo-left{display:flex;align-items:center;gap:12px}"
+      +".shop-name{font-size:20px;font-weight:700;color:#B8732A}"
+      +".shop-sub{font-size:12px;color:#888;margin-top:3px}"
       +".meta{text-align:right;font-size:12px;color:#888}"
       +"h2{font-size:14px;font-weight:700;color:#B8732A;margin:18px 0 8px;padding:5px 10px;background:#fff7f0;border-left:4px solid #B8732A}"
       +".kpi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:10px 0 16px}"
@@ -4549,13 +4621,17 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
       +"table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:12px}"
       +"th{background:#B8732A;color:#fff;padding:7px 10px;text-align:left;font-size:11px}"
       +"td{padding:6px 10px;border-bottom:1px solid #f0ece8}tr:nth-child(even) td{background:#fdf9f6}"
+      +".sig-box{margin-top:36px;padding-top:14px;border-top:1px dashed #ccc;display:grid;grid-template-columns:repeat(3,1fr);gap:24px}"
+      +".sig-item{font-size:12px;color:#555;line-height:2.2}"
+      +".sig-line{border-bottom:1px solid #555;display:inline-block;width:180px;margin-left:6px}"
       +".footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}"
       +"@media print{body{padding:14px}}</style></head><body>"
       +"<div class='header'>"
-        +"<div style=\'display:flex;align-items:center;gap:12px\'>"
-        +(logoUrl?"<img src='"+logoUrl+"' style='width:44px;height:44px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:8px' onerror='this.style.display=none'/>":"")+"<div class='logo'>"+shopName+" <span>💼 ហិរញ្ញវត្ថុ · "+periodLabel+" · "+branchLabel+(userName?" · 👤 "+userName:"")+"</span></div>"
+        +"<div class='logo-left'>"
+        +logoHtmlFin
+        +"<div><div class='shop-name'>"+shopName+"</div><div class='shop-sub'>"+finScopeLabel+"</div></div>"
         +"</div>"
-        +"<div class='meta'><b>"+periodLabel+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+"</div>"
+        +"<div class='meta'><b>ហិរញ្ញវត្ថុ"+(finPeriod==="day"?"ប្រចាំថ្ងៃ":finPeriod==="year"?"ប្រចាំឆ្នាំ":"ប្រចាំខែ")+"</b><br/>បោះពុម្ព: "+new Date().toLocaleString("km-KH")+(userName?"<br/><span style='color:#B8732A'>👤 "+userName+"</span>":"")+"</div>"
       +"</div>"
       +"<h2>📊 សង្ខេបហិរញ្ញវត្ថុ</h2>"
       +"<div class='kpi-grid'>"
@@ -4583,6 +4659,11 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
          +"<table><thead>"+histHeaders+"</thead>"
          +"<tbody>"+histRows+"</tbody></table>"
         :"")
+      +"<div class='sig-box'>"
+        +"<div class='sig-item'>ឈ្មោះ ៖ <span class='sig-line'>&nbsp;</span></div>"
+        +"<div class='sig-item'>ថ្ងៃខែ ៖ <span class='sig-line'>&nbsp;</span></div>"
+        +"<div class='sig-item'>ស៊ីញ៉េ ទទួល ៖ <span class='sig-line'>&nbsp;</span></div>"
+      +"</div>"
       +"<div class='footer'>"+shopName+" POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+periodLabel+"</div>"
       +"<script>window.onload=function(){window.print();}</script></body></html>";
 
