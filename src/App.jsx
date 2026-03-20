@@ -3443,7 +3443,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       return usage;
     };
 
-    // Helper to build ingredient rows with ស្តុកដើម / ស្តុកនីសល់ / លក់អស់
+    // Helper to build ingredient rows with ស្តុកដើម / ស្តុកនៅសល់ / លក់អស់
     const buildIngRows = (ingList, usageMap) => {
       return ingList.map(i => {
         const iid = Number(i.ingredient_id);
@@ -3469,7 +3469,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     const stockTableHeader = `<table><thead><tr>
       <th>គ្រឿងផ្សំ</th>
       <th>ស្តុកដើម</th>
-      <th>ស្តុកនីសល់</th>
+      <th>ស្តុកនៅសល់</th>
       <th>លក់អស់</th>
       <th>Bar</th>
       <th>ស្ថានភាព</th>
