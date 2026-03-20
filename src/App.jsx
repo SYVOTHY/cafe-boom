@@ -121,7 +121,7 @@ async function tgSend(text) {
 }
 
 async function sendTelegram(rec) {
-  const branch = getBranchName();
+  const branch = localStorage.getItem("cb_current_branch_name") || rec.branch_id || "Cafe Bloom";
   const method = rec.method === "cash" ? "💵 សាច់ប្រាក់"
     : rec.method === "qr"   ? "📱 QR Code"
     : "🏦 ធនាគារ";
@@ -149,7 +149,7 @@ async function sendTelegram(rec) {
 
 // sendTelegramWithBranch — uses explicit branch name (from user's branch_id)
 async function sendTelegramWithBranch(rec, branchName) {
-  const branch = branchName || getBranchName();
+  const branch = branchName || localStorage.getItem("cb_current_branch_name") || rec.branch_id || "Cafe Bloom";
   const method = rec.method === "cash" ? "💵 សាច់ប្រាក់"
     : rec.method === "qr"   ? "📱 QR Code"
     : "🏦 ធនាគារ";
@@ -1077,6 +1077,7 @@ function CafeBloom() {
         branchList={branchList}
         onSwitchBranch={() => setShowBranchPicker(true)}
         isGlobalAdmin={isGlobalAdmin}
+        currentBranchName={currentBranchName}
         lowStockCount={(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0).length}
         onStockAlert={() => setStockAlert(prev => prev || { items:(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0), key:"manual" })} />
 
@@ -1167,7 +1168,7 @@ function LoginPage({ theme, loading, error, onLogin }) {
 // ═══════════════════════════════════════════════════════════════════
 //  TOPBAR COMPONENT
 // ═══════════════════════════════════════════════════════════════════
-function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin, lowStockCount, onStockAlert }) {
+function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin, lowStockCount, onStockAlert, currentBranchName }) {
   const [shopName, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
   const [shopLogo, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
 
