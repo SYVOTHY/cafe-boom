@@ -24,6 +24,19 @@ async function resolveBranchName(branchId, branchList) {
   return branchId;
 }
 
+// Get branch display name — uses localStorage cache for instant display
+function getBranchName(branchId, branchList) {
+  if (!branchId || branchId === "all") return "";
+  // Check in-memory list first
+  const found = (branchList||[]).find(b => b.branch_id === branchId);
+  if (found) return found.branch_name;
+  // Check localStorage cache (set when branchList loads)
+  const cached = localStorage.getItem("cb_bn_" + branchId);
+  if (cached) return cached;
+  // Last resort: raw ID
+  return branchId;
+}
+
 const parseKhNum = (s) => {
   if(s===null||s===undefined||s==="")return NaN;
   const str=String(s)
@@ -51,7 +64,7 @@ function getUserBranchBadge(user, branches) {
     // Super Admin
     return { label: "⭐ Super Admin", bg: "linear-gradient(135deg,#1A0A3A,#6A3FB8)", color: "#C084FC", border: "#9B6FE833" };
   }
-  const bName = (branches||[]).find(b => b.branch_id === bid)?.branch_name || (bid === DEFAULT_BRANCH ? BRANCH_NAME : bid);
+  const bName = getBranchName(bid, branches);
   const colors = {
     branch_1: { bg:"#1A2A0A", color:"#27AE60", border:"#27AE6033" },
     branch_2: { bg:"#0A1A2A", color:"#5BA3E0", border:"#5BA3E033" },
@@ -405,7 +418,14 @@ export default function CafeBloom() {
     const token = localStorage.getItem("pos_token");
     const hdr = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
     fetch(`${API}/api/branches`, { headers:hdr })
-      .then(r=>r.json()).then(d=>{ if(Array.isArray(d)) setBranchList(d.filter(b=>b.active)); })
+      .then(r=>r.json()).then(d=>{
+      if(Array.isArray(d)) {
+        const active = d.filter(b=>b.active);
+        setBranchList(active);
+        // Cache branch names in localStorage for instant display
+        active.forEach(b => localStorage.setItem("cb_bn_"+b.branch_id, b.branch_name));
+      }
+    })
       .catch(()=>{});
   }, [isGlobalAdmin]);
 
@@ -879,7 +899,7 @@ export default function CafeBloom() {
                   <div style={{ flex:1, textAlign:"left" }}>
                     <div style={{ fontSize:12, fontWeight:700 }}>ជ្រើសសាខា</div>
                     <div style={{ fontSize:10, color:"#5BA3E0AA", marginTop:1 }}>
-                      {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || (activeBranchId===DEFAULT_BRANCH ? BRANCH_NAME : activeBranchId)}
+                      {getBranchName(activeBranchId, branchList)}
                     </div>
                   </div>
                   <span style={{ fontSize:11 }}>▼</span>
@@ -1131,7 +1151,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
           onClick={onSwitchBranch}>
           <span style={{ fontSize:10, color:"#5BA3E0" }}>🏪</span>
           <span style={{ fontSize:11, fontWeight:700, color:"#5BA3E0" }}>
-            {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || (activeBranchId===DEFAULT_BRANCH ? BRANCH_NAME : activeBranchId)}
+            {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || (getBranchName(activeBranchId, branchList)}
           </span>
           <span style={{ fontSize:9, color:"#5BA3E0" }}>▼</span>
         </div>
@@ -1155,7 +1175,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
                 border:"1px solid #5BA3E033", fontWeight:700 }}>
                 {currentUser.branch_id === "all"
                     ? ((branchList||[]).find(b=>b.branch_id===activeBranchId)?.branch_name || activeBranchId)
-                    : (BRANCH_NAME || currentUser.branch_id)}
+                    : getBranchName(currentUser.branch_id, branchList)}
               </span>
             : null
         }
@@ -5482,7 +5502,7 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
             <div style={{ fontWeight:700, fontSize:18 }}>👥 គ្រប់គ្រង Users</div>
             <div style={{ fontSize:12, color:"#888", marginTop:2 }}>
               {displayUsers.length} users · {displayUsers.filter(u => u.active).length} active
-              {isBranchAdmin && <span style={{ marginLeft:6, color:"var(--accent)" }}>· {(branchList||[]).find(b=>b.branch_id===branchId)?.branch_name || BRANCH_NAME || branchId}</span>}
+              {isBranchAdmin && <span style={{ marginLeft:6, color:"var(--accent)" }}>· {getBranchName(branchId, branchList)}</span>}
               {isGlobalAdmin && filterBranch !== "all" && (
                 <span style={{ marginLeft:6, color:"#5BA3E0" }}>
                   · {branchList.find(b=>b.branch_id===filterBranch)?.branch_name || filterBranch}
