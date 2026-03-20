@@ -51,7 +51,7 @@ function getUserBranchBadge(user, branches) {
     // Super Admin
     return { label: "⭐ Super Admin", bg: "linear-gradient(135deg,#1A0A3A,#6A3FB8)", color: "#C084FC", border: "#9B6FE833" };
   }
-  const bName = (branches||[]).find(b => b.branch_id === bid)?.branch_name || bid;
+  const bName = (branches||[]).find(b => b.branch_id === bid)?.branch_name || (bid === DEFAULT_BRANCH ? BRANCH_NAME : bid);
   const colors = {
     branch_1: { bg:"#1A2A0A", color:"#27AE60", border:"#27AE6033" },
     branch_2: { bg:"#0A1A2A", color:"#5BA3E0", border:"#5BA3E033" },
@@ -879,7 +879,7 @@ export default function CafeBloom() {
                   <div style={{ flex:1, textAlign:"left" }}>
                     <div style={{ fontSize:12, fontWeight:700 }}>ជ្រើសសាខា</div>
                     <div style={{ fontSize:10, color:"#5BA3E0AA", marginTop:1 }}>
-                      {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || activeBranchId}
+                      {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || (activeBranchId===DEFAULT_BRANCH ? BRANCH_NAME : activeBranchId)}
                     </div>
                   </div>
                   <span style={{ fontSize:11 }}>▼</span>
@@ -1131,7 +1131,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
           onClick={onSwitchBranch}>
           <span style={{ fontSize:10, color:"#5BA3E0" }}>🏪</span>
           <span style={{ fontSize:11, fontWeight:700, color:"#5BA3E0" }}>
-            {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || activeBranchId}
+            {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || (activeBranchId===DEFAULT_BRANCH ? BRANCH_NAME : activeBranchId)}
           </span>
           <span style={{ fontSize:9, color:"#5BA3E0" }}>▼</span>
         </div>
@@ -4941,7 +4941,7 @@ function BranchesPage({ notify, isGlobalAdmin, currentUser }) {
                           {b.branch_name}
                         </div>
                         <div style={{ fontSize:11, color:"#666", fontFamily:"'DM Mono',monospace", marginTop:2 }}>
-                          ID: {b.branch_id}
+                          <span style={{ opacity:0.5, fontSize:10 }}>ID: {b.branch_id}</span>
                         </div>
                       </div>
                     </div>
@@ -5482,7 +5482,7 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
             <div style={{ fontWeight:700, fontSize:18 }}>👥 គ្រប់គ្រង Users</div>
             <div style={{ fontSize:12, color:"#888", marginTop:2 }}>
               {displayUsers.length} users · {displayUsers.filter(u => u.active).length} active
-              {isBranchAdmin && <span style={{ marginLeft:6, color:"var(--accent)" }}>· {branchId}</span>}
+              {isBranchAdmin && <span style={{ marginLeft:6, color:"var(--accent)" }}>· {(branchList||[]).find(b=>b.branch_id===branchId)?.branch_name || BRANCH_NAME || branchId}</span>}
               {isGlobalAdmin && filterBranch !== "all" && (
                 <span style={{ marginLeft:6, color:"#5BA3E0" }}>
                   · {branchList.find(b=>b.branch_id===filterBranch)?.branch_name || filterBranch}
