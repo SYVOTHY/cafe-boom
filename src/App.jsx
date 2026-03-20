@@ -3567,7 +3567,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       return usage;
     };
 
-    // Helper to build ingredient rows with ស្តុកដើម / ស្តុកនីសល់ / លក់អស់
+    // Helper to build ingredient rows with ស្តុកដើម / ស្តុកនៅសល់ / លក់អស់
     const buildIngRows = (ingList, usageMap) => {
       return ingList.map(i => {
         const iid = Number(i.ingredient_id);
@@ -3593,7 +3593,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     const stockTableHeader = `<table><thead><tr>
       <th>គ្រឿងផ្សំ</th>
       <th>ស្តុកដើម</th>
-      <th>ស្តុកនីសល់</th>
+      <th>ស្តុកនៅសល់</th>
       <th>លក់អស់</th>
       <th>Bar</th>
       <th>ស្ថានភាព</th>
@@ -4624,7 +4624,7 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     const userName=currentUser?.name||currentUser?.username||"";
     const logoUrl=localStorage.getItem("cb_shop_logo")||"";
     const _all=(branches.length>0?branches:branchList)||[];
-    const branchLabel=selBranch==="all"?"តាមអស់ (All branches)"
+    const branchLabel=selBranch==="all"?"ទាំងអស់ (All branches)"
       :(_all.find(b=>b.branch_id===(viewBranchId||branchId))?.branch_name
         ||await resolveBranchName(viewBranchId||branchId,branchList));
 
