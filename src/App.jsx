@@ -3083,127 +3083,224 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     const _B=await resolveBranchName(branchId,branchList);
     const _U=currentUser?.name||currentUser?.username||"";
     const _L=localStorage.getItem("cb_shop_logo")||"";
-    const prodCount = {};
-    filtered.forEach(o => o.items.forEach(i => { prodCount[i.product_name] = (prodCount[i.product_name] || 0) + i.qty; }));
-    const top = Object.entries(prodCount).sort((a, b) => b[1] - a[1]);
-    const payBreak = { cash: 0, qr: 0, bank: 0 };
-    filtered.forEach(o => { payBreak[o.method] = (payBreak[o.method] || 0) + o.total + o.tax; });
+    const isAll = reportMode === "all" && isGlobalAdmin;
 
-    // Summary rows for month/year
-    let periodSummaryHtml = "";
-    if (period === "month") {
-      const byDay = {};
-      filtered.forEach(o => { const d = new Date(o.order_id).getDate(); byDay[d] = (byDay[d] || { rev: 0, cnt: 0, items: 0 }); byDay[d].rev += (o.total + o.tax); byDay[d].cnt++; byDay[d].items += o.items.reduce((s, i) => s + i.qty, 0); });
-      const dayRows = Object.entries(byDay).sort((a, b) => Number(a[0]) - Number(b[0]))
-        .map(([d, v]) => `<tr><td>${String(d).padStart(2, "0")}</td><td style="color:#5BA3E0">${v.cnt}</td><td style="color:#5C9E5C">${v.items}</td><td style="font-weight:700;color:#B8732A">${fmt(v.rev)}</td></tr>`).join("");
-      periodSummaryHtml = `<h3>📅 សង្ខេបប្រចាំថ្ងៃ — ${periodLabel}</h3>
-        <table><thead><tr><th>ថ្ងៃ</th><th>Orders</th><th>Items</th><th>ចំណូល</th></tr></thead><tbody>${dayRows}
-        <tr class="total-row"><td>សរុប</td><td>${filtered.length}</td><td>${totalItems}</td><td>${fmt(totalRev)}</td></tr>
-        </tbody></table><br/>`;
-    } else if (period === "year") {
-      const byMonth = {};
-      filtered.forEach(o => { const m = new Date(o.order_id).getMonth(); byMonth[m] = (byMonth[m] || { rev: 0, cnt: 0, items: 0 }); byMonth[m].rev += (o.total + o.tax); byMonth[m].cnt++; byMonth[m].items += o.items.reduce((s, i) => s + i.qty, 0); });
-      const monRows = Object.entries(byMonth).sort((a, b) => Number(a[0]) - Number(b[0]))
-        .map(([m, v]) => `<tr><td>${MON_KH[Number(m)] || m}</td><td style="color:#5BA3E0">${v.cnt}</td><td style="color:#5C9E5C">${v.items}</td><td style="font-weight:700;color:#B8732A">${fmt(v.rev)}</td></tr>`).join("");
-      periodSummaryHtml = `<h3>📆 សង្ខេបប្រចាំខែ — ${periodLabel}</h3>
-        <table><thead><tr><th>ខែ</th><th>Orders</th><th>Items</th><th>ចំណូល</th></tr></thead><tbody>${monRows}
-        <tr class="total-row"><td>សរុប</td><td>${filtered.length}</td><td>${totalItems}</td><td>${fmt(totalRev)}</td></tr>
-        </tbody></table><br/>`;
+    // ── helpers ──────────────────────────────────────────────────────
+    const fmt = (n) => "$"+(Number(n)||0).toFixed(2);
+    const fmtN = (n) => Number(n||0) % 1 === 0 ? String(Number(n||0)) : Number(n||0).toFixed(1);
+    const esc = (s) => String(s||"").replace(/"/g,"'").replace(/,/g," ");
+    const logoHtml = _L ? `<img src="${_L}" style="width:52px;height:52px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display=\'none\'"/>` : "";
+
+    // ── Section 1: Branch Summary (all-mode only) ─────────────────────
+    let branchSummaryHtml = "";
+    if (isAll && branches.length > 0) {
+      const bRows = branches.filter(b=>b.active).map(b => {
+        const bOrds = (allOrders||[]).filter(o => {
+          if (o.branch_id !== b.branch_id) return false;
+          try {
+            const d = new Date(o.order_id);
+            if (period==="day")   return d.toISOString().slice(0,10)===selDate;
+            if (period==="month") return d.toISOString().slice(0,7)===selMonth;
+            if (period==="year")  return d.toISOString().slice(0,4)===selYear;
+          } catch { return false; }
+          return true;
+        });
+        const bRev = bOrds.reduce((s,o)=>s+o.total+o.tax,0);
+        const bPct = totalRev>0 ? Math.round((bRev/totalRev)*100) : 0;
+        return `<tr>
+          <td style="font-weight:600">🏪 ${esc(b.branch_name)}</td>
+          <td style="font-weight:700;color:#B8732A">${fmt(bRev)}</td>
+          <td>${bOrds.length} orders</td>
+          <td>${bPct}%</td>
+          <td><div style="background:#eee;border-radius:4px;height:8px;width:100px;overflow:hidden"><div style="width:${bPct}%;height:100%;background:#B8732A"></div></div></td>
+        </tr>`;
+      }).join("");
+      branchSummaryHtml = `
+        <h2>🏪 សង្ខេបតាមតូប</h2>
+        <table><thead><tr><th>តូប</th><th>ចំណូល</th><th>Orders</th><th>%</th><th>Progress</th></tr></thead>
+        <tbody>${bRows}</tbody></table>`;
     }
 
-    // Orders table (day: all rows; month/year: top 50)
-    const orderRows = (period === "day" ? filtered : filtered.slice(0, 50)).map(o => `<tr>
-      <td style="white-space:nowrap;font-size:11px">${o.ts}</td>
-      <td>${o.table || "—"}</td>
-      <td style="font-size:11px">${o.items.map(i => `${i.product_name}×${i.qty}`).join(", ")}</td>
-      <td style="text-align:right;font-weight:600;color:#B8732A">${fmt(o.total + o.tax)}</td>
-      <td>${o.method === "cash" ? "💵" : o.method === "qr" ? "📱" : "🏦"} ${o.method}</td>
+    // ── Section 2: Daily Revenue (month view) ────────────────────────
+    let dailyHtml = "";
+    if (period === "month" && Object.keys(byDay).length > 0) {
+      const dayRows = Object.entries(byDay).sort((a,b)=>a[0].localeCompare(b[0])).map(([d,v])=>`<tr>
+        <td>📅 ${d}</td>
+        <td style="font-weight:700;color:#B8732A">${fmt(v)}</td>
+        <td><div style="background:#eee;border-radius:3px;height:6px;width:80px;overflow:hidden"><div style="width:${Math.min(100,Math.round((v/Math.max(...Object.values(byDay)))*100))}%;height:100%;background:#B8732A"></div></div></td>
+      </tr>`).join("");
+      dailyHtml = `
+        <h2>📅 ចំណូលតាមថ្ងៃ</h2>
+        <table><thead><tr><th>ថ្ងៃ</th><th>ចំណូល</th><th>Progress</th></tr></thead>
+        <tbody>${dayRows}</tbody></table>`;
+    } else if (period === "year" && Object.keys(byMon).length > 0) {
+      const monRows = Object.entries(byMon).sort((a,b)=>a[0].localeCompare(b[0])).map(([mo,v])=>{
+        const [py,pm] = mo.split("-");
+        return `<tr>
+          <td>📆 ${MON_KH[parseInt(pm)-1]} ${py}</td>
+          <td style="font-weight:700;color:#B8732A">${fmt(v)}</td>
+        </tr>`;
+      }).join("");
+      dailyHtml = `<h2>📅 ចំណូលតាមខែ</h2>
+        <table><thead><tr><th>ខែ</th><th>ចំណូល</th></tr></thead>
+        <tbody>${monRows}</tbody></table>`;
+    }
+
+    // ── Section 3: Summary KPI ────────────────────────────────────────
+    const payBreak = { cash:0, qr:0, bank:0 };
+    filtered.forEach(o => { payBreak[o.method]=(payBreak[o.method]||0)+o.total+o.tax; });
+    const kpiHtml = `
+      <h2>📋 សង្ខេបប្រចាំ${period==="day"?"ថ្ងៃ":period==="month"?"ខែ":"ឆ្នាំ"}</h2>
+      <div class="kpi-grid">
+        <div class="kpi"><div class="kpi-val" style="color:#B8732A">${fmt(totalRev)}</div><div class="kpi-lbl">💰 ចំណូលសរុប</div></div>
+        <div class="kpi"><div class="kpi-val" style="color:#5BA3E0">${filtered.length}</div><div class="kpi-lbl">🛒 Orders</div></div>
+        <div class="kpi"><div class="kpi-val" style="color:#27AE60">${totalItems}</div><div class="kpi-lbl">🍽️ មុខម្ហូប</div></div>
+        <div class="kpi"><div class="kpi-val" style="color:#9B6FE8">${fmt(avgOrder)}</div><div class="kpi-lbl">📊 មធ្យម/Order</div></div>
+      </div>
+      <table style="margin-top:10px"><thead><tr><th>វិធីទូទាត់</th><th>ចំណូល</th><th>%</th></tr></thead>
+      <tbody>
+        ${[["💵 Cash","cash"],["📱 QR","qr"],["🏦 Bank","bank"]].filter(([,k])=>payBreak[k]>0).map(([lb,k])=>`<tr>
+          <td>${lb}</td>
+          <td style="font-weight:700">${fmt(payBreak[k])}</td>
+          <td>${totalRev>0?Math.round((payBreak[k]/totalRev)*100):0}%</td>
+        </tr>`).join("")}
+      </tbody></table>`;
+
+    // ── Section 4: User sales ─────────────────────────────────────────
+    const userSalesMap = {};
+    filtered.forEach(o => {
+      const key = o.cashier||o.user||"unknown";
+      if (!userSalesMap[key]) userSalesMap[key]={orders:0,revenue:0,items:0};
+      userSalesMap[key].orders++;
+      userSalesMap[key].revenue += o.total+o.tax;
+      userSalesMap[key].items += (o.items||[]).reduce((s,i)=>s+i.qty,0);
+    });
+    let userHtml = "";
+    if (Object.keys(userSalesMap).length > 0) {
+      const uRows = Object.entries(userSalesMap).sort((a,b)=>b[1].revenue-a[1].revenue).map(([u,v])=>`<tr>
+        <td>👤 ${esc(u)}</td>
+        <td style="font-weight:700;color:#B8732A">${fmt(v.revenue)}</td>
+        <td>${v.orders} orders</td>
+        <td>${v.items} មុខ</td>
+      </tr>`).join("");
+      userHtml = `<h2>👤 ការលក់តាម User</h2>
+        <table><thead><tr><th>User</th><th>ចំណូល</th><th>Orders</th><th>Items</th></tr></thead>
+        <tbody>${uRows}</tbody></table>`;
+    }
+
+    // ── Section 5: Top products ──────────────────────────────────────
+    const prodCount = {};
+    filtered.forEach(o => o.items.forEach(i => { prodCount[i.product_name]=(prodCount[i.product_name]||0)+i.qty; }));
+    const topRows = Object.entries(prodCount).sort((a,b)=>b[1]-a[1]).slice(0,15).map(([n,q])=>`<tr>
+      <td>${esc(n)}</td><td style="font-weight:700;color:#B8732A">${q} ចាន</td>
     </tr>`).join("");
-    const orderNote = (period !== "day" && filtered.length > 50) ? `<p style="font-size:11px;color:#888">(បង្ហាញ 50 ក្នុង ${filtered.length} orders)</p>` : "";
+    const topHtml = topRows ? `<h2>🏆 មុខម្ហូបលក់ច្រើន</h2>
+      <table><thead><tr><th>មុខម្ហូប</th><th>ចំនួន</th></tr></thead>
+      <tbody>${topRows}</tbody></table>` : "";
 
-    // Stock status
-    const stockRows = ings.map(i => {
-      const s = Number(i.current_stock), t = Number(i.threshold);
-      const isLow = s <= t, isWarn = s <= t * 1.5 && !isLow;
-      const col = isLow ? "#E74C3C" : isWarn ? "#E67E22" : "#27AE60";
-      const pct = Math.min(100, (s / (t * 4 || 1)) * 100);
-      return `<tr>
-        <td>${i.ingredient_name}</td>
-        <td style="font-weight:700;color:${col}">${fmtStock(s)} ${i.unit}</td>
-        <td style="color:#888">${fmtStock(t)} ${i.unit}</td>
-        <td><div style="background:#eee;border-radius:4px;height:8px;width:120px"><div style="background:${col};height:8px;border-radius:4px;width:${pct}%"></div></div></td>
-        <td style="color:${col};font-weight:600">${isLow ? "⚠️ ជិតអស់" : isWarn ? "🔶 ប្រុង" : "✅ ល្អ"}</td>
-      </tr>`;
-    }).join("");
+    // ── Section 6: Stock status (all branches if available) ──────────
+    let stockHtml = "";
+    const stockData = (isAll && allStock) ? allStock : null;
+    const ownIngs = ings || [];
+    if (stockData && Object.keys(stockData).length > 0) {
+      // All branches stock
+      const branchStockHtml = Object.entries(stockData).map(([bid,bd]) => {
+        const bIngs = bd.ingredients||[];
+        const bName = bd.branch_name||bid;
+        const ingRows = bIngs.map(i => {
+          const s=Number(i.current_stock||0), t=Number(i.threshold||0);
+          const pct=t>0?Math.min(100,Math.round((s/t)*100)):100;
+          const sc=s<=t?"#E74C3C":s<=t*1.5?"#F39C12":"#27AE60";
+          const st=s<=t?"⚠️ ជិតអស់":s<=t*1.5?"🔶 ប្រុង":"✅ ល្អ";
+          return `<tr>
+            <td>${esc(i.ingredient_name)}</td>
+            <td style="font-weight:700;color:${sc}">${fmtN(s)} ${i.unit||""}</td>
+            <td style="color:#888">${fmtN(t)} ${i.unit||""}</td>
+            <td><div style="background:#eee;border-radius:3px;height:7px;width:70px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${sc}"></div></div></td>
+            <td style="color:${sc};font-weight:600;font-size:11px">${st}</td>
+          </tr>`;
+        }).join("");
+        const lowC=bIngs.filter(i=>Number(i.current_stock||0)<=Number(i.threshold||0)).length;
+        return `<h3 style="font-size:13px;font-weight:700;color:#B8732A;margin:14px 0 6px;padding:5px 10px;background:#fff7f0;border-left:3px solid #B8732A">
+          🏪 ${esc(bName)} ${lowC>0?`<span style="color:#E74C3C;font-size:11px"> ⚠️ ${lowC} ជិតអស់</span>`:'<span style="color:#27AE60;font-size:11px"> ✅</span>'}
+        </h3>
+        <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Bar</th><th>ស្ថានភាព</th></tr></thead>
+        <tbody>${ingRows||"<tr><td colspan=5 style='color:#888;text-align:center'>គ្មានទិន្នន័យ</td></tr>"}</tbody></table>`;
+      }).join("");
+      stockHtml = `<h2>🧂 ស្ថានភាពស្តុក — ទាំងអស់</h2>${branchStockHtml}`;
+    } else if (ownIngs.length > 0) {
+      // Own branch only
+      const ingRows2 = ownIngs.map(i => {
+        const s=Number(i.current_stock||0), t=Number(i.threshold||0);
+        const pct=t>0?Math.min(100,Math.round((s/t)*100)):100;
+        const sc=s<=t?"#E74C3C":s<=t*1.5?"#F39C12":"#27AE60";
+        const st=s<=t?"⚠️ ជិតអស់":s<=t*1.5?"🔶 ប្រុង":"✅ ល្អ";
+        return `<tr>
+          <td>${esc(i.ingredient_name)}</td>
+          <td style="font-weight:700;color:${sc}">${fmtN(s)} ${i.unit||""}</td>
+          <td style="color:#888">${fmtN(t)} ${i.unit||""}</td>
+          <td><div style="background:#eee;border-radius:3px;height:7px;width:70px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${sc}"></div></div></td>
+          <td style="color:${sc};font-weight:600;font-size:11px">${st}</td>
+        </tr>`;
+      }).join("");
+      stockHtml = `<h2>🧂 ស្ថានភាពស្តុក</h2>
+        <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Bar</th><th>ស្ថានភាព</th></tr></thead>
+        <tbody>${ingRows2}</tbody></table>`;
+    }
 
-    const topRows = top.map(([n, q], i) => `<tr><td>#${i + 1}</td><td>${n}</td><td style="font-weight:700;color:#B8732A">${q} ចាន</td></tr>`).join("");
-
-    const win = window.open("", "_blank", "width=1000,height=750");
+    // ── Build HTML ────────────────────────────────────────────────────
+    const scopeLabel = isAll ? "🌐 ទាំងអស់" : ("🏪 " + _B);
+    const win = window.open("","_blank","width=1000,height=700");
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-    <title>Café Boom — របាយការណ៍ ${periodLabel}</title>
+    <title>${_S} — របាយការណ៍${period==="day"?"ថ្ងៃ":period==="month"?"ខែ":"ឆ្នាំ"} ${periodLabel}</title>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@400;600;700&display=swap');
       *{box-sizing:border-box;margin:0;padding:0}
-      body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:28px 32px;font-size:13px;background:#fff}
-      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:3px solid #B8732A}
-      .logo{font-size:22px;font-weight:700;color:#B8732A}
-      .logo span{font-size:12px;color:#888;display:block;font-weight:400}
+      body{font-family:'Kantumruy Pro',Arial,sans-serif;color:#111;padding:24px 32px;font-size:13px}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #B8732A;margin-bottom:20px;padding-bottom:14px}
+      .logo-left{display:flex;align-items:center;gap:12px}
+      .shop-name{font-size:20px;font-weight:700;color:#B8732A}
+      .shop-sub{font-size:11px;color:#888;margin-top:2px}
       .meta{text-align:right;font-size:12px;color:#888}
-      h2{font-size:15px;font-weight:700;color:#B8732A;margin:20px 0 10px;padding:6px 10px;background:#fff7f0;border-left:4px solid #B8732A}
-      h3{font-size:13px;font-weight:700;color:#555;margin:16px 0 8px}
-      table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:12px}
+      h2{font-size:14px;font-weight:700;color:#B8732A;margin:20px 0 8px;padding:6px 12px;background:#fff7f0;border-left:4px solid #B8732A;border-radius:0 6px 6px 0}
+      h3{font-size:13px;font-weight:700}
+      table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:12px}
       th{background:#B8732A;color:#fff;padding:7px 10px;text-align:left;font-size:11px}
       td{padding:6px 10px;border-bottom:1px solid #f0ece8}
       tr:nth-child(even) td{background:#fdf9f6}
-      .total-row td{background:#fff3e8!important;font-weight:700;color:#B8732A}
-      .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:12px 0 20px}
-      .kpi{background:#fff7f0;border:1px solid #e8d8c8;border-radius:8px;padding:12px 14px}
-      .kpi .val{font-size:20px;font-weight:700;color:#B8732A;margin-top:4px}
-      .kpi .lbl{font-size:11px;color:#888}
-      .pay-row{display:flex;gap:12px;margin:8px 0 16px}
-      .pay-card{flex:1;background:#f8f8f8;border:1px solid #eee;border-radius:8px;padding:10px 14px;text-align:center}
-      .pay-card .icon{font-size:18px}
-      .pay-card .amt{font-size:15px;font-weight:700;color:#333;margin-top:2px}
-      .footer{margin-top:28px;padding-top:12px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
-      @media print{body{padding:16px 20px} .no-print{display:none}}
+      .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:10px 0 14px}
+      .kpi{background:#fff7f0;border:1px solid #e8d8c8;border-radius:8px;padding:10px 12px;text-align:center}
+      .kpi-val{font-size:18px;font-weight:700;margin-bottom:3px}
+      .kpi-lbl{font-size:11px;color:#888}
+      .footer{margin-top:28px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
+      @media print{body{padding:14px}.kpi-grid{grid-template-columns:repeat(4,1fr)}}
     </style></head><body>
-    <div class="header" style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">${_L?`<img src="${_L}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`:""}<div><div class="logo">☕ ${_S}<span>${_B}</span></div></div></div><div class="meta" style="text-align:right"><b>របាយការណ៍${period==="day"?"ប្រចាំថ្ងៃ":period==="month"?"ប្រចាំខែ":"ប្រចាំឆ្នាំ"}</b><br/>${periodLabel}<br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
-
-    <h2>📊 សង្ខេបទូទៅ</h2>
-    <div class="kpi-grid">
-      <div class="kpi"><div class="lbl">💰 ចំណូលសរុប</div><div class="val">${fmt(totalRev)}</div></div>
-      <div class="kpi"><div class="lbl">🛒 ការបញ្ជាទិញ</div><div class="val">${filtered.length} លើក</div></div>
-      <div class="kpi"><div class="lbl">☕ មុខម្ហូបលក់</div><div class="val">${totalItems} ចាន</div></div>
-      <div class="kpi"><div class="lbl">📊 មធ្យម/Order</div><div class="val">${fmt(avgOrder)}</div></div>
+    <div class="header">
+      <div class="logo-left">
+        ${logoHtml}
+        <div>
+          <div class="shop-name">☕ ${_S}</div>
+          <div class="shop-sub">${scopeLabel} · ${periodLabel}</div>
+        </div>
+      </div>
+      <div class="meta">
+        <b>របាយការណ៍${period==="day"?"ប្រចាំថ្ងៃ":period==="month"?"ប្រចាំខែ":"ប្រចាំឆ្នាំ"}</b><br/>
+        បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>
+        ${_U?`<span style="color:#B8732A">👤 ${_U}</span>`:""}
+      </div>
     </div>
-    <div class="pay-row">
-      <div class="pay-card"><div class="icon">💵</div><div class="lbl">សាច់ប្រាក់</div><div class="amt">${fmt(payBreak.cash)}</div></div>
-      <div class="pay-card"><div class="icon">📱</div><div class="lbl">QR Code</div><div class="amt">${fmt(payBreak.qr)}</div></div>
-      <div class="pay-card"><div class="icon">🏦</div><div class="lbl">ធនាគារ</div><div class="amt">${fmt(payBreak.bank)}</div></div>
-    </div>
-
-    ${periodSummaryHtml}
-
-    <h2>📋 តារាង Orders</h2>
-    <table><thead><tr><th>ថ្ងៃទី</th><th>តុ</th><th>មុខម្ហូប</th><th>ចំណូល</th><th>ទូទាត់</th></tr></thead>
-    <tbody>${orderRows}
-    <tr class="total-row"><td colspan="3" style="text-align:right">សរុបរួម</td><td>${fmt(totalRev)}</td><td></td></tr>
-    </tbody></table>
-    ${orderNote}
-
-    <h2>🏆 មុខម្ហូបលក់ច្រើន</h2>
-    <table><thead><tr><th>#</th><th>មុខម្ហូប</th><th>ចំនួន</th></tr></thead>
-    <tbody>${topRows}</tbody></table>
-
-    <h2>⚠️ ស្ថានភាពស្តុក</h2>
-    <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Progress</th><th>ស្ថានភាព</th></tr></thead>
-    <tbody>${stockRows}</tbody></table>
-
-    <div class="footer">Café Boom POS © ${new Date().getFullYear()} · Generated ${new Date().toLocaleString()}</div>
-    \x3cscript\x3ewindow.onload=()=>{window.print();}\x3c/script\x3e
+    ${branchSummaryHtml}
+    ${kpiHtml}
+    ${dailyHtml}
+    ${userHtml}
+    ${topHtml}
+    ${stockHtml}
+    <div class="footer">${_S} POS © ${new Date().getFullYear()} · ${periodLabel}${_U?" · 👤 "+_U:""}</div>
+    <script>window.onload=()=>{window.print();}</script>
     </body></html>`);
     win.document.close();
   };
+
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
