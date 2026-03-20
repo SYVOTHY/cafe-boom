@@ -408,20 +408,11 @@ export default function CafeBloom() {
   // Admin with specific branch (e.g. "branch_2"): use that branch
   // Admin with branch_id="all": use pickedBranch (chosen after login)
   const [pickedBranch, setPickedBranch] = useState(null); // null = not picked yet
-  const [branchList,   setBranchList]   = useState(() => {
-    // Pre-populate from localStorage cache for instant display
-    try {
-      const keys = Object.keys(localStorage).filter(k => k.startsWith("cb_bn_"));
-      if (keys.length > 0) {
-        return keys.map(k => ({
-          branch_id: k.replace("cb_bn_", ""),
-          branch_name: localStorage.getItem(k),
-          active: true
-        }));
-      }
-    } catch(e) {}
-    return [];
-  });   // for picker
+  const [branchList,   setBranchList]   = useState([]);   // for picker
+  // Derived: display name for current user's branch (resolves async)
+  const [currentBranchName, setCurrentBranchName] = useState(
+    () => localStorage.getItem("cb_current_branch_name") || ""
+  );
 
   const isGlobalAdmin = currentUser?.role === "admin" && currentUser?.branch_id === "all";
 
@@ -435,8 +426,16 @@ export default function CafeBloom() {
       if(Array.isArray(d)) {
         const active = d.filter(b=>b.active);
         setBranchList(active);
-        // Cache branch names in localStorage for instant display
-        active.forEach(b => localStorage.setItem("cb_bn_"+b.branch_id, b.branch_name));
+        // Cache all branch names
+        active.forEach(b => {
+          if (b.branch_name) localStorage.setItem("cb_bn_"+b.branch_id, b.branch_name);
+        });
+        // Update current user's branch display name
+        const cu = d.find(b => b.branch_id === currentUser?.branch_id);
+        if (cu?.branch_name) {
+          setCurrentBranchName(cu.branch_name);
+          localStorage.setItem("cb_current_branch_name", cu.branch_name);
+        }
       }
     })
       .catch(()=>{});
@@ -473,19 +472,6 @@ export default function CafeBloom() {
     if (db.orders)      skipIfPending("orders",      () => setOrdersRaw(db.orders));
     if (db.logs)        skipIfPending("logs",        () => setLogsRaw(db.logs));
     if (db.users)       skipIfPending("users",       () => setUsersRaw(db.users));
-    // Populate branchList from db.branches (shared data) — instant, no extra API call
-    if (db.branches && Array.isArray(db.branches) && db.branches.length > 0) {
-      setBranchList(prev => {
-        // Only update if we got more/better data
-        if (prev.length >= db.branches.length) return prev;
-        const active = db.branches.filter(b => b.active !== false);
-        // Cache names in localStorage for instant display on next render
-        active.forEach(b => {
-          if (b.branch_name) localStorage.setItem("cb_bn_" + b.branch_id, b.branch_name);
-        });
-        return active;
-      });
-    }
     if (db.theme) {
       skipIfPending("theme", () => {
         setThemeRaw({ ...DEFAULT_THEME, ...db.theme });
@@ -571,6 +557,28 @@ export default function CafeBloom() {
       if (!r.ok) { setLoginError(d.error || "Login failed"); return; }
       localStorage.setItem("pos_token", d.token);
       setCurrentUser(d.user);
+      // Resolve branch name immediately after login
+      if (d.user?.branch_id && d.user.branch_id !== "all") {
+        const bid = d.user.branch_id;
+        const hdr2 = { "Content-Type":"application/json", "ngrok-skip-browser-warning":"true",
+          Authorization: "Bearer " + d.token };
+        fetch(`${API}/api/branches`, { headers: hdr2 })
+          .then(r => r.json())
+          .then(list => {
+            if (Array.isArray(list)) {
+              const found = list.find(b => b.branch_id === bid);
+              if (found?.branch_name) {
+                setCurrentBranchName(found.branch_name);
+                localStorage.setItem("cb_current_branch_name", found.branch_name);
+                // Also cache all branch names
+                list.forEach(b => {
+                  if (b.branch_name) localStorage.setItem("cb_bn_" + b.branch_id, b.branch_name);
+                });
+                setBranchList(list.filter(b => b.active !== false));
+              }
+            }
+          }).catch(() => {});
+      }
     } catch { setLoginError("Cannot connect to server"); }
     finally   { setLoginLoading(false); }
   }, []);
@@ -580,6 +588,35 @@ export default function CafeBloom() {
     localStorage.removeItem("pos_token");
     setCurrentUser(null);
   }, []);
+
+  // Update currentBranchName when currentUser changes (e.g. /api/me on refresh)
+  useEffect(() => {
+    if (!currentUser?.branch_id || currentUser.branch_id === "all") return;
+    const bid = currentUser.branch_id;
+    // Check if we already have the name
+    const cached = localStorage.getItem("cb_bn_" + bid);
+    if (cached) {
+      setCurrentBranchName(cached);
+      return;
+    }
+    // Fetch if not cached
+    const token = localStorage.getItem("pos_token");
+    if (!token) return;
+    fetch(`${API}/api/branches`, {
+      headers: { "Content-Type":"application/json", "ngrok-skip-browser-warning":"true",
+        Authorization: "Bearer " + token }
+    }).then(r => r.json()).then(list => {
+      if (Array.isArray(list)) {
+        list.forEach(b => { if (b.branch_name) localStorage.setItem("cb_bn_"+b.branch_id, b.branch_name); });
+        const found = list.find(b => b.branch_id === bid);
+        if (found?.branch_name) {
+          setCurrentBranchName(found.branch_name);
+          localStorage.setItem("cb_current_branch_name", found.branch_name);
+          setBranchList(list.filter(b => b.active !== false));
+        }
+      }
+    }).catch(() => {});
+  }, [currentUser?.branch_id]);
 
   // ── Low Stock Alert ─────────────────────────────────────────────
   const [stockAlert, setStockAlert]   = useState(null);  // { items: [...] }
@@ -1201,7 +1238,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
                 border:"1px solid #5BA3E033", fontWeight:700 }}>
                 {currentUser.branch_id === "all"
                     ? ((branchList||[]).find(b=>b.branch_id===activeBranchId)?.branch_name || activeBranchId)
-                    : getBranchName(currentUser.branch_id, branchList)}
+                    : (currentBranchName || getBranchName(currentUser.branch_id, branchList))}
               </span>
             : null
         }
