@@ -934,10 +934,13 @@ function CafeBloom() {
           isBranchAdmin={currentUser?.role === "admin" && currentUser?.branch_id && currentUser?.branch_id !== "all"}
           onClose={() => setShowClearData(false)}
           notify={notify}
-          onCleared={(bid) => {
-            // Reset local state for cleared branch
+          onCleared={async (bid) => {
+            // Reset local state immediately so UI reflects clear
             setOrdersRaw([]);
             setLogsRaw([]);
+            setShowClearData(false);
+            // Small delay so server socket broadcast settles before we re-fetch
+            await new Promise(r => setTimeout(r, 600));
             reload();
           }}
         />
@@ -5477,7 +5480,7 @@ function ClearDataModal({ branchId, isAdmin, isBranchAdmin, onClose, notify, onC
       const cleared = d.cleared || [];
       notify(`✅ លុប Data លក់ ${cleared.length} សាខា រួចហើយ!`);
       onCleared(bid);
-      onClose();
+      // onClose is handled inside onCleared to avoid double-close race
     } catch (e) {
       notify("❌ មិនអាចភ្ជាប់ Server!", "error");
     } finally {
