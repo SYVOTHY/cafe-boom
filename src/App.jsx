@@ -4455,30 +4455,80 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
         +"<td style='text-align:right;color:#888;font-size:11px'>"+pct+"%</td></tr>";
     }).filter(Boolean).join("");
 
-    // Monthly history
-    const allMonths = [...new Set([
-      ...(Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).map(t=>t.date?.slice(0,7)).filter(Boolean),
-      selMonth
-    ])].sort().reverse().slice(0,12);
+    // ── "No expense" label — adapts to period ──────────────────────
+    const noExpLabel = finPeriod === "day"  ? "គ្មានចំណាយសម្រាប់ថ្ងៃទី " + selDay
+      : finPeriod === "year" ? "គ្មានចំណាយសម្រាប់ឆ្នាំ " + selYear
+      : "គ្មានចំណាយសម្រាប់ខែ " + monthLabel;
 
-    const histRows = allMonths.map(mo => {
-      const [ey,em] = mo.split("-");
-      const rev2 = (sourceOrders||[]).filter(o=>{
-        try{return new Date(o.order_id).toISOString().slice(0,7)===mo;}catch{return false;}
-      }).reduce((s,o)=>s+o.total+o.tax,0);
-      const txnExp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[])
-        .filter(t=>t.date?.slice(0,7)===mo&&(!viewBranchId||t.branch_id===viewBranchId))
-        .reduce((s,t)=>s+Number(t.amount||0),0);
-      const legRec = monthlyRecords.find(e=>e.month===mo);
-      const legExp2 = legRec ? expCats.reduce((s,c)=>s+Number((legRec.items||{})[c.id]||0),0) : 0;
-      const exp2 = txnExp2 + legExp2;
-      const pnl2 = rev2 - exp2;
-      return "<tr"+(mo===selMonth?" style='background:#fff7f0'":'')+">"
-        +"<td>"+MON_KH[parseInt(em)-1]+" "+ey+"</td>"
-        +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
-        +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
-        +"<td style='font-weight:700;color:"+(pnl2>=0?"#27ae60":"#c0392b")+"'>"+(pnl2>=0?"+":"")+fmt(pnl2)+"</td></tr>";
-    }).join("");
+    // ── History rows — adapts to period ────────────────────────────
+    let histTitle = "";
+    let histHeaders = "";
+    let histRows = "";
+
+    if (finPeriod === "day") {
+      // Daily view: show all days that have orders OR expenses in selected month
+      histTitle = "📅 ប្រវត្តិប្រចាំថ្ងៃ (ខែ " + monthLabel + ")";
+      histHeaders = "<tr><th>ថ្ងៃ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr>";
+      const allDays = [...new Set([
+        ...(sourceOrders||[]).map(o => { try { return new Date(o.order_id).toISOString().slice(0,10); } catch { return null; } }).filter(Boolean),
+        ...(Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).map(t=>t.date?.slice(0,10)).filter(Boolean),
+        selDay,
+      ])].filter(d => d.slice(0,7) === selMonth).sort().reverse();
+      histRows = allDays.map(day => {
+        const rev2 = (sourceOrders||[]).filter(o=>{ try{return new Date(o.order_id).toISOString().slice(0,10)===day;}catch{return false;} }).reduce((s,o)=>s+o.total+o.tax,0);
+        const exp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,10)===day&&(!viewBranchId||t.branch_id===viewBranchId)).reduce((s,t)=>s+Number(t.amount||0),0);
+        const pnl2 = rev2 - exp2;
+        return "<tr"+(day===selDay?" style='background:#fff7f0'":'')+">"
+          +"<td>"+day+"</td>"
+          +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
+          +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
+          +"<td style='font-weight:700;color:"+(pnl2>=0?"#27ae60":"#c0392b")+"'>"+(pnl2>=0?"+":"")+fmt(pnl2)+"</td></tr>";
+      }).join("");
+
+    } else if (finPeriod === "year") {
+      // Yearly view: show all months in selected year
+      histTitle = "📅 ប្រវត្តិប្រចាំខែ (ឆ្នាំ " + selYear + ")";
+      histHeaders = "<tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr>";
+      const allMonthsInYear = Array.from({length:12}, (_,i) => selYear + "-" + String(i+1).padStart(2,"0"));
+      histRows = allMonthsInYear.map(mo => {
+        const [ey,em] = mo.split("-");
+        const rev2 = (sourceOrders||[]).filter(o=>{ try{return new Date(o.order_id).toISOString().slice(0,7)===mo;}catch{return false;} }).reduce((s,o)=>s+o.total+o.tax,0);
+        const txnExp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,7)===mo&&(!viewBranchId||t.branch_id===viewBranchId)).reduce((s,t)=>s+Number(t.amount||0),0);
+        const legRec = monthlyRecords.find(e=>e.month===mo);
+        const legExp2 = legRec ? expCats.reduce((s,c)=>s+Number((legRec.items||{})[c.id]||0),0) : 0;
+        const exp2 = txnExp2 + legExp2;
+        const pnl2 = rev2 - exp2;
+        if (rev2===0 && exp2===0) return ""; // skip empty months
+        return "<tr"+(mo===selMonth?" style='background:#fff7f0'":'')+">"
+          +"<td>"+MON_KH[parseInt(em)-1]+" "+ey+"</td>"
+          +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
+          +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
+          +"<td style='font-weight:700;color:"+(pnl2>=0?"#27ae60":"#c0392b")+"'>"+(pnl2>=0?"+":"")+fmt(pnl2)+"</td></tr>";
+      }).filter(Boolean).join("");
+
+    } else {
+      // Monthly view: show last 12 months
+      histTitle = "📅 ប្រវត្តិប្រចាំខែ (១២ ខែចុងក្រោយ)";
+      histHeaders = "<tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr>";
+      const allMonths = [...new Set([
+        ...(Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).map(t=>t.date?.slice(0,7)).filter(Boolean),
+        selMonth,
+      ])].sort().reverse().slice(0,12);
+      histRows = allMonths.map(mo => {
+        const [ey,em] = mo.split("-");
+        const rev2 = (sourceOrders||[]).filter(o=>{ try{return new Date(o.order_id).toISOString().slice(0,7)===mo;}catch{return false;} }).reduce((s,o)=>s+o.total+o.tax,0);
+        const txnExp2 = (Array.isArray(expenses)?expenses.filter(e=>e&&e._txn):[]).filter(t=>t.date?.slice(0,7)===mo&&(!viewBranchId||t.branch_id===viewBranchId)).reduce((s,t)=>s+Number(t.amount||0),0);
+        const legRec = monthlyRecords.find(e=>e.month===mo);
+        const legExp2 = legRec ? expCats.reduce((s,c)=>s+Number((legRec.items||{})[c.id]||0),0) : 0;
+        const exp2 = txnExp2 + legExp2;
+        const pnl2 = rev2 - exp2;
+        return "<tr"+(mo===selMonth?" style='background:#fff7f0'":'')+">"
+          +"<td>"+MON_KH[parseInt(em)-1]+" "+ey+"</td>"
+          +"<td style='color:#B8732A'>"+fmt(rev2)+"</td>"
+          +"<td style='color:#c0392b'>"+fmt(exp2)+"</td>"
+          +"<td style='font-weight:700;color:"+(pnl2>=0?"#27ae60":"#c0392b")+"'>"+(pnl2>=0?"+":"")+fmt(pnl2)+"</td></tr>";
+      }).join("");
+    }
 
     const barExpW = totalExp>0 ? Math.min(100,(totalExp/Math.max(revenue,totalExp))*100) : 0;
 
@@ -4522,15 +4572,15 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
          +"</tr></thead><tbody>"+txnRows
          +"<tr style='background:#fff3e8'><td colspan='"+(branches.length>1?5:4)+"' style='font-weight:700'>💸 ចំណាយសរុប</td><td style='text-align:right;font-weight:700;color:#c0392b'>"+fmt(totalExp)+"</td></tr>"
          +"</tbody></table>"
-        :"<p style='color:#888;font-size:12px;margin:12px 0'>គ្មានចំណាយសម្រាប់ខែនេះ</p>")
+        :"<p style='color:#888;font-size:12px;margin:12px 0'>"+noExpLabel+"</p>")
       +(catSummaryRows
         ?"<h2>📊 សង្ខេបតាមប្រភេទ</h2>"
          +"<table><thead><tr><th>ប្រភេទ</th><th style='text-align:right'>សរុប</th><th style='text-align:right'>%</th></tr></thead>"
          +"<tbody>"+catSummaryRows+"</tbody></table>"
         :"")
       +(histRows
-        ?"<h2>📅 ប្រវត្តិប្រចាំខែ</h2>"
-         +"<table><thead><tr><th>ខែ</th><th>ចំណូល</th><th>ចំណាយ</th><th>ចំណេញ</th></tr></thead>"
+        ?"<h2>"+histTitle+"</h2>"
+         +"<table><thead>"+histHeaders+"</thead>"
          +"<tbody>"+histRows+"</tbody></table>"
         :"")
       +"<div class='footer'>"+shopName+" POS &copy; "+new Date().getFullYear()+" &middot; ហិរញ្ញវត្ថុ "+periodLabel+"</div>"
