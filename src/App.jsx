@@ -209,6 +209,8 @@ function startShiftScheduler(getOrders, getBranchList) {
     }
   }, 30 * 1000); // check every 30 seconds
 }
+
+async function tgSend(text) {
   try {
     const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       method: "POST",
