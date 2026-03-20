@@ -1153,7 +1153,9 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
             ? <span className="topbar-username" style={{ fontSize:9, padding:"1px 6px", borderRadius:8,
                 background:"rgba(91,163,224,.15)", color:"#5BA3E0",
                 border:"1px solid #5BA3E033", fontWeight:700 }}>
-                🏪 {(branchList||[]).find(b=>b.branch_id===(currentUser.branch_id==="all"?activeBranchId:currentUser.branch_id))?.branch_name || (currentUser.branch_id==="all"?activeBranchId:currentUser.branch_id)}
+                {currentUser.branch_id === "all"
+                    ? ((branchList||[]).find(b=>b.branch_id===activeBranchId)?.branch_name || activeBranchId)
+                    : (BRANCH_NAME || currentUser.branch_id)}
               </span>
             : null
         }
