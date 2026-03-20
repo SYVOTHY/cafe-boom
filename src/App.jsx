@@ -1153,7 +1153,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
             ? <span className="topbar-username" style={{ fontSize:9, padding:"1px 6px", borderRadius:8,
                 background:"rgba(91,163,224,.15)", color:"#5BA3E0",
                 border:"1px solid #5BA3E033", fontWeight:700 }}>
-                🏪 {(branchList||[]).find(b=>b.branch_id===currentUser.branch_id)?.branch_name || currentUser.branch_id}
+                🏪 {(branchList||[]).find(b=>b.branch_id===(currentUser.branch_id==="all"?activeBranchId:currentUser.branch_id))?.branch_name || (currentUser.branch_id==="all"?activeBranchId:currentUser.branch_id)}
               </span>
             : null
         }
@@ -3866,7 +3866,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
               <div style={{ display:"flex", gap:6, alignItems:"center" }}>
                 {reportMode === "all"
                   ? <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🌐 ទាំងអស់</span>
-                  : <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🏪 {branchId}</span>
+                  : <span style={{ fontSize:11, color:"#5BA3E0", background:"#5BA3E022", padding:"3px 10px", borderRadius:10 }}>🏪 {(branchList||[]).find(b=>b.branch_id===branchId)?.branch_name || branchId}</span>
                 }
                 {reportMode === "all" && allStock && (
                   <button onClick={doPrintAllStock}
@@ -5852,7 +5852,7 @@ function ThemePage({ theme, setTheme, notify, isGlobalAdmin, currentUser }) {
         </div>
         <div style={{ fontSize:12, color:"var(--accent)", background:"var(--bg-card)",
           border:"1px solid var(--border-col)", borderRadius:10, padding:"8px 16px" }}>
-          👤 {currentUser?.name} · 🏪 {currentUser?.branch_id}
+          👤 {currentUser?.name} · 🏪 {(branchList||[]).find(b=>b.branch_id===currentUser?.branch_id)?.branch_name || currentUser?.branch_id}
         </div>
       </div>
     );
