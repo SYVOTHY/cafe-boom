@@ -2831,7 +2831,7 @@ function OrdersPage({ orders, ings, currentUser, branchId, branchList }) {
       .kpi .lbl{font-size:11px;color:#888}
       .footer{margin-top:24px;padding-top:10px;border-top:1px solid #eee;font-size:11px;color:#aaa;text-align:center}
     </style></head><body>
-    <div class="header" style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">${_L?`<img src="${_L}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`:""}<div><div class="logo">☕ ${_S}<span>${_B}</span></div></div></div><div class="meta" style="text-align:right"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
+    <div class="header" style="display:flex;justify-content:space-between;align-items:center"><div style="display:flex;align-items:center;gap:10px">${_L?`<img src="${_L}" style="width:48px;height:48px;border-radius:50%;object-fit:cover;border:2px solid #B8732A" onerror="this.style.display='none'"/>`:`<div style="width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#B8732A,#E8A84B);display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">🏪</div>`}<div><div class="logo">${_S}<span>${_B}</span></div></div></div><div class="meta" style="text-align:right"><b>${dateLabel}</b><br/>បោះពុម្ព: ${new Date().toLocaleString("km-KH")}<br/>${_U?'<span style="color:#B8732A">👤 '+_U+'</span>':""}</div></div>
 
     <h2>📊 សង្ខេប</h2>
     <div class="kpi-grid">
@@ -3169,7 +3169,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     <div class="header">
       <div class="logo-area">
         ${logoHtml}
-        <div><div class="shop-name">☕ ${_S}</div><div class="shop-sub">🧂 ស្ថានភាពស្តុក + ការប្រើប្រាស់</div></div>
+        <div><div class="shop-name">${_S}</div><div class="shop-sub">🧂 ស្ថានភាពស្តុក + ការប្រើប្រាស់</div></div>
       </div>
       <div class="meta">
         <b>${todayLabel}</b><br/>
@@ -3485,7 +3485,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       <div class="logo-left">
         ${logoHtml}
         <div>
-          <div class="shop-name">☕ ${_S}</div>
+          <div class="shop-name">${_S}</div>
           <div class="shop-sub">${scopeLabel} · ${periodLabel}</div>
         </div>
       </div>
