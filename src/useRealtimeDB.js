@@ -25,6 +25,7 @@ export function useRealtimeDB(serverUrl, branchId) {
 
   // ── Initial load from REST API ──────────────────────────────────
   const loadFull = useCallback(async () => {
+    setLoading(true);   // always show loading state during fetch
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 8000);
@@ -76,6 +77,16 @@ export function useRealtimeDB(serverUrl, branchId) {
   }, [serverUrl, branchId]);
 
   // ── Socket.io setup (async — won't crash if socket.io-client missing) ──
+  // Safety net: if loading is stuck after 12s, force it off
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setLoading(prev => {
+        if (prev) { console.warn("[RealtimeDB] ⚠️ Loading timeout — forcing off"); return false; }
+        return prev;
+      });
+    }, 12000);
+    return () => clearTimeout(t);
+  }, [serverUrl, branchId]);
   useEffect(() => {
     let mounted = true;
 
