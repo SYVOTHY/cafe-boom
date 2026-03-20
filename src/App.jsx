@@ -107,7 +107,108 @@ function getUserBranchBadge(user, branches) {
 
 
 
-async function tgSend(text) {
+// ── Shift Summary Telegram ────────────────────────────────────────
+// Shifts: Morning 05:00–13:00 | Afternoon 12:00–19:00
+const SHIFTS = [
+  { id:"morning",   label:"ព្រឹក",   icon:"🌅", start:5,  end:13 },
+  { id:"afternoon", label:"រសៀល",   icon:"☀️",  start:12, end:19 },
+];
+
+// Build & send shift summary for ALL branches
+async function sendShiftSummary(shiftId, allOrdersData, branchListData) {
+  const shift = SHIFTS.find(s => s.id === shiftId) || SHIFTS[0];
+  const today = new Date().toISOString().slice(0, 10);
+  const now   = new Date().toLocaleString("km-KH");
+
+  // Filter orders: today + within shift hours
+  const shiftOrders = (allOrdersData || []).filter(o => {
+    try {
+      const d = new Date(o.order_id);
+      const dateOk  = d.toISOString().slice(0, 10) === today;
+      const hourOk  = d.getHours() >= shift.start && d.getHours() < shift.end;
+      return dateOk && hourOk;
+    } catch { return false; }
+  });
+
+  // Group by branch
+  const byBranch = {};
+  shiftOrders.forEach(o => {
+    const bid = o.branch_id || "unknown";
+    if (!byBranch[bid]) byBranch[bid] = { orders:[], revenue:0, items:0 };
+    byBranch[bid].orders.push(o);
+    byBranch[bid].revenue += (Number(o.total||0) + Number(o.tax||0));
+    byBranch[bid].items   += (o.items||[]).reduce((s,i)=>s+(i.qty||1),0);
+  });
+
+  // Group by cashier
+  const byCashier = {};
+  shiftOrders.forEach(o => {
+    const name = o.cashier || "unknown";
+    if (!byCashier[name]) byCashier[name] = { orders:0, revenue:0, items:0 };
+    byCashier[name].orders++;
+    byCashier[name].revenue += (Number(o.total||0) + Number(o.tax||0));
+    byCashier[name].items   += (o.items||[]).reduce((s,i)=>s+(i.qty||1),0);
+  });
+
+  const totalRev   = shiftOrders.reduce((s,o)=>s+Number(o.total||0)+Number(o.tax||0),0);
+  const totalItems = shiftOrders.reduce((s,o)=>s+(o.items||[]).reduce((ss,i)=>ss+(i.qty||1),0),0);
+
+  // Build branch lines
+  const branchLines = Object.entries(byBranch).map(([bid, bd]) => {
+    const bName = (branchListData||[]).find(b=>b.branch_id===bid)?.branch_name
+      || localStorage.getItem("cb_bn_"+bid) || bid;
+    return `  🏪 ${bName}: <b>$${bd.revenue.toFixed(2)}</b> · ${bd.orders.length} Orders · ${bd.items} មុខ`;
+  }).join("\n");
+
+  // Build cashier lines
+  const cashierLines = Object.entries(byCashier)
+    .sort((a,b)=>b[1].revenue-a[1].revenue)
+    .map(([name,d])=>`  👤 ${name}: <b>$${d.revenue.toFixed(2)}</b> · ${d.orders} Orders`)
+    .join("\n");
+
+  const text = [
+    `${shift.icon} <b>Cafe Bloom — ប្តូរវេន${shift.label}!</b>`,
+    `⏰ <b>វេន:</b> ${shift.start}:00 → ${shift.end}:00`,
+    `📅 <b>ថ្ងៃ:</b> ${today}  |  🕐 ${now}`,
+    ``,
+    `📊 <b>សង្ខេប:</b>`,
+    `  💰 ចំណូលសរុប: <b>$${totalRev.toFixed(2)}</b>`,
+    `  🛒 Orders: <b>${shiftOrders.length}</b>`,
+    `  🍽️ មុខ: <b>${totalItems}</b>`,
+    ``,
+    ...(branchLines ? [`🏪 <b>តាម​សាខា:</b>`, branchLines, ``] : []),
+    ...(cashierLines ? [`👥 <b>តាម​បុគ្គលិក:</b>`, cashierLines] : []),
+    `─────────────────`,
+    `✅ <b>ប្តូរវេនរួចរាល់!</b>`,
+  ].join("\n");
+
+  await tgSend(text);
+}
+
+// Track last sent shift to avoid duplicate sends
+const _shiftSent = {};
+
+// Auto-check every minute if it's time to send shift summary
+function startShiftScheduler(getOrders, getBranchList) {
+  return setInterval(() => {
+    const now = new Date();
+    const hm  = now.getHours() * 60 + now.getMinutes();
+    // Send at exactly 13:00 (780) for morning shift and 19:00 (1140) for afternoon
+    const triggers = [
+      { hm: 13 * 60, shiftId: "morning"   },
+      { hm: 19 * 60, shiftId: "afternoon" },
+    ];
+    const today = now.toISOString().slice(0, 10);
+    for (const t of triggers) {
+      const key = today + "_" + t.shiftId;
+      if (Math.abs(hm - t.hm) <= 1 && !_shiftSent[key]) {
+        _shiftSent[key] = true;
+        console.log(`[ShiftSummary] Sending ${t.shiftId} summary at ${now.toLocaleTimeString()}`);
+        sendShiftSummary(t.shiftId, getOrders(), getBranchList()).catch(e=>console.error("[ShiftSummary]",e));
+      }
+    }
+  }, 30 * 1000); // check every 30 seconds
+}
   try {
     const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       method: "POST",
@@ -717,6 +818,27 @@ function CafeBloom() {
     localStorage.setItem("cb_stock_alert_dismissed", JSON.stringify(next));
     setStockAlert(null);
   };
+
+  // ── Auto Shift Summary Scheduler ────────────────────────────────
+  // Runs only on Global Admin client — sends summary at 13:00 & 19:00
+  const shiftOrdersRef    = useRef(ordersRaw);
+  const shiftBranchRef    = useRef(branchList);
+  // Keep refs current whenever data changes
+  useEffect(() => { shiftOrdersRef.current = ordersRaw; }, [ordersRaw]);
+  useEffect(() => { shiftBranchRef.current = branchList; }, [branchList]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const isGA = currentUser.role === "admin" && currentUser.branch_id === "all";
+    if (!isGA) return;
+    const timer = startShiftScheduler(
+      () => shiftOrdersRef.current,
+      () => shiftBranchRef.current
+    );
+    console.log("[ShiftScheduler] Started for global admin");
+    return () => { clearInterval(timer); console.log("[ShiftScheduler] Stopped"); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.user_id]);
 
   // ── Toast notification (used by POSPage) ─────────────────────────
   const [toast, setToast] = useState("");
@@ -3443,7 +3565,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       return usage;
     };
 
-    // Helper to build ingredient rows with ស្តុកដើម / ស្តុកនៅសល់ / លក់អស់
+    // Helper to build ingredient rows with ស្តុកដើម / ស្តុកនីសល់ / លក់អស់
     const buildIngRows = (ingList, usageMap) => {
       return ingList.map(i => {
         const iid = Number(i.ingredient_id);
@@ -3469,7 +3591,7 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
     const stockTableHeader = `<table><thead><tr>
       <th>គ្រឿងផ្សំ</th>
       <th>ស្តុកដើម</th>
-      <th>ស្តុកនៅសល់</th>
+      <th>ស្តុកនីសល់</th>
       <th>លក់អស់</th>
       <th>Bar</th>
       <th>ស្ថានភាព</th>
@@ -4237,11 +4359,19 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
           )}
         </div>
 
-        {/* Telegram button */}
-        <div style={{ marginTop: 20 }}>
-          <button onClick={async () => { await sendDailySummary(orders); alert("✅ ផ្ញើ Telegram Summary រួចហើយ!"); }}
-            style={{ ...btnGold, display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-            📲 ផ្ញើ Summary ថ្ងៃនេះ ទៅ Telegram
+        {/* Telegram buttons — manual shift summary */}
+        <div style={{ marginTop: 20, display:"flex", gap:8, flexWrap:"wrap" }}>
+          <button onClick={async () => {
+            await sendShiftSummary("morning", orders, branchList);
+            notify("✅ ផ្ញើ Summary វេនព្រឹក រួចហើយ!");
+          }} style={{ ...btnGold, display:"flex", alignItems:"center", gap:8, fontSize:13 }}>
+            🌅 ផ្ញើ Summary វេនព្រឹក (05:00–13:00)
+          </button>
+          <button onClick={async () => {
+            await sendShiftSummary("afternoon", orders, branchList);
+            notify("✅ ផ្ញើ Summary វេនរសៀល រួចហើយ!");
+          }} style={{ ...btnGold, display:"flex", alignItems:"center", gap:8, fontSize:13, background:"linear-gradient(135deg,#1A6A4A,#27AE60)" }}>
+            ☀️ ផ្ញើ Summary វេនរសៀល (12:00–19:00)
           </button>
         </div>
       </div>{/* end scroll */}
