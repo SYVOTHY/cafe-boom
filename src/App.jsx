@@ -76,13 +76,7 @@ function getUserBranchBadge(user, branches) {
   return { label: "🏪 " + bName, ...c };
 }
 
-function getBranchName() {
-  if (typeof window !== "undefined") {
-    if (window.CAFE_BRANCH_NAME) return window.CAFE_BRANCH_NAME;
-    if (window.CAFE_BRANCH)      return window.CAFE_BRANCH;
-  }
-  return "Cafe Bloom";
-}
+
 
 async function tgSend(text) {
   try {
