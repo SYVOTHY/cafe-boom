@@ -243,7 +243,15 @@ function runTransaction(ingredients, recipes, productId, qty) {
   return { success: true, checks, newIngredients };
 }
 
-const nextId = a => Math.max(0, ...a.map(x => Object.values(x)[0])) + 1;
+const nextId = (a, key) => {
+  if (!a || !a.length) return 1;
+  // If key provided, use that field; otherwise fallback to first numeric value found
+  const vals = a.map(x => {
+    const v = key ? x[key] : Object.values(x).find(v => typeof v === "number" && v < 1e12);
+    return Number(v) || 0;
+  }).filter(v => v > 0 && v < 1e12);  // exclude timestamps (>1e12)
+  return vals.length ? Math.max(...vals) + 1 : 1;
+};
 
 const fmtN = n => Number(n).toFixed(1);
 // Format number with thousands separator: 1716.0 → "1,716.0"  or  "1,716"
@@ -662,7 +670,21 @@ function CafeBloom() {
     }).catch(() => {});
   }, [currentUser?.branch_id]);
 
-  // ── Low Stock Alert ─────────────────────────────────────────────
+  // ── Auto-clean orphan recipe mappings when DB loads ──────────────
+  // Runs silently when ingredients or recipes update — removes any recipe
+  // rows whose ingredient_id no longer exists in the current branch.
+  useEffect(() => {
+    if (!recipesRaw?.length || !ingsRaw?.length) return;
+    const ingIds = new Set(ingsRaw.map(i => Number(i.ingredient_id)));
+    const hasOrphan = recipesRaw.some(r => !ingIds.has(Number(r.ingredient_id)));
+    if (!hasOrphan) return;
+    // Silently remove orphan mappings and save
+    const cleaned = recipesRaw.filter(r => ingIds.has(Number(r.ingredient_id)));
+    console.log(`[AutoClean] Removing ${recipesRaw.length - cleaned.length} orphan recipe mapping(s)`);
+    setRecipesRaw(cleaned);
+    saveTable("recipes", cleaned);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ingsRaw, recipesRaw?.length]);
   const [stockAlert, setStockAlert]   = useState(null);  // { items: [...] }
   const [stockAlertDismissed, setStockAlertDismissed] = useState(() => {
     try { return JSON.parse(localStorage.getItem("cb_stock_alert_dismissed")||"{}"); } catch { return {}; }
@@ -2212,12 +2234,12 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
   };
 
   const saveIng = (data) => {
-    if (modal.mode === "add") setIngs(p => [...p, { ...data, ingredient_id: nextId(p) }]);
+    if (modal.mode === "add") setIngs(p => [...p, { ...data, ingredient_id: nextId(p, "ingredient_id") }]);
     else setIngs(p => p.map(i => i.ingredient_id === data.ingredient_id ? data : i));
     notify(modal.mode === "add" ? "✓ បន្ថែមគ្រឿងផ្សំ" : "✓ កែប្រែ"); setModal(null);
   };
   const saveRec = (data) => {
-    if (modal.mode === "add") setRecipes(p => [...p, { ...data, recipe_id: nextId(p) }]);
+    if (modal.mode === "add") setRecipes(p => [...p, { ...data, recipe_id: nextId(p, "recipe_id") }]);
     else setRecipes(p => p.map(r => r.recipe_id === data.recipe_id ? data : r));
     notify(modal.mode === "add" ? "✓ បន្ថែមរូបមន្ត" : "✓ កែប្រែ"); setModal(null);
   };
