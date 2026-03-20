@@ -6929,27 +6929,60 @@ function BackupPage({ branchList, notify, setTheme }) {
   const [progress,setProgress]=useState([]);
   const [restoreLog,setRestoreLog]=useState([]);
   const [showRestore,setShowRestore]=useState(false);
+  const [confirmFile,setConfirmFile]=useState(null); // ⚠️ fix: confirm before overwrite
   const fileRef=useRef(null);
 
   const doBackup=async()=>{
     setLoading(true);setProgress([]);
     const token=localStorage.getItem("pos_token");
     const hdr={"Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{})};
-    const snap={_created:new Date().toISOString(),_version:"1.0",branches:{}};
+    const snap={_created:new Date().toISOString(),_version:"1.1",branches:{}};
     try{
       setProgress(p=>[...p,"⏳ Loading shared data..."]);
       const sr=await fetch(`${CLOUD_URL}/api/db?branch=branch_1`,{headers:hdr});
       const sd=await sr.json();
-      snap.shared={categories:sd.categories||[],products:sd.products||[],options:sd.options||[],users:(sd.users||[]).map(({password:_,...u})=>u),theme:sd.theme||{},branches:sd.branches||[]};
+      // ⚠️ fix: DO backup users (with passwords stripped) so restore can re-create them
+      snap.shared={
+        categories:sd.categories||[],
+        products:sd.products||[],
+        options:sd.options||[],
+        users:(sd.users||[]).map(({password:_,...u})=>u), // passwords stripped for security
+        theme:sd.theme||{},
+        branches:sd.branches||[],
+      };
       setProgress(p=>[...p.slice(0,-1),"✅ Shared data loaded"]);
-      const branches=(branchList||[]).filter(b=>b.active!==false);
-      for(const b of branches){
+
+      // ⚠️ fix: always fetch branches from server if branchList is empty
+      let activeBranches=(branchList||[]).filter(b=>b.active!==false);
+      if(activeBranches.length===0){
+        setProgress(p=>[...p,"⏳ Fetching branch list..."]);
+        try{
+          const br=await fetch(`${CLOUD_URL}/api/branches`,{headers:hdr});
+          const bd=await br.json();
+          activeBranches=(Array.isArray(bd)?bd:[]).filter(b=>b.active!==false);
+          setProgress(p=>[...p.slice(0,-1),`✅ Found ${activeBranches.length} branches`]);
+        }catch(e){setProgress(p=>[...p.slice(0,-1),"⚠️ Could not fetch branches — using branchList prop"]);}
+      }
+
+      if(activeBranches.length===0){
+        setProgress(p=>[...p,"⚠️ No branches found — only shared data will be backed up"]);
+      }
+
+      for(const b of activeBranches){
         setProgress(p=>[...p,`⏳ Loading ${b.branch_name||b.branch_id}...`]);
         try{
           const r=await fetch(`${CLOUD_URL}/api/db?branch=${b.branch_id}`,{headers:hdr});
           const d=await r.json();
-          snap.branches[b.branch_id]={branch_name:b.branch_name,orders:d.orders||[],logs:d.logs||[],tables:d.tables||[],ingredients:d.ingredients||[],expenses:d.expenses||[],recipes:d.recipes||[]};
-          setProgress(p=>[...p.slice(0,-1),`✅ ${b.branch_name||b.branch_id} (${(d.orders||[]).length} orders)`]);
+          snap.branches[b.branch_id]={
+            branch_name:b.branch_name,
+            orders:d.orders||[],
+            logs:d.logs||[],
+            tables:d.tables||[],
+            ingredients:d.ingredients||[],
+            expenses:d.expenses||[],
+            recipes:d.recipes||[],  // per-branch recipes
+          };
+          setProgress(p=>[...p.slice(0,-1),`✅ ${b.branch_name||b.branch_id} (${(d.orders||[]).length} orders, ${(d.recipes||[]).length} recipes)`]);
         }catch(e){setProgress(p=>[...p.slice(0,-1),`❌ ${b.branch_id}: ${e.message}`]);}
       }
       const json=JSON.stringify(snap,null,2);
@@ -6960,59 +6993,107 @@ function BackupPage({ branchList, notify, setTheme }) {
       URL.revokeObjectURL(url);
       const now=new Date().toLocaleString("km-KH");
       setLastBackup(now);localStorage.setItem("cb_last_backup",now);
-      setProgress(p=>[...p,`✅ Backup saved! (${(json.length/1024).toFixed(1)} KB)`]);
+      const totalOrders=Object.values(snap.branches).reduce((s,b)=>s+(b.orders||[]).length,0);
+      setProgress(p=>[...p,`✅ Backup saved! ${activeBranches.length} branches · ${totalOrders} orders · ${(json.length/1024).toFixed(1)} KB`]);
       notify("✅ Backup រួចហើយ!");
     }catch(e){setProgress(p=>[...p,`❌ Error: ${e.message}`]);notify("❌ Backup failed");}
     setLoading(false);
   };
 
+  // ⚠️ fix: show confirm dialog before restore
+  const handleFileSelect=(file)=>{
+    if(!file)return;
+    setConfirmFile(file);
+  };
+
   const doRestore=async(file)=>{
     if(!file)return;
+    setConfirmFile(null);
     setRestoring(true);setRestoreLog([]);
     const token=localStorage.getItem("pos_token");
     const hdr={"Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{})};
     try{
       const text=await file.text();
       const snap=JSON.parse(text);
-      setRestoreLog(p=>[...p,`📂 ${file.name}  |  📅 ${snap._created||"unknown"}`]);
+      setRestoreLog(p=>[...p,`📂 ${file.name}  |  📅 ${snap._created||"unknown"}  |  v${snap._version||"1.0"}`]);
       if(snap.shared){
         for(const t of["categories","products","options","theme"]){
           if(snap.shared[t]){
-            try{await fetch(`${CLOUD_URL}/api/db/${t}`,{method:"POST",headers:hdr,body:JSON.stringify(snap.shared[t])});setRestoreLog(p=>[...p,`✅ shared/${t}`]);}
+            try{await fetch(`${CLOUD_URL}/api/db/${t}`,{method:"POST",headers:hdr,body:JSON.stringify(snap.shared[t])});setRestoreLog(p=>[...p,`✅ shared/${t} (${Array.isArray(snap.shared[t])?snap.shared[t].length+" rows":"ok"})`]);}
             catch(e){setRestoreLog(p=>[...p,`❌ shared/${t}: ${e.message}`]);}
           }
         }
         if(snap.shared.theme&&setTheme)setTheme(snap.shared.theme);
+        // ⚠️ fix: restore users (without passwords — they keep existing hash or get empty)
+        if(snap.shared.users&&snap.shared.users.length>0){
+          try{
+            await fetch(`${CLOUD_URL}/api/db/users`,{method:"POST",headers:hdr,body:JSON.stringify(snap.shared.users)});
+            setRestoreLog(p=>[...p,`✅ shared/users (${snap.shared.users.length} users — passwords preserved from DB)`]);
+          }catch(e){setRestoreLog(p=>[...p,`❌ shared/users: ${e.message}`]);}
+        }
       }
       for(const[bid,bd]of Object.entries(snap.branches||{})){
         setRestoreLog(p=>[...p,`⏳ Restoring ${bd.branch_name||bid}...`]);
-        let ok=0;
+        let ok=0,fail=0;
         for(const t of["orders","logs","tables","ingredients","expenses","recipes"]){
-          if(bd[t]){try{await fetch(`${CLOUD_URL}/api/db/${t}?branch=${bid}`,{method:"POST",headers:hdr,body:JSON.stringify(bd[t])});ok++;}catch(e){setRestoreLog(p=>[...p,`  ❌ ${bid}/${t}: ${e.message}`]);}}
+          if(bd[t]){
+            try{
+              await fetch(`${CLOUD_URL}/api/db/${t}?branch=${bid}`,{method:"POST",headers:hdr,body:JSON.stringify(bd[t])});
+              ok++;
+            }catch(e){
+              setRestoreLog(p=>[...p,`  ❌ ${bid}/${t}: ${e.message}`]);
+              fail++;
+            }
+          }
         }
-        setRestoreLog(p=>[...p.slice(0,-1),`✅ ${bd.branch_name||bid}: ${ok}/6 tables`]);
+        setRestoreLog(p=>[...p.slice(0,-1),`${fail>0?"⚠️":"✅"} ${bd.branch_name||bid}: ${ok}/6 tables${fail>0?` (${fail} failed)`:""}`]);
       }
-      setRestoreLog(p=>[...p,"✅ Restore complete! Reload page."]);
+      setRestoreLog(p=>[...p,"✅ Restore complete! Reload page to see changes."]);
       notify("✅ Restore រួចហើយ! សូម reload page");
-    }catch(e){setRestoreLog(p=>[...p,`❌ ${e.message}`]);notify("❌ Restore failed");}
+    }catch(e){setRestoreLog(p=>[...p,`❌ ${e.message}`]);notify("❌ Restore failed: "+e.message);}
     setRestoring(false);
   };
 
   return(
     <div style={{padding:"20px 16px 40px",maxWidth:600,margin:"0 auto"}}>
+
+      {/* ── Confirm Restore Modal ── */}
+      {confirmFile&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:"var(--bg-card)",border:"2px solid #E74C3C55",borderRadius:16,padding:24,maxWidth:400,width:"100%"}}>
+            <div style={{fontSize:36,textAlign:"center",marginBottom:12}}>⚠️</div>
+            <div style={{fontWeight:700,fontSize:16,color:"#E74C3C",textAlign:"center",marginBottom:8}}>បញ្ជាក់ Restore</div>
+            <div style={{fontSize:13,color:"var(--text-dim)",textAlign:"center",marginBottom:6}}>File: <b style={{color:"var(--text-main)"}}>{confirmFile.name}</b></div>
+            <div style={{fontSize:12,color:"#E74C3C",textAlign:"center",marginBottom:20,padding:"8px 12px",background:"#E74C3C11",borderRadius:8}}>
+              ⚠️ ទិន្នន័យបច្ចុប្បន្នទាំងអស់នឹង <b>overwrite</b> — មិនអាចត្រឡប់វិញបានទេ!
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setConfirmFile(null)} style={{flex:1,padding:12,borderRadius:10,border:"1px solid var(--border-col)",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,color:"var(--text-dim)"}}>❌ បោះបង់</button>
+              <button onClick={()=>doRestore(confirmFile)} style={{flex:1,padding:12,borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:"linear-gradient(135deg,#7A1A1A,#E74C3C)",color:"#fff"}}>✅ យល់ព្រម Restore</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{fontWeight:700,fontSize:20,color:"var(--accent)",marginBottom:6}}>💾 Backup & Restore</div>
-      <div style={{fontSize:13,color:"var(--text-dim)",marginBottom:20}}>Download/Upload ទិន្នន័យទាំងអស់ — orders, ingredients, recipes, expenses</div>
+      <div style={{fontSize:13,color:"var(--text-dim)",marginBottom:20}}>Download/Upload ទិន្នន័យទាំងអស់ — orders, ingredients, recipes, expenses, users</div>
+
+      {/* Status bar */}
       <div style={{background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:12,padding:14,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div><div style={{fontSize:11,color:"var(--text-dim)"}}>⏰ Backup ចុងក្រោយ</div><div style={{fontSize:14,fontWeight:700,color:lastBackup?"#27AE60":"#E74C3C",marginTop:2}}>{lastBackup||"មិនទាន់ backup ទេ"}</div></div>
         <div style={{fontSize:11,color:"var(--text-dim)"}}>{(branchList||[]).filter(b=>b.active!==false).length} branches</div>
       </div>
+
+      {/* Backup */}
       <div style={{background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:14,padding:16,marginBottom:14}}>
-        <div style={{fontWeight:700,fontSize:14,color:"var(--accent)",marginBottom:10}}>📤 Backup</div>
+        <div style={{fontWeight:700,fontSize:14,color:"var(--accent)",marginBottom:10}}>📤 Backup ទាំងអស់</div>
         <button onClick={doBackup} disabled={loading} style={{width:"100%",padding:14,borderRadius:12,border:"none",cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",fontSize:15,fontWeight:700,background:loading?"var(--bg-main)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",color:loading?"var(--text-dim)":"#fff",marginBottom:progress.length?12:0,opacity:loading?0.7:1}}>
           {loading?"⏳ កំពុង backup...":"💾 Backup ឥឡូវ"}
         </button>
-        {progress.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3}}>{progress.map((m,i)=><div key={i} style={{fontSize:12,color:m.startsWith("✅")?"#27AE60":m.startsWith("❌")?"#E74C3C":"var(--text-dim)"}}>{m}</div>)}</div>}
+        {progress.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3}}>{progress.map((m,i)=><div key={i} style={{fontSize:12,color:m.startsWith("✅")?"#27AE60":m.startsWith("❌")?"#E74C3C":m.startsWith("⚠️")?"#F39C12":"var(--text-dim)"}}>{m}</div>)}</div>}
       </div>
+
+      {/* Restore */}
       <div style={{background:"var(--bg-card)",border:"1px solid #E74C3C33",borderRadius:14,padding:16,marginBottom:14}}>
         <div style={{fontWeight:700,fontSize:14,color:"#E74C3C",marginBottom:6}}>📥 Restore</div>
         <div style={{fontSize:12,color:"var(--text-dim)",marginBottom:12,padding:"8px 12px",background:"#E74C3C11",borderRadius:8}}>⚠️ Restore នឹង <b style={{color:"#E74C3C"}}>overwrite</b> ទិន្នន័យបច្ចុប្បន្ន — backup ជាមុន!</div>
@@ -7020,20 +7101,27 @@ function BackupPage({ branchList, notify, setTheme }) {
           <button onClick={()=>setShowRestore(true)} style={{width:"100%",padding:12,borderRadius:10,border:"1px solid #E74C3C44",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,color:"#E74C3C"}}>📥 Restore ពី Backup File</button>
         ):(
           <div>
-            <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={e=>e.target.files[0]&&doRestore(e.target.files[0])}/>
+            {/* ⚠️ fix: onChange now calls handleFileSelect → shows confirm first */}
+            <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={e=>{if(e.target.files[0])handleFileSelect(e.target.files[0]);e.target.value="";}}/>
             <div style={{display:"flex",gap:8,marginBottom:10}}>
               <button onClick={()=>fileRef.current?.click()} disabled={restoring} style={{flex:1,padding:12,borderRadius:10,border:"1px solid #E74C3C44",background:restoring?"var(--bg-main)":"#E74C3C11",cursor:restoring?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,color:"#E74C3C",opacity:restoring?0.6:1}}>{restoring?"⏳ កំពុង restore...":"📂 ជ្រើស .json file"}</button>
               <button onClick={()=>{setShowRestore(false);setRestoreLog([]);}} style={{padding:"12px 16px",borderRadius:10,border:"1px solid var(--border-col)",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,color:"var(--text-dim)"}}>បោះបង់</button>
             </div>
-            {restoreLog.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:200,overflowY:"auto"}}>{restoreLog.map((m,i)=><div key={i} style={{fontSize:12,color:m.startsWith("✅")?"#27AE60":m.startsWith("❌")?"#E74C3C":"var(--text-dim)"}}>{m}</div>)}</div>}
+            {restoreLog.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:220,overflowY:"auto"}}>{restoreLog.map((m,i)=><div key={i} style={{fontSize:12,color:m.startsWith("✅")?"#27AE60":m.startsWith("❌")?"#E74C3C":m.startsWith("⚠️")?"#F39C12":"var(--text-dim)"}}>{m}</div>)}</div>}
+            {restoreLog.some(m=>m.includes("complete"))&&(
+              <button onClick={()=>window.location.reload()} style={{marginTop:10,width:"100%",padding:10,borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:"linear-gradient(135deg,#1A7A3A,#27AE60)",color:"#fff"}}>🔄 Reload Page Now</button>
+            )}
           </div>
         )}
       </div>
+
+      {/* Notes */}
       <div style={{padding:14,background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:12,fontSize:12,color:"var(--text-dim)",lineHeight:1.9}}>
         <div style={{fontWeight:700,color:"var(--accent)",marginBottom:6}}>📖 ការណែនាំ</div>
-        <div>• Backup file ជា <b style={{color:"var(--text-main)"}}>.json</b> — រក្សាទុកក្នុង Drive/Disk</div>
-        <div>• Restore: ជ្រើស .json → data overwrite ភ្លាម → reload page</div>
-        <div>• Password hash មិន backup ទេ (security)</div>
+        <div>• Backup ជា <b style={{color:"var(--text-main)"}}>.json</b> — រក្សាទុកក្នុង Google Drive / Disk</div>
+        <div>• រួមបញ្ចូល: orders, ingredients, recipes, expenses, categories, products, users</div>
+        <div>• Password <b style={{color:"var(--text-main)"}}>មិន</b> backup ទេ (security) — users នៅ DB ដដែល</div>
+        <div>• Restore: ជ្រើស .json → confirm → data overwrite → reload page</div>
         <div>• ណែនាំ backup ចន្លោះ ១ ថ្ងៃ ម្តង</div>
       </div>
     </div>
