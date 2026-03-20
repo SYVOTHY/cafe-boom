@@ -767,6 +767,51 @@ async function handler(req, res) {
     return;
   }
 
+  // ── MIGRATE RECIPES — fix orphan recipe→ingredient mappings ───────
+  // Removes recipe rows whose ingredient_id no longer exists in that branch's
+  // ingredients list, and re-sequences ingredient_id + recipe_id integers so
+  // they never collide with timestamp-based IDs.
+  if (req.method === "POST" && url === "/api/migrate-recipes") {
+    const session = getSession(req);
+    if (!session || session.role !== "admin") {
+      send(res, 403, { error:"Admin only" }); return;
+    }
+    try {
+      const branches = (await loadBranches()).filter(b => b.active);
+      const results  = [];
+      // Shared recipes (if any) — skip (branch recipes only)
+      for (const b of branches) {
+        const bd = await loadBranch(b.branch_id);
+        const ings    = bd.ingredients || [];
+        const recipes = bd.recipes     || [];
+        const ingIds  = new Set(ings.map(i => Number(i.ingredient_id)));
+
+        // 1) Remove orphan mappings (ingredient no longer exists)
+        const clean   = recipes.filter(r => ingIds.has(Number(r.ingredient_id)));
+        const removed = recipes.length - clean.length;
+
+        // 2) Re-sequence recipe_id (keep as small integers, avoid timestamp IDs)
+        const reindexed = clean.map((r, idx) => ({ ...r, recipe_id: idx + 1 }));
+
+        await saveBranchKey(b.branch_id, "recipes", reindexed);
+        broadcastBranchUpdate(b.branch_id, "recipes", reindexed);
+
+        results.push({
+          branch_id: b.branch_id,
+          before: recipes.length,
+          after:  reindexed.length,
+          removed,
+        });
+        console.log(`[migrate-recipes] ${b.branch_id}: removed=${removed}, kept=${reindexed.length}`);
+      }
+      send(res, 200, { ok:true, results });
+    } catch(e) {
+      console.error("[migrate-recipes]", e.message);
+      send(res, 500, { error: e.message });
+    }
+    return;
+  }
+
   // ── RESET DAILY ─────────────────────────────────────────────────
   if (req.method === "POST" && url.startsWith("/api/reset-daily")) {
     const bid = resolveBranch(req);
