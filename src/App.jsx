@@ -399,9 +399,9 @@ export default function CafeBloom() {
 
   const isGlobalAdmin = currentUser?.role === "admin" && currentUser?.branch_id === "all";
 
-  // Load branch list for global admin picker
+  // Load branch list for branch picker + branch name display
   useEffect(() => {
-    if (!isGlobalAdmin) return;
+    if (!currentUser) return; // load branches for all users (needed for branch name display)
     const token = localStorage.getItem("pos_token");
     const hdr = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
     fetch(`${API}/api/branches`, { headers:hdr })
