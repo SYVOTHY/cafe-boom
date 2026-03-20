@@ -513,8 +513,14 @@ function CafeBloom() {
     if (db.theme) {
       skipIfPending("theme", () => {
         setThemeRaw({ ...DEFAULT_THEME, ...db.theme });
-        if (db.theme.shopName) localStorage.setItem("cb_shop_name", db.theme.shopName);
-        if (db.theme.shopLogo !== undefined) localStorage.setItem("cb_shop_logo", db.theme.shopLogo || "");
+        if (db.theme.shopName) {
+          localStorage.setItem("cb_shop_name", db.theme.shopName);
+          window.__SHOP_NAME__ = db.theme.shopName;           // trigger TopBar polling
+        }
+        if (db.theme.shopLogo !== undefined) {
+          localStorage.setItem("cb_shop_logo", db.theme.shopLogo || "");
+          window.__SHOP_LOGO__ = db.theme.shopLogo || "";     // trigger TopBar polling
+        }
       });
     }
     if (db.expenses)    skipIfPending("expenses",    () => setExpensesRaw(db.expenses));
@@ -1078,6 +1084,8 @@ function CafeBloom() {
         onSwitchBranch={() => setShowBranchPicker(true)}
         isGlobalAdmin={isGlobalAdmin}
         currentBranchName={currentBranchName}
+        shopNameProp={themeRaw?.shopName || ""}
+        shopLogoProp={themeRaw?.shopLogo ?? ""}
         lowStockCount={(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0).length}
         onStockAlert={() => setStockAlert(prev => prev || { items:(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0), key:"manual" })} />
 
@@ -1168,18 +1176,21 @@ function LoginPage({ theme, loading, error, onLogin }) {
 // ═══════════════════════════════════════════════════════════════════
 //  TOPBAR COMPONENT
 // ═══════════════════════════════════════════════════════════════════
-function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin, lowStockCount, onStockAlert, currentBranchName }) {
-  const [shopName, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
-  const [shopLogo, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
+function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin, lowStockCount, onStockAlert, currentBranchName, shopNameProp, shopLogoProp }) {
+  // shopName/shopLogo: prefer props from themeRaw (real-time DB), fallback localStorage
+  const [shopNameLocal, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
+  const [shopLogoLocal, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
+  const shopName = shopNameProp || shopNameLocal;
+  const shopLogo = shopLogoProp !== undefined ? shopLogoProp : shopLogoLocal;
 
-  // Listen for storage changes when ThemePage saves
+  // Listen for storage changes when ThemePage saves (cross-tab)
   useEffect(() => {
     function onStorage(e) {
       if (e.key === "cb_shop_name") setShopNameState(e.newValue || "Café Boom");
       if (e.key === "cb_shop_logo") setShopLogoState(e.newValue || "");
     }
     window.addEventListener("storage", onStorage);
-    // Also poll window variables set by ThemePage (same-tab updates)
+    // Also poll window variables set by ThemePage (same-tab saves)
     const poll = setInterval(() => {
       if (window.__SHOP_NAME__) { setShopNameState(window.__SHOP_NAME__); window.__SHOP_NAME__ = null; }
       if (window.__SHOP_LOGO__ !== undefined && window.__SHOP_LOGO__ !== null) {
