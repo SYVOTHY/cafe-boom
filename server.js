@@ -162,6 +162,38 @@ async function initDB() {
       console.warn("[Migration] branch_id backfill warning:", migErr.message);
     }
 
+    // ── One-time migration: move recipes from shared_data → branch_data ──
+    // recipes must be per-branch so each branch has its own ingredient mappings
+    try {
+      const { rows: sharedRecRows } = await client.query(
+        "SELECT value FROM shared_data WHERE key='recipes'"
+      );
+      if (sharedRecRows.length > 0) {
+        const sharedRecipes = Array.isArray(sharedRecRows[0].value) ? sharedRecRows[0].value : [];
+        if (sharedRecipes.length > 0) {
+          // Copy shared recipes to every branch that doesn't yet have branch-level recipes
+          const { rows: branchList } = await client.query("SELECT branch_id FROM branches");
+          for (const { branch_id } of branchList) {
+            const { rows: existing } = await client.query(
+              "SELECT 1 FROM branch_data WHERE branch_id=$1 AND key='recipes'", [branch_id]
+            );
+            if (existing.length === 0) {
+              await client.query(
+                "INSERT INTO branch_data(branch_id,key,value) VALUES($1,'recipes',$2) ON CONFLICT DO NOTHING",
+                [branch_id, JSON.stringify(sharedRecipes)]
+              );
+              console.log(`[Migration] Copied ${sharedRecipes.length} shared recipes → ${branch_id}`);
+            }
+          }
+        }
+        // Remove recipes from shared_data (no longer shared)
+        await client.query("DELETE FROM shared_data WHERE key='recipes'");
+        console.log("[Migration] Removed recipes from shared_data (now per-branch)");
+      }
+    } catch (recMigErr) {
+      console.warn("[Migration] recipes migration warning:", recMigErr.message);
+    }
+
     console.log("✅ PostgreSQL tables ready");
   } finally {
     client.release();
@@ -314,6 +346,7 @@ async function loadBranch(bid) {
     tables:      BRANCH_TABLES_DEF,
     ingredients: BRANCH_INGREDIENTS,
     expenses:    [],
+    recipes:     [],   // recipes are per-branch (each branch has own ingredient mappings)
   };
   for (const [k, v] of Object.entries(def)) {
     if (!(k in db)) {
@@ -462,8 +495,10 @@ function broadcastSharedUpdate(table, data) {
 // ═══════════════════════════════════════════════════════════════════
 //  HTTP HANDLER
 // ═══════════════════════════════════════════════════════════════════
-const SHARED_TABLES = new Set(["categories","products","recipes","options","users","theme"]);
-const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses"]);
+// recipes is PER-BRANCH: each branch has its own ingredient mappings
+// (different branches may have different stock/ingredients)
+const SHARED_TABLES = new Set(["categories","products","options","users","theme"]);
+const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses","recipes"]);
 
 function readBody(req) {
   return new Promise((resolve,reject) => {
