@@ -3,8 +3,37 @@
 //  PostgreSQL + Socket.io Edition (Full Integrated)
 //  config: public/config.js → window.CAFE_SERVER, window.CAFE_BRANCH
 // ═══════════════════════════════════════════════════════════════════
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Component } from "react";
 import { useRealtimeDB } from "./useRealtimeDB.js";
+
+// ── Error Boundary — shows error instead of black screen ──────────
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  componentDidCatch(error, info) { console.error("[ErrorBoundary]", error, info); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight:"100vh", background:"#09080A", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:24, fontFamily:"sans-serif", color:"#EDE8E1" }}>
+          <div style={{ fontSize:52 }}>⚠️</div>
+          <div style={{ fontSize:20, fontWeight:700, color:"#E74C3C" }}>App Error</div>
+          <div style={{ fontSize:13, color:"#aaa", textAlign:"center", maxWidth:480, background:"#1a0a0a", border:"1px solid #E74C3C44", borderRadius:10, padding:"12px 18px", wordBreak:"break-word" }}>
+            {this.state.error?.message || "Unknown error"}
+          </div>
+          <div style={{ fontSize:11, color:"#555", textAlign:"center", maxWidth:380 }}>
+            បើក Console (F12) ដើម្បីឃើញ error ពេញ
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{ padding:"10px 28px", background:"linear-gradient(135deg,#B8732A,#E8A84B)", color:"#000", border:"none", borderRadius:10, cursor:"pointer", fontWeight:700, fontSize:14, marginTop:8 }}>
+            🔄 Reload App
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ── Config from public/config.js ─────────────────────────────────
 const CLOUD_URL        = window.CAFE_SERVER      || "https://cafe-bloom-backend.up.railway.app";
@@ -371,7 +400,11 @@ function safeMonth(v) { return safeDate(v).slice(0,7); }
 // ═══════════════════════════════════════════════════════════════════
 //  MAIN APP
 // ═══════════════════════════════════════════════════════════════════
-export default function CafeBloom() {
+export default function CafeBloomApp() {
+  return <ErrorBoundary><CafeBloom /></ErrorBoundary>;
+}
+
+function CafeBloom() {
   // ── Auth state ──────────────────────────────────────────────────
   const [currentUser, setCurrentUser] = useState(null);
   const [loginLoading, setLoginLoading] = useState(false);
@@ -1083,11 +1116,18 @@ export default function CafeBloom() {
 // ═══════════════════════════════════════════════════════════════════
 function Splash({ theme, msg = "កំពុង​ចាប់​ផ្ដើម…" }) {
   return (
-    <div style={{ minHeight:"100vh", background: theme?.bgMain || "#09080A", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16 }}>
+    <div style={{ minHeight:"100vh", background: theme?.bgMain || "#09080A", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, fontFamily:"'Hanuman','Noto Sans Khmer',sans-serif" }}>
       <div style={{ fontSize:48 }}>☕</div>
       <div style={{ fontSize:20, fontWeight:700, color: theme?.accent || "#E8A84B" }}>Cafe Bloom POS</div>
       <div style={{ fontSize:13, color: theme?.textDim || "#666" }}>{msg}</div>
-      <div className="spinner" />
+      <div style={{
+        width:32, height:32,
+        border: `3px solid ${theme?.borderCol || "#2A2730"}`,
+        borderTopColor: theme?.accent || "#E8A84B",
+        borderRadius:"50%",
+        animation:"cb_spin .8s linear infinite"
+      }} />
+      <style>{`@keyframes cb_spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
