@@ -76,13 +76,7 @@ function getUserBranchBadge(user, branches) {
   return { label: "🏪 " + bName, ...c };
 }
 
-function getBranchName() {
-  if (typeof window !== "undefined") {
-    if (window.CAFE_BRANCH_NAME) return window.CAFE_BRANCH_NAME;
-    if (window.CAFE_BRANCH)      return window.CAFE_BRANCH;
-  }
-  return "Cafe Bloom";
-}
+
 
 async function tgSend(text) {
   try {
@@ -472,6 +466,17 @@ export default function CafeBloom() {
     if (db.orders)      skipIfPending("orders",      () => setOrdersRaw(db.orders));
     if (db.logs)        skipIfPending("logs",        () => setLogsRaw(db.logs));
     if (db.users)       skipIfPending("users",       () => setUsersRaw(db.users));
+    // Populate branchList from db.branches (shared data) — instant, no extra API call
+    if (db.branches && Array.isArray(db.branches) && db.branches.length > 0) {
+      setBranchList(prev => {
+        if (prev.length >= db.branches.length) return prev;
+        const active = db.branches.filter(b => b.active !== false);
+        active.forEach(b => {
+          if (b.branch_name) localStorage.setItem("cb_bn_" + b.branch_id, b.branch_name);
+        });
+        return active;
+      });
+    }
     if (db.theme) {
       skipIfPending("theme", () => {
         setThemeRaw({ ...DEFAULT_THEME, ...db.theme });
