@@ -3198,54 +3198,96 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
       <table><thead><tr><th>មុខម្ហូប</th><th>ចំនួន</th></tr></thead>
       <tbody>${topRows}</tbody></table>` : "";
 
-    // ── Section 6: Stock status (all branches if available) ──────────
+    // ── Section 6: Stock status with usage calc ────────────────────
     let stockHtml = "";
     const stockData = (isAll && allStock) ? allStock : null;
     const ownIngs = ings || [];
-    if (stockData && Object.keys(stockData).length > 0) {
-      // All branches stock
-      const branchStockHtml = Object.entries(stockData).map(([bid,bd]) => {
-        const bIngs = bd.ingredients||[];
-        const bName = bd.branch_name||bid;
-        const ingRows = bIngs.map(i => {
-          const s=Number(i.current_stock||0), t=Number(i.threshold||0);
-          const pct=t>0?Math.min(100,Math.round((s/t)*100)):100;
-          const sc=s<=t?"#E74C3C":s<=t*1.5?"#F39C12":"#27AE60";
-          const st=s<=t?"⚠️ ជិតអស់":s<=t*1.5?"🔶 ប្រុង":"✅ ល្អ";
-          return `<tr>
-            <td>${esc(i.ingredient_name)}</td>
-            <td style="font-weight:700;color:${sc}">${fmtN(s)} ${i.unit||""}</td>
-            <td style="color:#888">${fmtN(t)} ${i.unit||""}</td>
-            <td><div style="background:#eee;border-radius:3px;height:7px;width:70px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${sc}"></div></div></td>
-            <td style="color:${sc};font-weight:600;font-size:11px">${st}</td>
-          </tr>`;
-        }).join("");
-        const lowC=bIngs.filter(i=>Number(i.current_stock||0)<=Number(i.threshold||0)).length;
-        return `<h3 style="font-size:13px;font-weight:700;color:#B8732A;margin:14px 0 6px;padding:5px 10px;background:#fff7f0;border-left:3px solid #B8732A">
-          🏪 ${esc(bName)} ${lowC>0?`<span style="color:#E74C3C;font-size:11px"> ⚠️ ${lowC} ជិតអស់</span>`:'<span style="color:#27AE60;font-size:11px"> ✅</span>'}
-        </h3>
-        <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Bar</th><th>ស្ថានភាព</th></tr></thead>
-        <tbody>${ingRows||"<tr><td colspan=5 style='color:#888;text-align:center'>គ្មានទិន្នន័យ</td></tr>"}</tbody></table>`;
-      }).join("");
-      stockHtml = `<h2>🧂 ស្ថានភាពស្តុក — ទាំងអស់</h2>${branchStockHtml}`;
-    } else if (ownIngs.length > 0) {
-      // Own branch only
-      const ingRows2 = ownIngs.map(i => {
-        const s=Number(i.current_stock||0), t=Number(i.threshold||0);
-        const pct=t>0?Math.min(100,Math.round((s/t)*100)):100;
-        const sc=s<=t?"#E74C3C":s<=t*1.5?"#F39C12":"#27AE60";
-        const st=s<=t?"⚠️ ជិតអស់":s<=t*1.5?"🔶 ប្រុង":"✅ ល្អ";
+
+    // Calculate ingredient usage from filtered orders + recipes
+    // usage[ingredient_id] = total qty consumed in this period
+    const calcUsage = (ordersArr, recipesArr) => {
+      const usage = {};
+      if (!recipesArr || !recipesArr.length) return usage;
+      ordersArr.forEach(o => {
+        (o.items||[]).forEach(item => {
+          // Find recipes for this product
+          const pid = item.product_id;
+          const pRecs = recipesArr.filter(r => Number(r.product_id) === Number(pid));
+          pRecs.forEach(r => {
+            const iid = Number(r.ingredient_id);
+            const qty = Number(r.quantity_required||0) * (item.qty||1);
+            usage[iid] = (usage[iid]||0) + qty;
+          });
+        });
+      });
+      return usage;
+    };
+
+    // Helper to build ingredient rows with ស្តុកដើម / ស្តុកនីសល់ / លក់អស់
+    const buildIngRows = (ingList, usageMap) => {
+      return ingList.map(i => {
+        const iid = Number(i.ingredient_id);
+        const cur  = Number(i.current_stock||0);
+        const thr  = Number(i.threshold||0);
+        const used = usageMap[iid] || 0;
+        const init = cur + used;  // ស្តុកដើម = current + used
+        const pct  = thr>0 ? Math.min(100, Math.round((cur/thr)*100)) : 100;
+        const sc   = cur<=thr ? "#E74C3C" : cur<=thr*1.5 ? "#F39C12" : "#27AE60";
+        const st   = cur<=thr ? "⚠️ ជិតអស់" : cur<=thr*1.5 ? "🔶 ប្រុង" : "✅ ល្អ";
+        const unit = i.unit||"";
         return `<tr>
           <td>${esc(i.ingredient_name)}</td>
-          <td style="font-weight:700;color:${sc}">${fmtN(s)} ${i.unit||""}</td>
-          <td style="color:#888">${fmtN(t)} ${i.unit||""}</td>
-          <td><div style="background:#eee;border-radius:3px;height:7px;width:70px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${sc}"></div></div></td>
+          <td style="color:#555">${fmtN(init)} ${unit}</td>
+          <td style="font-weight:700;color:${sc}">${fmtN(cur)} ${unit}</td>
+          <td style="color:#E74C3C;font-weight:600">${used>0?fmtN(used)+" "+unit:"—"}</td>
+          <td><div style="background:#eee;border-radius:3px;height:7px;width:60px;overflow:hidden"><div style="width:${pct}%;height:100%;background:${sc}"></div></div></td>
           <td style="color:${sc};font-weight:600;font-size:11px">${st}</td>
         </tr>`;
       }).join("");
+    };
+
+    const stockTableHeader = `<table><thead><tr>
+      <th>គ្រឿងផ្សំ</th>
+      <th>ស្តុកដើម</th>
+      <th>ស្តុកនីសល់</th>
+      <th>លក់អស់</th>
+      <th>Bar</th>
+      <th>ស្ថានភាព</th>
+    </tr></thead>`;
+
+    if (stockData && Object.keys(stockData).length > 0) {
+      // All branches — need to find recipes per branch orders
+      const branchStockSections = Object.entries(stockData).map(([bid, bd]) => {
+        const bIngs = bd.ingredients || [];
+        const bName = bd.branch_name || bid;
+        // Get orders for this branch in period
+        const bOrds = (allOrders||[]).filter(o => {
+          if (o.branch_id !== bid) return false;
+          try {
+            const d = new Date(o.order_id);
+            if (period==="day")   return d.toISOString().slice(0,10)===selDate;
+            if (period==="month") return d.toISOString().slice(0,7)===selMonth;
+            if (period==="year")  return d.toISOString().slice(0,4)===selYear;
+          } catch { return false; }
+          return true;
+        });
+        const bUsage = calcUsage(bOrds, recipes||[]);
+        const ingRows = buildIngRows(bIngs, bUsage);
+        const lowC = bIngs.filter(i=>Number(i.current_stock||0)<=Number(i.threshold||0)).length;
+        return `
+          <h3 style="font-size:13px;font-weight:700;color:#B8732A;margin:16px 0 6px;padding:5px 10px;background:#fff7f0;border-left:3px solid #B8732A">
+            🏪 ${esc(bName)} ${lowC>0?`<span style="color:#E74C3C;font-size:11px"> ⚠️ ${lowC} ជិតអស់</span>`:'<span style="color:#27AE60;font-size:11px"> ✅ ល្អ</span>'}
+          </h3>
+          ${stockTableHeader}<tbody>${ingRows||"<tr><td colspan=6 style='color:#888;text-align:center;padding:12px'>គ្មានទិន្នន័យ</td></tr>"}</tbody></table>`;
+      }).join("");
+      stockHtml = `<h2>🧂 ស្ថានភាពស្តុក — ទាំងអស់</h2>${branchStockSections}`;
+
+    } else if (ownIngs.length > 0) {
+      // Own branch only
+      const ownUsage = calcUsage(filtered, recipes||[]);
+      const ingRows2 = buildIngRows(ownIngs, ownUsage);
       stockHtml = `<h2>🧂 ស្ថានភាពស្តុក</h2>
-        <table><thead><tr><th>គ្រឿងផ្សំ</th><th>ស្តុក</th><th>ដែនកំណត់</th><th>Bar</th><th>ស្ថានភាព</th></tr></thead>
-        <tbody>${ingRows2}</tbody></table>`;
+        ${stockTableHeader}<tbody>${ingRows2}</tbody></table>`;
     }
 
     // ── Build HTML ────────────────────────────────────────────────────
