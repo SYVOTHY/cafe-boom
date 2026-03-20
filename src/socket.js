@@ -1,15 +1,34 @@
 // ═══════════════════════════════════════════════════════════════════
 //  socket.js  —  Real-time client (Frontend)
-//  Import this in App.jsx:  import { initSocket, onBranchUpdate } from "./socket.js"
+//  FIX: dynamic import of socket.io-client → app won't crash if pkg missing
 // ═══════════════════════════════════════════════════════════════════
-import { io } from "socket.io-client";
 
 let socket = null;
-const listeners = new Map();   // event → Set of callbacks
+let _io    = null;
+const listeners = new Map();
+
+// ── Load socket.io-client dynamically (no crash if pkg missing) ───
+async function getIo() {
+  if (_io) return _io;
+  try {
+    const mod = await import("socket.io-client");
+    _io = mod.io || mod.default;
+    return _io;
+  } catch (e) {
+    console.error("[Socket.io] ❌ socket.io-client not installed. Run: npm i socket.io-client");
+    return null;
+  }
+}
 
 // ── Connect to server ─────────────────────────────────────────────
-export function initSocket(serverUrl, branchId) {
+export async function initSocket(serverUrl, branchId) {
   if (socket && socket.connected) return socket;
+
+  const io = await getIo();
+  if (!io) {
+    console.warn("[Socket.io] Running without real-time (socket.io-client unavailable).");
+    return null;
+  }
 
   socket = io(serverUrl, {
     transports: ["websocket", "polling"],
@@ -21,7 +40,6 @@ export function initSocket(serverUrl, branchId) {
 
   socket.on("connect", () => {
     console.log("[Socket.io] ✅ Connected:", socket.id);
-    // Join this branch's room for targeted updates
     socket.emit("join_branch", branchId);
   });
 
@@ -35,10 +53,9 @@ export function initSocket(serverUrl, branchId) {
 
   socket.on("reconnect", (attempt) => {
     console.log("[Socket.io] 🔄 Reconnected after", attempt, "attempts");
-    socket.emit("join_branch", branchId);   // re-join room after reconnect
+    socket.emit("join_branch", branchId);
   });
 
-  // ── Forward all server events to local listeners ──────────────
   ["db_update", "branch_update", "shared_update"].forEach(event => {
     socket.on(event, (data) => {
       const cbs = listeners.get(event);
@@ -50,37 +67,19 @@ export function initSocket(serverUrl, branchId) {
 }
 
 // ── Subscribe to events ───────────────────────────────────────────
-// Usage: const off = onBranchUpdate(({table, data}) => { ... })
-//        off()  ← call to unsubscribe
-
-export function onDbUpdate(cb) {
-  return _on("db_update", cb);
-}
-
-export function onBranchUpdate(cb) {
-  return _on("branch_update", cb);
-}
-
-export function onSharedUpdate(cb) {
-  return _on("shared_update", cb);
-}
+export function onDbUpdate(cb)     { return _on("db_update",     cb); }
+export function onBranchUpdate(cb) { return _on("branch_update", cb); }
+export function onSharedUpdate(cb) { return _on("shared_update", cb); }
 
 function _on(event, cb) {
   if (!listeners.has(event)) listeners.set(event, new Set());
   listeners.get(event).add(cb);
-  return () => listeners.get(event).delete(cb);   // returns unsubscribe fn
+  return () => listeners.get(event).delete(cb);
 }
 
-// ── Getters ───────────────────────────────────────────────────────
-export function isConnected() {
-  return socket?.connected ?? false;
-}
+export function isConnected()  { return socket?.connected ?? false; }
+export function getSocket()    { return socket; }
 
-export function getSocket() {
-  return socket;
-}
-
-// ── Disconnect (cleanup) ─────────────────────────────────────────
 export function disconnectSocket() {
   if (socket) { socket.disconnect(); socket = null; }
   listeners.clear();
