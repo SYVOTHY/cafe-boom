@@ -1151,7 +1151,7 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
           onClick={onSwitchBranch}>
           <span style={{ fontSize:10, color:"#5BA3E0" }}>🏪</span>
           <span style={{ fontSize:11, fontWeight:700, color:"#5BA3E0" }}>
-            {branchList.find(b=>b.branch_id===activeBranchId)?.branch_name || (getBranchName(activeBranchId, branchList)}
+            {getBranchName(activeBranchId, branchList)}
           </span>
           <span style={{ fontSize:9, color:"#5BA3E0" }}>▼</span>
         </div>
