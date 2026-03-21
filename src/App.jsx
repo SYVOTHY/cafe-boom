@@ -2228,7 +2228,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
                 onClick={()=>setEditProd({ product_name:"", base_price:0, category_id:cats[0]?.category_id, emoji:"☕", is_active:true })}>
                 ➕ បន្ថែម
               </button>}
-              {!isAdmin && <div style={{ fontSize:11, color:"#888", padding:"6px 10px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ បានតែមើល</div>}
+              {!isAdmin && <div style={{ fontSize:11, color:"#888", padding:"6px 10px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ មើលបានតែ</div>}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:10 }}>
               {filteredP.map(p => {
@@ -2415,7 +2415,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
       <div style={{ flexShrink: 0, padding: "16px 14px 0", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
         <SectionHeader
           title="🧂 ស្តុកគ្រឿងផ្សំ"
-          sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} ជិតអស់${!canEdit ? " · 👁️ បានតេមើល" : ""}`}
+          sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} ជិតអស់${!canEdit ? " · 👁️ មើលបានតែ" : ""}`}
         />
         {/* Admin: full tabs; Staff: stock view only */}
         {canEdit
@@ -2425,7 +2425,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         {subTab === "stock" && (
           <div style={{ padding: "10px 0 10px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {canEdit && <button onClick={() => setModal({ mode: "add", entity: "ing", data: { ingredient_id: null, ingredient_name: "", current_stock: 0, unit: "g", threshold: 100 } })} style={{ ...btnGold, padding:"9px 16px", width:"auto" }}>➕ បន្ថែម</button>}
-            {!canEdit && <div style={{ fontSize:12, color:"#888", padding:"6px 12px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ បានតែមើល — admin ទេដែរ edit</div>}
+            {!canEdit && <div style={{ fontSize:12, color:"#888", padding:"6px 12px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ មើលបានតែ — admin ទេដែរ edit</div>}
             <div style={{ flex:1 }} />
             {/* Export buttons */}
             <button style={{ ...btnSmall, color:"#27AE60", borderColor:"#27AE6044", fontSize:12, padding:"7px 14px" }}
@@ -2588,7 +2588,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                       <button onClick={() => setDelConf({ name: i.ingredient_name, fn: () => { setIngs(p => p.filter(x => x.ingredient_id !== i.ingredient_id)); setRecipes(p => p.filter(r => r.ingredient_id !== i.ingredient_id)); notify("✓ លុប"); setDelConf(null); } })}
                         style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33", padding: "5px 10px", fontSize: 12 }}>🗑️</button>
                     </>) : (
-                      <div style={{ fontSize:11, color:"#555", padding:"4px 8px" }}>👁️ បានតែមើល</div>
+                      <div style={{ fontSize:11, color:"#555", padding:"4px 8px" }}>👁️ មើលបានតែ</div>
                     )}
                   </div>
                 </div>
@@ -6087,7 +6087,12 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
           {displayUsers.map(u => {
             const roleInfo = ROLES.find(r => r.v === u.role);
             const isMe = u.user_id === currentUser.user_id;
-            const perms = u.role === "admin"
+            // Compute display perms:
+            // - Super Admin (branch_id="all"): all pages enabled
+            // - Branch Admin: actual saved permissions (set by super admin)
+            // - Staff: actual saved permissions
+            const isSuperAdmin = u.role === "admin" && u.branch_id === "all";
+            const perms = isSuperAdmin
               ? Object.keys(PERM_LABELS).reduce((a, k) => ({ ...a, [k]: true }), {})
               : { ...DEFAULT_PERMS_TPL, ...(u.permissions || {}) };
             const allowedPages = Object.entries(perms).filter(([, v]) => v).map(([k]) => k);
@@ -6171,16 +6176,24 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
 
                 {/* Permissions badges */}
                 <div style={{ marginBottom: 10 }}>
-                  <div style={{ fontSize: 11, color: "#555", marginBottom: 5 }}>សិទ្ធចូលប្រើ:</div>
+                  <div style={{ fontSize: 11, color: "#555", marginBottom: 5 }}>
+                    សិទ្ធចូលប្រើ:
+                    {isSuperAdmin && <span style={{ marginLeft:6, fontSize:10, color:"#E8A84B" }}>✨ All pages</span>}
+                  </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {Object.entries(PERM_LABELS).map(([k, { icon, label }]) => {
                       const has = perms[k];
                       return (
                         <span key={k} style={{
                           fontSize: 10, padding: "2px 7px", borderRadius: 10,
-                          background: has ? "#1A3A1A" : "#1A1A1A",
-                          color: has ? "#27AE60" : "#333",
-                          border: `1px solid ${has ? "#27AE6022" : "#2A2A2A"}`
+                          background: isSuperAdmin
+                            ? "#1A2A3A"
+                            : has ? "#0A1E3A" : "#111111",
+                          color: isSuperAdmin
+                            ? "#E8A84B"
+                            : has ? "#5BA3E0" : "#333",
+                          border: `1px solid ${isSuperAdmin ? "#E8A84B22" : has ? "#5BA3E033" : "#222"}`,
+                          fontWeight: has ? 600 : 400,
                         }}>
                           {icon} {label}
                         </span>
