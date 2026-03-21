@@ -1659,13 +1659,17 @@ async function handler(req, res) {
       lines.push(`SET standard_conforming_strings = on;`);
       lines.push(``);
 
-      // Helper: escape SQL string value
+      // Helper: escape SQL value — properly handle JSON objects/arrays
       const esc = (v) => {
         if (v === null || v === undefined) return "NULL";
         if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
-        if (typeof v === "number") return String(v);
-        if (v instanceof Date)     return `'${v.toISOString()}'`;
-        // Escape string: double single-quotes
+        if (typeof v === "number" && isFinite(v)) return String(v);
+        if (v instanceof Date) return `'${v.toISOString()}'`;
+        // Objects and arrays → serialize as JSON string
+        if (typeof v === "object") {
+          return `'${JSON.stringify(v).replace(/'/g, "''")}'`;
+        }
+        // Plain string
         return `'${String(v).replace(/'/g, "''")}'`;
       };
 
@@ -1686,7 +1690,14 @@ async function handler(req, res) {
         const cols = Object.keys(rows[0]);
         for (const row of rows) {
           const vals = cols.map(c => esc(row[c])).join(", ");
-          lines.push(`INSERT INTO ${tableName} (${cols.join(", ")}) VALUES (${vals}) ON CONFLICT DO NOTHING;`);
+          // Use ON CONFLICT ... DO UPDATE so restore overwrites existing data
+          const pkCols = tableName === "branch_data"
+            ? "(branch_id, key)"
+            : `(${cols[0]})`;  // first col = primary key
+          const updateCols = cols.slice(1)
+            .map(c => `${c} = EXCLUDED.${c}`)
+            .join(", ");
+          lines.push(`INSERT INTO ${tableName} (${cols.join(", ")}) VALUES (${vals}) ON CONFLICT ${pkCols} DO UPDATE SET ${updateCols};`);
         }
         lines.push(``);
         logger.info(`Dumped table`, { table: tableName, rows: rows.length });
