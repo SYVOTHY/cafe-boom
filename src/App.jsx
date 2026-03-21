@@ -2228,7 +2228,7 @@ function MenuPage({ cats, setCats, prods, setProds, options, setOptions, notify,
                 onClick={()=>setEditProd({ product_name:"", base_price:0, category_id:cats[0]?.category_id, emoji:"☕", is_active:true })}>
                 ➕ បន្ថែម
               </button>}
-              {!isAdmin && <div style={{ fontSize:11, color:"#888", padding:"6px 10px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ មើលបានតែ</div>}
+              {!isAdmin && <div style={{ fontSize:11, color:"#888", padding:"6px 10px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ បានតែមើល</div>}
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))", gap:10 }}>
               {filteredP.map(p => {
@@ -2415,7 +2415,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
       <div style={{ flexShrink: 0, padding: "16px 14px 0", borderBottom: "1px solid var(--border-col)", background: "var(--bg-main)" }}>
         <SectionHeader
           title="🧂 ស្តុកគ្រឿងផ្សំ"
-          sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} ជិតអស់${!canEdit ? " · 👁️ មើលបានតែ" : ""}`}
+          sub={`${ings.filter(i => Number(i.current_stock) <= Number(i.threshold)).length} ជិតអស់${!canEdit ? " · 👁️ បានតេមើល" : ""}`}
         />
         {/* Admin: full tabs; Staff: stock view only */}
         {canEdit
@@ -2425,7 +2425,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
         {subTab === "stock" && (
           <div style={{ padding: "10px 0 10px", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {canEdit && <button onClick={() => setModal({ mode: "add", entity: "ing", data: { ingredient_id: null, ingredient_name: "", current_stock: 0, unit: "g", threshold: 100 } })} style={{ ...btnGold, padding:"9px 16px", width:"auto" }}>➕ បន្ថែម</button>}
-            {!canEdit && <div style={{ fontSize:12, color:"#888", padding:"6px 12px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ មើលបានតែ — admin ទេដែរ edit</div>}
+            {!canEdit && <div style={{ fontSize:12, color:"#888", padding:"6px 12px", background:"rgba(255,255,255,.04)", borderRadius:8, border:"1px solid #2A2730" }}>👁️ បានតែមើល — admin ទេដែរ edit</div>}
             <div style={{ flex:1 }} />
             {/* Export buttons */}
             <button style={{ ...btnSmall, color:"#27AE60", borderColor:"#27AE6044", fontSize:12, padding:"7px 14px" }}
@@ -2588,7 +2588,7 @@ function InventoryPage({ ings, setIngs, recipes, setRecipes, prods, notify, logs
                       <button onClick={() => setDelConf({ name: i.ingredient_name, fn: () => { setIngs(p => p.filter(x => x.ingredient_id !== i.ingredient_id)); setRecipes(p => p.filter(r => r.ingredient_id !== i.ingredient_id)); notify("✓ លុប"); setDelConf(null); } })}
                         style={{ ...btnSmall, color: "#E74C3C", borderColor: "#E74C3C33", padding: "5px 10px", fontSize: 12 }}>🗑️</button>
                     </>) : (
-                      <div style={{ fontSize:11, color:"#555", padding:"4px 8px" }}>👁️ មើលបានតែ</div>
+                      <div style={{ fontSize:11, color:"#555", padding:"4px 8px" }}>👁️ បានតែមើល</div>
                     )}
                   </div>
                 </div>
