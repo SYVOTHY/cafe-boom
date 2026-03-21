@@ -1492,9 +1492,11 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
             qty:          i.qty,
             price:        i.price,
             emoji:        i.emoji || "☕",
+            opts:         i.opts  || {},
             options:      i.options || [],
-            sugar:        i.sugar,
-            milk:         i.milk,
+            sugar:        i.opts?.sugar || i.sugar || "",
+            milk:         i.opts?.milk  || i.milk  || "",
+            image_url:    i.image_url   || "",
           })),
           method:   payMethod,
           table:    selTable,
@@ -1730,7 +1732,7 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
               }
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-main)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.product_name}</div>
-                <div style={{ fontSize: 10, color: "#555" }}>{item.opts.size} · {item.opts.sugar}</div>
+                <div style={{ fontSize: 10, color: "#555" }}>{item?.opts?.size || ""} · {item?.opts?.sugar || ""}</div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <button onClick={() => setCart(p => p.map(i => i.key === item.key ? { ...i, qty: Math.max(0, i.qty - 1) } : i).filter(i => i.qty > 0))}
@@ -6837,7 +6839,7 @@ function CustomerDisplay({ cart, cartTotal, cartTax, payMethod, selTable, onClos
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 15 }}>{item.product_name}</div>
                   <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>
-                    {item.opts.size} · ស្ករ {item.opts.sugar} · {item.opts.milk}
+                    {item?.opts?.size || ""} · ស្ករ {item?.opts?.sugar || ""} · {item?.opts?.milk || ""}
                   </div>
                 </div>
                 <div style={{ textAlign: "right", flexShrink: 0 }}>
@@ -6964,7 +6966,7 @@ function ReceiptModal({ receipt, onClose }) {
           <div key={i.key} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
             <div>
               <div>{i.product_name} ×{i.qty}</div>
-              <div style={{ fontSize: 10, color: "#999" }}>{i.opts.size} · {i.opts.sugar} · {i.opts.milk}</div>
+              <div style={{ fontSize: 10, color: "#999" }}>{i?.opts?.size || ""} · {i?.opts?.sugar || ""} · {i?.opts?.milk || ""}</div>
             </div>
             <div style={{ fontWeight: 600 }}>{fmt(i.price * i.qty)}</div>
           </div>
