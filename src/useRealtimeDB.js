@@ -7,6 +7,7 @@ import { initSocket, announcePresence, onBranchUpdate, onSharedUpdate, onPresenc
 const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses","recipes"]);
 
 function authHeaders() {
+  // Compatible with TokenStore — reads from same localStorage key
   const token = localStorage.getItem("pos_token");
   return {
     "Content-Type": "application/json",
