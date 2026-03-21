@@ -2,7 +2,7 @@
 //  useRealtimeDB.js  —  React Hook  (with presence tracking)
 // ═══════════════════════════════════════════════════════════════════
 import { useState, useEffect, useRef, useCallback } from "react";
-import { initSocket, onBranchUpdate, onSharedUpdate, onPresenceUpdate, isConnected } from "./socket.js";
+import { initSocket, announcePresence, onBranchUpdate, onSharedUpdate, onPresenceUpdate, isConnected } from "./socket.js";
 
 const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses","recipes"]);
 
@@ -80,6 +80,15 @@ export function useRealtimeDB(serverUrl, branchId, currentUser) {
     }, 12000);
     return () => clearTimeout(t);
   }, [serverUrl, branchId]);
+
+  // ── Re-announce presence whenever currentUser changes ────────────
+  // This fires when: (1) user logs in, (2) user data updates, (3) socket reconnects
+  useEffect(() => {
+    if (!currentUser?.user_id) return;
+    // Small delay to let socket connect first if this runs before connection
+    const t = setTimeout(() => announcePresence(currentUser), 500);
+    return () => clearTimeout(t);
+  }, [currentUser?.user_id, currentUser?.name]);
 
   // ── Socket setup ──────────────────────────────────────────────────
   useEffect(() => {
