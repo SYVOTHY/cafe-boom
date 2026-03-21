@@ -390,9 +390,17 @@ const PERM_LABELS = {
 // Permissions that only admin can have (never grant to staff)
 const ADMIN_ONLY_PERMS = new Set([]); // Super admin controls all
 
+// Default permissions for STAFF (when super admin clicks "Set Default Perms")
 const DEFAULT_PERMS_TPL = {
+  pos: true, tables: true, menu: false, orders: true, report: false, finance: false,
+  inventory: true, users: false, branches: false, theme: false, backup: false,
+};
+
+// Default permissions for BRANCH ADMIN when first created (minimal — super admin must grant more)
+const BRANCH_ADMIN_DEFAULT_PERMS = {
   pos: true, tables: true, menu: true, orders: true, report: true, finance: true,
-  inventory: false, users: false, branches: false, theme: false, backup: false,
+  inventory: true, users: true, branches: false, theme: false, backup: false,
+};
 };
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
@@ -886,12 +894,14 @@ function CafeBloom() {
     if (isBranch) {
       // Global-only pages: always deny for branch admin
       if (p==="theme"||p==="branches"||p==="backup") return false;
-      // If branch admin has explicit permissions set, respect them
+      // Check explicit permissions set by Super Admin
       const perms = currentUser.permissions;
       if (perms && Object.keys(perms).length > 0) return !!perms[p];
-      // Default: allow all non-global pages
-      return true;
+      // ⚠️ No permissions set → branch admin defaults to DENY (must be explicitly enabled by Super Admin)
+      // Exception: inventory always allowed so branch can manage their own stock
+      return p === "inventory";
     }
+    // Staff: check explicit permissions only
     return !!currentUser.permissions?.[p];
   }, [currentUser]);
 
@@ -956,10 +966,11 @@ function CafeBloom() {
     if (n.alwaysShow)   return true;               // inventory: always visible
     if (_isGA)          return true;               // super admin sees everything
     if (_isBA) {
-      // Branch admin: check explicit permissions if set, else show all non-global
+      // Branch admin: ONLY show pages explicitly enabled by Super Admin
+      // If no permissions set → deny all (except inventory via alwaysShow above)
       const perms = currentUser?.permissions;
       if (perms && Object.keys(perms).length > 0) return !!perms[n.id];
-      return true; // no perms set → show all
+      return false; // no perms → deny — super admin must explicitly grant access
     }
     return canAccess(n.id);                        // staff: check permissions
   });
@@ -5802,11 +5813,11 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
   const visibleUsers = (() => {
     if (isGlobalAdmin) return users;  // global admin sees all
     if (isBranchAdmin) {
-      // branch admin sees users whose branch matches, or no branch set
+      // Branch admin sees ONLY users in own branch — never super admins (branch_id="all")
       return users.filter(u =>
-        u.branch_id === branchId ||
-        u.user_id === currentUser.user_id ||
-        !u.branch_id
+        u.branch_id !== "all" &&       // ← NEVER show super admins
+        (u.branch_id === branchId ||
+         u.user_id === currentUser.user_id)
       );
     }
     return users; // staff shouldn't be here, but show all as fallback
@@ -5820,6 +5831,27 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
     if (isNew && !data.password?.trim()) {
       notify("⚠️ User ថ្មី ត្រូវការ Password!", "error"); return;
     }
+
+    // ── Branch admin restrictions ────────────────────────────────
+    if (isBranchAdmin) {
+      // Cannot create/edit Super Admin (branch_id="all")
+      if (data.branch_id === "all") {
+        notify("⛔ Branch Admin មិនអាចបង្កើត Super Admin!", "error"); return;
+      }
+      // Cannot assign to another branch
+      if (data.branch_id && data.branch_id !== branchId) {
+        notify("⛔ Branch Admin អាចបង្កើត User ក្នុងសាខាខ្លួនឯងតែប៉ុណ្ណោះ!", "error"); return;
+      }
+      // Cannot create any admin role (staff only)
+      if (data.role === "admin") {
+        notify("⛔ Branch Admin មិនអាចបង្កើត Admin user!", "error"); return;
+      }
+      // Cannot modify permissions field — strip it (only Global Admin can set perms)
+      delete data.permissions;
+      // Force branch_id to own branch
+      data = { ...data, branch_id: branchId, role: "staff" };
+    }
+
     if (isNew) {
       const dup = users.find(u => u.username === data.username.trim());
       if (dup) { notify("❌ Username នេះមានរួចហើយ!", "error"); return; }
@@ -5827,18 +5859,29 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
         ...data,
         user_id: Math.max(0, ...p.map(u => u.user_id)) + 1,
         username: data.username.trim(),
-        permissions: data.role === "admin" ? {} : { ...DEFAULT_PERMS_TPL, ...(data.permissions || {}) }
+        permissions: data.role === "admin"
+          ? (data.branch_id === "all" ? {} : { ...BRANCH_ADMIN_DEFAULT_PERMS, ...(data.permissions||{}) })
+          : { ...DEFAULT_PERMS_TPL, ...(data.permissions || {}) }
       }]);
       notify("✅ បន្ថែម User រួចហើយ!");
     } else {
+      // Branch admin cannot edit users from other branches or super admins
+      if (isBranchAdmin) {
+        const existing = users.find(u => u.user_id === data.user_id);
+        if (existing?.branch_id === "all" || existing?.branch_id !== branchId) {
+          notify("⛔ Branch Admin មិនអាចកែប្រែ User ពី branch ផ្សេង!", "error"); return;
+        }
+      }
       setUsers(p => p.map(u => {
         if (u.user_id !== data.user_id) return u;
         return {
-          ...u,          // keep old fields (esp. password hash)
+          ...u,
           ...data,
           username: data.username.trim(),
           // If password field was left blank, keep old password
           password: data.password?.trim() ? data.password.trim() : u.password,
+          // Branch admin cannot escalate role or change branch
+          ...(isBranchAdmin ? { role: "staff", branch_id: branchId } : {}),
         };
       }));
       notify("✅ កែប្រែ User រួចហើយ!");
@@ -5847,6 +5890,21 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
   };
 
   const savePerm = (uid, perms) => {
+    // HARD BLOCK: Only Global Admin (branch_id="all") can set permissions — no exceptions
+    if (!isGlobalAdmin) {
+      notify("⛔ តែ Super Admin (branch: all) ប៉ុណ្ណោះ អាចកំណត់សិទ្ធបាន!", "error");
+      setPermModal(null);
+      return;
+    }
+    // Cannot modify own permissions
+    if (uid === currentUser.user_id) {
+      notify("⛔ មិនអាចកំណត់សិទ្ធខ្លួនឯងបានទេ!", "error"); return;
+    }
+    // Cannot modify another super admin's permissions
+    const target = users.find(u => u.user_id === uid);
+    if (target?.branch_id === "all") {
+      notify("⛔ Super Admin មិនត្រូវការ permissions!", "error"); return;
+    }
     setUsers(p => p.map(u => u.user_id === uid ? { ...u, permissions: perms } : u));
     notify("✅ កំណត់សិទ្ធ រួចហើយ!");
     setPermModal(null);
@@ -5854,11 +5912,29 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
 
   const toggleActive = (uid) => {
     if (uid === currentUser.user_id) { notify("⚠️ មិនអាចបិទ account ខ្លួនឯង!", "error"); return; }
+    const target = users.find(u => u.user_id === uid);
+    // Branch admin cannot toggle super admin or users from other branches
+    if (isBranchAdmin) {
+      if (target?.branch_id === "all" || target?.branch_id !== branchId) {
+        notify("⛔ Branch Admin មិនអាចផ្លាស់ប្តូរ User ពី branch ផ្សេង!", "error"); return;
+      }
+    }
     setUsers(p => p.map(u => u.user_id === uid ? { ...u, active: !u.active } : u));
   };
 
   const delUser = (uid) => {
     if (uid === currentUser.user_id) { notify("⚠️ មិនអាចលុប account ខ្លួនឯង!", "error"); return; }
+    const target = users.find(u => u.user_id === uid);
+    // Branch admin cannot delete super admin or users from other branches
+    if (isBranchAdmin) {
+      if (target?.branch_id === "all" || target?.branch_id !== branchId) {
+        notify("⛔ Branch Admin មិនអាចលុប User ពី branch ផ្សេង!", "error"); return;
+      }
+    }
+    // Nobody can delete super admin (branch_id="all") except super admin themselves
+    if (target?.branch_id === "all" && !isGlobalAdmin) {
+      notify("⛔ Super Admin មិនអាចលុបដោយ Branch Admin!", "error"); return;
+    }
     setUsers(p => p.filter(u => u.user_id !== uid));
     notify("✅ លុប User រួចហើយ!"); setDelConf(null);
   };
@@ -5883,11 +5959,19 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
         <Modal onClose={() => setModal(null)} maxW={440}>
           {modal.mode === "add" && <>
             <div style={{ fontWeight:700, fontSize:16, marginBottom:18, color:"#E8A84B" }}>➕ បន្ថែម User ថ្មី</div>
-            <UserForm data={modal.data} onSave={saveUser} onCancel={() => setModal(null)} roles={ROLES} />
+            <UserForm data={modal.data} onSave={saveUser} onCancel={() => setModal(null)} roles={ROLES}
+              branchList={branchList}
+              editorIsGlobalAdmin={isGlobalAdmin}
+              editorIsBranchAdmin={isBranchAdmin}
+              editorBranchId={branchId} />
           </>}
           {modal.mode === "edit" && <>
             <div style={{ fontWeight:700, fontSize:16, marginBottom:18, color:"#E8A84B" }}>✏️ កែប្រែ User</div>
-            <UserForm data={modal.data} onSave={saveUser} onCancel={() => setModal(null)} roles={ROLES} />
+            <UserForm data={modal.data} onSave={saveUser} onCancel={() => setModal(null)} roles={ROLES}
+              branchList={branchList}
+              editorIsGlobalAdmin={isGlobalAdmin}
+              editorIsBranchAdmin={isBranchAdmin}
+              editorBranchId={branchId} />
           </>}
           {modal.mode === "reset" && <ResetPasswordForm user={modal.data} onSave={(uid, pw) => {
             setUsers(p => p.map(u => u.user_id === uid ? { ...u, password: pw } : u));
@@ -5942,6 +6026,20 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
           )}
         </div>
 
+      {/* Branch Admin — restriction notice */}
+      {isBranchAdmin && (
+        <div style={{ margin:"8px 0 0", padding:"8px 12px", background:"#1A0A00", border:"1px solid #E8A84B33",
+          borderRadius:8, fontSize:11, color:"#E8A84B", display:"flex", gap:8, alignItems:"flex-start" }}>
+          <span>ℹ️</span>
+          <div>
+            <b>Branch Admin Mode</b> — អ្នកអាច: បន្ថែម/កែ Staff ក្នុងសាខាខ្លួន, Reset Password, Active/Inactive ប៉ុណ្ណោះ
+            <br/>
+            <span style={{color:"#E74C3C"}}>⛔ មិនអាច: បង្កើត Admin/Super Admin, កំណត់សិទ្ធ, មើល Super Admin</span>
+            <br/>
+            <span style={{color:"#888"}}>📋 សិទ្ធ User ត្រូវបានកំណត់ដោយ Super Admin</span>
+          </div>
+        </div>
+      )}
         {/* Branch filter tabs — Super Admin only */}
         {isGlobalAdmin && branchList.length > 0 && (
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", paddingTop:10, alignItems:"center" }}>
@@ -6094,26 +6192,42 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
 
                 {/* Actions */}
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button onClick={() => toggleActive(u.user_id)}
-                    style={{
-                      flex: 1, ...btnSmall, fontSize: 11,
-                      color: u.active ? "#27AE60" : "#E74C3C",
-                      borderColor: u.active ? "#27AE6033" : "#E74C3C33"
-                    }}>
-                    {u.active ? "✅ Active" : "⛔ Inactive"}
-                  </button>
-                  {!(u.role === "admin" && u.branch_id === "all") && (
+                  {/* Active toggle — branch admin can only toggle own-branch staff */}
+                  {(!isBranchAdmin || (u.branch_id === branchId && u.branch_id !== "all")) && (
+                    <button onClick={() => toggleActive(u.user_id)}
+                      style={{
+                        flex: 1, ...btnSmall, fontSize: 11,
+                        color: u.active ? "#27AE60" : "#E74C3C",
+                        borderColor: u.active ? "#27AE6033" : "#E74C3C33"
+                      }}>
+                      {u.active ? "✅ Active" : "⛔ Inactive"}
+                    </button>
+                  )}
+                  {/* Perm button — ONLY Global Admin can set permissions */}
+                  {isGlobalAdmin && !(u.role === "admin" && u.branch_id === "all") && (
                     <button onClick={() => setPermModal(u)}
                       style={{ ...btnSmall, fontSize: 12, color: "#5BA3E0", borderColor: "#5BA3E033" }}
                       title="កំណត់សិទ្ធ">🛡️</button>
                   )}
-                  <button onClick={() => setModal({ mode: "edit", data: { ...u } })} style={{ ...btnSmall, fontSize: 12 }} title="កែប្រែ">✏️</button>
-                  <button onClick={() => setModal({ mode: "reset", data: u })} style={{ ...btnSmall, fontSize: 11, color:"#F39C12", borderColor:"#F39C1233", display:"flex", alignItems:"center", gap:4 }} title="Reset Password">
-                    🔑 <span className="btn-label-mobile" style={{ fontSize:10 }}>Reset PW</span>
-                  </button>
-                  <button onClick={() => setModal({ mode: "photo", data: u })} style={{ ...btnSmall, fontSize: 12, color:"#5BA3E0", borderColor:"#5BA3E033" }} title="Upload Photo">🖼️</button>
-                  <button onClick={() => setDelConf({ name: u.name, fn: () => delUser(u.user_id) })}
-                    style={{ ...btnSmall, color:"#E74C3C", borderColor:"#E74C3C33", fontSize: 12 }} title="លុប">🗑️</button>
+                  {/* Edit — branch admin can only edit own-branch staff, not super admins */}
+                  {(!isBranchAdmin || (u.branch_id === branchId && u.role === "staff")) && (
+                    <button onClick={() => setModal({ mode: "edit", data: { ...u } })} style={{ ...btnSmall, fontSize: 12 }} title="កែប្រែ">✏️</button>
+                  )}
+                  {/* Reset PW — same restriction */}
+                  {(!isBranchAdmin || (u.branch_id === branchId && u.role === "staff")) && (
+                    <button onClick={() => setModal({ mode: "reset", data: u })} style={{ ...btnSmall, fontSize: 11, color:"#F39C12", borderColor:"#F39C1233", display:"flex", alignItems:"center", gap:4 }} title="Reset Password">
+                      🔑 <span className="btn-label-mobile" style={{ fontSize:10 }}>Reset PW</span>
+                    </button>
+                  )}
+                  {/* Photo — branch admin can only upload for own-branch staff */}
+                  {(!isBranchAdmin || (u.branch_id === branchId && u.role === "staff")) && (
+                    <button onClick={() => setModal({ mode: "photo", data: u })} style={{ ...btnSmall, fontSize: 12, color:"#5BA3E0", borderColor:"#5BA3E033" }} title="Upload Photo">🖼️</button>
+                  )}
+                  {/* Delete — branch admin cannot delete super admins; global admin can delete all except self */}
+                  {(!isBranchAdmin || (u.branch_id === branchId && u.role === "staff")) && !(u.branch_id === "all" && !isGlobalAdmin) && (
+                    <button onClick={() => setDelConf({ name: u.name, fn: () => delUser(u.user_id) })}
+                      style={{ ...btnSmall, color:"#E74C3C", borderColor:"#E74C3C33", fontSize: 12 }} title="លុប">🗑️</button>
+                  )}
                 </div>
               </div>
             );
@@ -6246,10 +6360,16 @@ function UploadPhotoForm({ user, onSave, onCancel }) {
 
 
 // Permission editor modal
-function UserForm({ data, user, onSave, onCancel, roles, branchList }) {
+function UserForm({ data, user, onSave, onCancel, roles, branchList, editorIsGlobalAdmin, editorIsBranchAdmin, editorBranchId }) {
   // Support both prop names: data (new) and user (old)
   const init = data || user || {};
   const [v, setV] = useState(init);
+
+  // Branch admin: roles limited to staff only
+  const availableRoles = editorIsBranchAdmin
+    ? [{ v: "staff", label: "👤 Staff", color: "#5BA3E0" }]
+    : (roles || [{ v: "staff", label: "👤 Staff" }, { v: "admin", label: "👑 Admin" }]);
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
       <input className="inp" placeholder="ឈ្មោះ​ពេញ" value={v.name||""} onChange={e=>setV({...v,name:e.target.value})} />
@@ -6263,30 +6383,46 @@ function UserForm({ data, user, onSave, onCancel, roles, branchList }) {
           value={v.password||""}
           onChange={e=>setV({...v,password:e.target.value})} />
       </div>
-      <select className="inp" value={v.role||"staff"} onChange={e=>setV({...v,role:e.target.value})}
-        style={{ background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:9, padding:"9px 13px", color:"var(--text-main)", fontFamily:"inherit", fontSize:13 }}>
-        {roles ? roles.map(r => <option key={r.v} value={r.v}>{r.label}</option>)
-               : <><option value="staff">👤 Staff</option><option value="admin">👑 Admin</option></>}
+      {/* Role selector — branch admin can only create staff */}
+      <select className="inp" value={v.role||"staff"}
+        onChange={e=>setV({...v,role:e.target.value})}
+        disabled={editorIsBranchAdmin}
+        style={{ background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:9, padding:"9px 13px", color:"var(--text-main)", fontFamily:"inherit", fontSize:13,
+          opacity: editorIsBranchAdmin ? 0.6 : 1 }}>
+        {availableRoles.map(r => <option key={r.v} value={r.v}>{r.label}</option>)}
       </select>
+      {editorIsBranchAdmin && (
+        <div style={{ fontSize:11, color:"#E74C3C", padding:"4px 8px", background:"#E74C3C11", borderRadius:6 }}>
+          ⛔ Branch Admin អាចបង្កើតតែ Staff ប៉ុណ្ណោះ
+        </div>
+      )}
       {/* Branch selector */}
       <div>
         <div style={{ fontSize:11, color:"var(--text-dim)", marginBottom:4 }}>
-          🏪 សាខា {v.role==="admin" ? <span style={{color:"#888"}}>(admin: "all" = ទាំងអស់)</span> : "*"}
+          🏪 សាខា {v.role==="admin" && !editorIsBranchAdmin ? <span style={{color:"#888"}}>(admin: "all" = ទាំងអស់)</span> : "*"}
         </div>
-        {branchList && branchList.length > 0 ? (
+        {editorIsBranchAdmin ? (
+          // Branch admin: locked to own branch
+          <div style={{ padding:"9px 13px", background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:9, fontSize:13, color:"#888", opacity:0.7 }}>
+            🏪 {branchList?.find(b=>b.branch_id===editorBranchId)?.branch_name || editorBranchId}
+            <span style={{ fontSize:10, color:"#555", marginLeft:8 }}>(ផ្ទូតនឹងសាខារបស់អ្នក)</span>
+          </div>
+        ) : branchList && branchList.length > 0 ? (
           <select className="inp" value={v.branch_id||""}
             onChange={e=>setV({...v,branch_id:e.target.value})}
             style={{ width:"100%", background:"var(--bg-card)", border:"1px solid var(--border)", borderRadius:9, padding:"9px 13px", color:"var(--text-main)", fontFamily:"inherit", fontSize:13 }}>
-            {v.role === "admin" && <option value="all">🌐 ទាំងអស់ (all)</option>}
+            {v.role === "admin" && <option value="all">🌐 ទាំងអស់ (Super Admin)</option>}
             {branchList.map(b => <option key={b.branch_id} value={b.branch_id}>🏪 {b.branch_name} ({b.branch_id})</option>)}
           </select>
         ) : (
           <input className="inp" placeholder="branch_1, branch_2 ... ឬ all"
             value={v.branch_id||""} onChange={e=>setV({...v,branch_id:e.target.value})} />
         )}
-        <div style={{ fontSize:10, color:"#666", marginTop:4 }}>
-          💡 Admin + branch_2 = login ចូល branch_2 ដូច staff ប៉ុន្តែមាន permission admin
-        </div>
+        {!editorIsBranchAdmin && (
+          <div style={{ fontSize:10, color:"#666", marginTop:4 }}>
+            💡 Admin + branch_2 = login ចូល branch_2 ដូច staff ប៉ុន្តែមាន permission admin
+          </div>
+        )}
       </div>
       <div style={{ display:"flex", gap:8, marginTop:4 }}>
         {onCancel && <button style={{ ...btnGhost, flex:1 }} onClick={onCancel}>បោះបង់</button>}
