@@ -1629,6 +1629,145 @@ async function handler(req, res) {
 
 
 
+  // ── DB BACKUP — pg_dump full PostgreSQL dump ─────────────────────
+  // GET /api/db-backup  → streams .sql dump file (Super Admin only)
+  if (req.method === "GET" && url === "/api/db-backup") {
+    const session = requireSuperAdmin(req, res);
+    if (!session) return;
+
+    if (!DATABASE_URL) {
+      send(res, 503, { error: "DATABASE_URL not configured" }); return;
+    }
+
+    try {
+      const { spawn } = await import("child_process");
+      const ts       = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const filename = `cafe-boom-backup-${ts}.sql`;
+
+      // Parse DATABASE_URL → pg_dump env vars
+      const dbUrl  = new URL(DATABASE_URL);
+      const pgEnv  = {
+        ...process.env,
+        PGPASSWORD: decodeURIComponent(dbUrl.password || ""),
+      };
+      const pgArgs = [
+        "-h", dbUrl.hostname,
+        "-p", dbUrl.port || "5432",
+        "-U", dbUrl.username,
+        "-d", dbUrl.pathname.slice(1),   // remove leading "/"
+        "--no-password",
+        "--verbose",
+        "--format=plain",                 // plain SQL — human readable + importable
+        "--encoding=UTF8",
+        "--no-owner",                     // skip ownership (works on any PG instance)
+        "--no-acl",
+      ];
+
+      logger.info("pg_dump started", { by: session.username });
+
+      const pg = spawn("pg_dump", pgArgs, { env: pgEnv });
+
+      // Stream directly to client
+      res.writeHead(200, {
+        "Content-Type":        "application/sql",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization,ngrok-skip-browser-warning",
+        "Cache-Control": "no-cache",
+      });
+
+      pg.stdout.pipe(res);
+
+      pg.stderr.on("data", d => logger.debug("pg_dump", { msg: d.toString().slice(0, 100) }));
+
+      pg.on("close", (code) => {
+        if (code !== 0) {
+          logger.error("pg_dump failed", { code });
+          // Response already started — can't send JSON, just end
+          if (!res.writableEnded) res.end();
+        } else {
+          logger.info("pg_dump complete", { file: filename, by: session.username });
+          if (!res.writableEnded) res.end();
+        }
+      });
+
+      pg.on("error", (e) => {
+        logger.error("pg_dump spawn error", { error: e.message });
+        if (!res.headersSent) {
+          send(res, 503, { error: "pg_dump not available: " + e.message });
+        } else {
+          if (!res.writableEnded) res.end();
+        }
+      });
+
+      return; // response handled by stream
+    } catch (e) {
+      logger.error("Backup error", { error: e.message });
+      send(res, 500, { error: e.message }); return;
+    }
+  }
+
+  // ── DB RESTORE — psql restore from .sql dump ──────────────────────
+  // POST /api/db-restore  → uploads .sql and pipes to psql (Super Admin only)
+  if (req.method === "POST" && url === "/api/db-restore") {
+    const session = requireSuperAdmin(req, res);
+    if (!session) return;
+
+    if (!DATABASE_URL) {
+      send(res, 503, { error: "DATABASE_URL not configured" }); return;
+    }
+
+    try {
+      const { spawn } = await import("child_process");
+
+      const dbUrl = new URL(DATABASE_URL);
+      const pgEnv = {
+        ...process.env,
+        PGPASSWORD: decodeURIComponent(dbUrl.password || ""),
+      };
+      const psqlArgs = [
+        "-h", dbUrl.hostname,
+        "-p", dbUrl.port || "5432",
+        "-U", dbUrl.username,
+        "-d", dbUrl.pathname.slice(1),
+        "--no-password",
+        "-v", "ON_ERROR_STOP=1",   // stop on first error
+      ];
+
+      logger.info("psql restore started", { by: session.username });
+
+      const ps = spawn("psql", psqlArgs, { env: pgEnv });
+
+      let stderr = "";
+      ps.stderr.on("data", d => { stderr += d.toString(); });
+
+      // Pipe request body (SQL file) → psql stdin
+      req.pipe(ps.stdin);
+
+      ps.on("close", (code) => {
+        if (code !== 0) {
+          logger.error("psql restore failed", { code, stderr: stderr.slice(0, 500) });
+          send(res, 500, { error: "Restore failed (code " + code + ")", detail: stderr.slice(0, 300) });
+        } else {
+          logger.info("psql restore complete", { by: session.username });
+          send(res, 200, { ok: true, message: "Restore complete — reload the app" });
+          // Broadcast to all clients to reload
+          io.emit("shared_update", { table: "reload", data: {} });
+        }
+      });
+
+      ps.on("error", (e) => {
+        logger.error("psql spawn error", { error: e.message });
+        send(res, 503, { error: "psql not available: " + e.message });
+      });
+
+      return;
+    } catch (e) {
+      logger.error("Restore error", { error: e.message });
+      send(res, 500, { error: e.message }); return;
+    }
+  }
+
   send(res, 404, { error:"Not found" });
 }
 
