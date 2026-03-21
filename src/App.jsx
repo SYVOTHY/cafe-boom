@@ -586,7 +586,7 @@ function CafeBloom() {
     return pickedBranch || DEFAULT_BRANCH;
   })();
 
-  const { db, loading, socketOnline, saveTable, reload } = useRealtimeDB(CLOUD_URL, activeBranchId);
+  const { db, loading, socketOnline, saveTable, reload, onlineUsers } = useRealtimeDB(CLOUD_URL, activeBranchId, currentUser);
 
   // Sync DB → state when data arrives/updates
   // Skip if table has a pending local write (within 3s) to prevent socket overwrite
@@ -927,6 +927,7 @@ function CafeBloom() {
     isGlobalAdmin: currentUser?.role === "admin" && currentUser?.branch_id === "all",
     isBranchAdmin: currentUser?.role === "admin" && currentUser?.branch_id && currentUser?.branch_id !== "all",
     lowStock: (ingsRaw||[]).filter(i => (i.current_stock||0) <= (i.threshold||0)),
+    onlineUsers,
   };
 
   const _bid  = currentUser?.branch_id;
@@ -5777,7 +5778,7 @@ function SelfResetPasswordModal({ currentUser, onClose, notify }) {
   );
 }
 
-function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalAdmin, isBranchAdmin, branchId }) {
+function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalAdmin, isBranchAdmin, branchId, onlineUsers }) {
   // Apply default permissions to all staff (super admin only)
   const applyDefaultPermsToAll = () => {
     const defPerms = {
@@ -5910,6 +5911,11 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
             <div style={{ fontWeight:700, fontSize:18 }}>👥 គ្រប់គ្រង Users</div>
             <div style={{ fontSize:12, color:"#888", marginTop:2 }}>
               {displayUsers.length} users · {displayUsers.filter(u => u.active).length} active
+              {(onlineUsers||[]).length > 0 && (
+                <span style={{ marginLeft:6, color:"#27AE60", fontWeight:700 }}>
+                  · ● {[...new Set((onlineUsers||[]).map(p=>p.user_id))].length} online
+                </span>
+              )}
               {isBranchAdmin && <span style={{ marginLeft:6, color:"var(--accent)" }}>· {getBranchName(branchId, branchList)}</span>}
               {isGlobalAdmin && filterBranch !== "all" && (
                 <span style={{ marginLeft:6, color:"#5BA3E0" }}>
@@ -5988,11 +5994,17 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
               ? Object.keys(PERM_LABELS).reduce((a, k) => ({ ...a, [k]: true }), {})
               : { ...DEFAULT_PERMS_TPL, ...(u.permissions || {}) };
             const allowedPages = Object.entries(perms).filter(([, v]) => v).map(([k]) => k);
+            // Presence: check if this user has any active socket session
+            const presence = (onlineUsers||[]).filter(p => p.user_id === u.user_id);
+            const isOnline  = presence.length > 0;
+            const sessionCount = presence.length; // multiple tabs/devices
             return (
               <div key={u.user_id} style={{
                 background: "var(--bg-card)",
-                border: `1px solid ${u.active ? "#1E1B1F" : "#2A1A1A"}`, borderRadius: 14, padding: "14px 16px",
-                opacity: u.active ? 1 : 0.6
+                border: `1px solid ${isOnline ? "#27AE6033" : u.active ? "#1E1B1F" : "#2A1A1A"}`,
+                borderRadius: 14, padding: "14px 16px",
+                opacity: u.active ? 1 : 0.6,
+                boxShadow: isOnline ? "0 0 0 1px #27AE6022" : "none",
               }}>
                 {/* Top row */}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
@@ -6006,6 +6018,15 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
                             display:"flex", alignItems:"center", justifyContent:"center", fontSize:20
                           }}>{u.role === "admin" ? "👑" : "👤"}</div>
                       }
+                      {/* Online/Offline dot */}
+                      <div title={isOnline ? `Online${sessionCount>1?" ("+sessionCount+" sessions)":""}` : "Offline"} style={{
+                        position:"absolute", bottom:-2, right:-2,
+                        width:13, height:13, borderRadius:"50%",
+                        background: isOnline ? "#27AE60" : "#555",
+                        border: "2px solid var(--bg-card)",
+                        boxShadow: isOnline ? "0 0 6px #27AE6088" : "none",
+                        transition: "background .3s",
+                      }} />
                     </div>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 14 }}>
@@ -6013,6 +6034,16 @@ function UsersPage({ users, setUsers, currentUser, notify, branchList, isGlobalA
                           fontSize: 10, color: "#27AE60", background: "#1A4A1A22",
                           padding: "2px 6px", borderRadius: 8, marginLeft: 4
                         }}>ខ្ញុំ</span>}
+                        {isOnline && <span style={{
+                          fontSize:10, color:"#27AE60", background:"#0A2A0A",
+                          padding:"1px 7px", borderRadius:8, marginLeft:4, fontWeight:700,
+                          border:"1px solid #27AE6033"
+                        }}>● Online{sessionCount>1?` ×${sessionCount}`:""}</span>}
+                        {!isOnline && u.active && <span style={{
+                          fontSize:10, color:"#555", background:"#1A181C",
+                          padding:"1px 7px", borderRadius:8, marginLeft:4,
+                          border:"1px solid #2A2730"
+                        }}>○ Offline</span>}
                       </div>
                       <div style={{ fontSize: 11, color: "#555", fontFamily: "'DM Mono',monospace", display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", marginTop:2 }}>
                         <span>@{u.username}</span>
