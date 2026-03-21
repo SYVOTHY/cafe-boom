@@ -44,6 +44,159 @@ const TG_CHAT_ID   = process.env.TG_CHAT_ID   || "";    // set in Railway env
 const TG_ENABLED   = TG_BOT_TOKEN.length > 10 && TG_CHAT_ID.length > 3;
 if (!TG_ENABLED) console.warn("[Telegram] TG_BOT_TOKEN or TG_CHAT_ID not set — notifications disabled");
 
+// ═══════════════════════════════════════════════════════════════════
+//  STRUCTURED LOGGER  (no extra deps — built on console + fs)
+//  Levels: error | warn | info | debug
+//  Output: JSON lines to stdout + optional rolling file
+// ═══════════════════════════════════════════════════════════════════
+const LOG_LEVEL = process.env.LOG_LEVEL || "info"; // error | warn | info | debug
+const LOG_FILE  = process.env.LOG_FILE  || "";      // optional: /tmp/cafe-boom.log
+
+const LEVELS = { error:0, warn:1, info:2, debug:3 };
+const currentLevel = LEVELS[LOG_LEVEL] ?? 2;
+
+function log(level, msg, meta = {}) {
+  if ((LEVELS[level] ?? 99) > currentLevel) return;
+  const entry = {
+    ts:    new Date().toISOString(),
+    level: level.toUpperCase(),
+    msg,
+    ...meta,
+  };
+  const line = JSON.stringify(entry);
+  // Colour in dev, plain in prod (Railway captures stdout as plain)
+  const colour = { ERROR:"\x1b[31m", WARN:"\x1b[33m", INFO:"\x1b[36m", DEBUG:"\x1b[90m" };
+  const reset  = "\x1b[0m";
+  const pfx    = colour[entry.level] || "";
+  console.log(`${pfx}[${entry.ts.slice(11,19)}] ${entry.level.padEnd(5)} ${msg}${reset}`
+    + (Object.keys(meta).length ? "  " + JSON.stringify(meta) : ""));
+  // Optional file logging
+  if (LOG_FILE) {
+    try { fs.appendFileSync(LOG_FILE, line + "\n"); } catch {}
+  }
+}
+
+const logger = {
+  error: (msg, meta) => log("error", msg, meta),
+  warn:  (msg, meta) => log("warn",  msg, meta),
+  info:  (msg, meta) => log("info",  msg, meta),
+  debug: (msg, meta) => log("debug", msg, meta),
+  // HTTP request logger (call at start of every handler)
+  request: (req, extra = {}) => log("info", `${req.method} ${req.url}`, {
+    ip: (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "?").split(",")[0].trim(),
+    ...extra,
+  }),
+};
+
+// ═══════════════════════════════════════════════════════════════════
+//  ZOD-STYLE SCHEMA VALIDATOR  (zero external deps)
+//  Usage:
+//    const schema = z.object({
+//      username: z.string().min(1).max(50),
+//      password: z.string().min(6).max(200),
+//      role:     z.enum(["admin","staff"]),
+//      amount:   z.number().min(0).max(1e7),
+//      items:    z.array().minLength(1),
+//    });
+//    const result = schema.parse(body);
+//    if (!result.ok) { send(res, 400, { error: result.error, errors: result.errors }); return; }
+//    const { username, password } = result.data;
+// ═══════════════════════════════════════════════════════════════════
+const z = (() => {
+  // Field validator builder
+  function field(name, check) {
+    const validators = [];
+    const self = {
+      _name: name,
+      _optional: false,
+      optional()   { self._optional = true; return self; },
+      // Run all validators; return first error string or null
+      _run(val) {
+        if (val === undefined || val === null || val === "") {
+          return self._optional ? null : `'${name}' is required`;
+        }
+        for (const v of validators) {
+          const err = v(val);
+          if (err) return err;
+        }
+        return null;
+      },
+      // Fluent builder helpers
+      _add(fn) { validators.push(fn); return self; },
+    };
+    return self;
+  }
+
+  const string = (name) => {
+    const f = field(name);
+    return {
+      ...f,
+      min(n) { return f._add(v => typeof v !== "string" || v.trim().length < n ? `'${name}' min ${n} chars` : null); },
+      max(n) { return f._add(v => typeof v !== "string" || v.length > n ? `'${name}' max ${n} chars` : null); },
+      pattern(re, msg) { return f._add(v => re.test(v) ? null : msg || `'${name}' invalid format`); },
+      noScript() { return f._add(v => /(<script|javascript:|on\w+=)/i.test(v) ? `'${name}' contains invalid content` : null); },
+      optional() { f._optional = true; return this; },
+      _run: f._run,
+    };
+  };
+
+  const number = (name) => {
+    const f = field(name);
+    return {
+      ...f,
+      min(n) { return f._add(v => isNaN(Number(v)) || Number(v) < n ? `'${name}' min ${n}` : null); },
+      max(n) { return f._add(v => isNaN(Number(v)) || Number(v) > n ? `'${name}' max ${n}` : null); },
+      optional() { f._optional = true; return this; },
+      _run: f._run,
+    };
+  };
+
+  const array = (name) => {
+    const f = field(name);
+    return {
+      ...f,
+      minLength(n) { return f._add(v => !Array.isArray(v) || v.length < n ? `'${name}' must have at least ${n} item(s)` : null); },
+      maxLength(n) { return f._add(v => !Array.isArray(v) || v.length > n ? `'${name}' max ${n} items` : null); },
+      optional() { f._optional = true; return this; },
+      _run(val) { return !Array.isArray(val) && !f._optional ? `'${name}' must be an array` : f._run(val); },
+    };
+  };
+
+  const enumField = (name, values) => {
+    const f = field(name);
+    f._add(v => values.includes(v) ? null : `'${name}' must be one of: ${values.join(", ")}`);
+    return { ...f, optional() { f._optional = true; return this; }, _run: f._run };
+  };
+
+  const boolean = (name) => {
+    const f = field(name);
+    f._add(v => typeof v === "boolean" ? null : `'${name}' must be boolean`);
+    return { ...f, optional() { f._optional = true; return this; }, _run: f._run };
+  };
+
+  // Schema builder
+  function object(shape) {
+    return {
+      parse(data) {
+        if (!data || typeof data !== "object" || Array.isArray(data)) {
+          return { ok:false, error:"Request body must be a JSON object", errors:["body must be object"], data:null };
+        }
+        const errors = [];
+        const out    = {};
+        for (const [key, validator] of Object.entries(shape)) {
+          const err = validator._run(data[key]);
+          if (err) errors.push(err);
+          else if (data[key] !== undefined && data[key] !== null) out[key] = data[key];
+        }
+        if (errors.length) return { ok:false, error:errors[0], errors, data:null };
+        return { ok:true, error:null, errors:[], data:{ ...data, ...out } }; // merge unknown fields
+      },
+    };
+  }
+
+  return { string, number, array, enum: enumField, boolean, object };
+})();
+
 if (!DATABASE_URL) {
   console.error("❌ DATABASE_URL មិនទាន់​កំណត់! បន្ថែម PostgreSQL plugin នៅ Railway។");
   process.exit(1);
@@ -59,7 +212,7 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
 });
 
-pool.on("error", (err) => console.error("❌ PG Pool Error:", err.message));
+pool.on("error", (err) => logger.error("PG Pool Error", { error: err.message }));
 
 // ── DB Init — Create tables if not exist ─────────────────────────
 async function initDB() {
@@ -543,7 +696,14 @@ const createSession = createAccessToken;
 // ═══════════════════════════════════════════════════════════════════
 //  HTTP + SOCKET.IO  SERVER
 // ═══════════════════════════════════════════════════════════════════
-const httpServer = http.createServer(handler);
+const httpServer = http.createServer(async (req, res) => {
+  try {
+    await handler(req, res);
+  } catch (err) {
+    logger.error("Unhandled handler error", { error: err.message, url: req.url, method: req.method });
+    try { send(res, 500, { error: "Internal server error" }); } catch {}
+  }
+});
 
 // ── Socket.io setup ───────────────────────────────────────────────
 const io = new Server(httpServer, {
@@ -711,77 +871,64 @@ function requireBranchAccess(req, res, bid) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  VALIDATION HELPERS
+//  VALIDATION — schema-based using z.*  (built above)
+//  Legacy helpers kept as thin wrappers for backward compat
 // ═══════════════════════════════════════════════════════════════════
 
-// Validate string field: non-empty, optional max length
-function valStr(val, name, { min=1, max=500, required=true } = {}) {
-  if (required && (val === undefined || val === null || String(val).trim() === "")) {
-    return `'${name}' is required`;
+// Pre-built schemas
+const Schemas = {
+  login: z.object({
+    username: z.string("username").min(1).max(100).noScript(),
+    password: z.string("password").min(1).max(200),
+  }),
+  changePassword: z.object({
+    oldPassword: z.string("oldPassword").min(1).max(200),
+    newPassword: z.string("newPassword").min(6).max(200),
+  }),
+  branchAdd: z.object({
+    branch_id:   z.string("branch_id").min(1).max(50).pattern(/^[a-zA-Z0-9_-]+$/, "branch_id must be alphanumeric/underscore/dash only"),
+    branch_name: z.string("branch_name").min(1).max(100).noScript(),
+    address:     z.string("address").max(200).noScript().optional(),
+  }),
+  checkout: z.object({
+    items:  z.array("items").minLength(1).maxLength(200),
+    method: z.enum("method", ["cash","qr","bank"]),
+    total:  z.number("total").min(0).max(1e7),
+    tax:    z.number("tax").min(0).max(1e7),
+  }),
+  shiftSummary: z.object({
+    shiftId: z.enum("shiftId", ["morning","afternoon"]),
+  }),
+};
+
+// Parse body with schema; auto-send 400 on failure
+function parseBody(res, schema, body) {
+  const result = schema.parse(body);
+  if (!result.ok) {
+    logger.warn("Validation failed", { error: result.error, count: result.errors.length });
+    send(res, 400, { error: result.error, errors: result.errors });
   }
-  if (val !== undefined && val !== null) {
-    const s = String(val).trim();
-    if (s.length < min) return `'${name}' must be at least ${min} character(s)`;
-    if (s.length > max) return `'${name}' must be at most ${max} character(s)`;
-  }
-  return null;
+  return result;
 }
 
-// Validate number: must be a finite number, optional range
-function valNum(val, name, { min=-Infinity, max=Infinity, required=true } = {}) {
-  if (required && (val === undefined || val === null)) return `'${name}' is required`;
-  const n = Number(val);
-  if (isNaN(n) || !isFinite(n)) return `'${name}' must be a valid number`;
-  if (n < min) return `'${name}' must be ≥ ${min}`;
-  if (n > max) return `'${name}' must be ≤ ${max}`;
-  return null;
-}
-
-// Validate array is actually an array
-function valArray(val, name) {
-  if (!Array.isArray(val)) return `'${name}' must be an array`;
-  return null;
-}
-
-// Collect errors and send 400 if any
-function validate(res, checks) {
-  const errors = checks.filter(Boolean);
-  if (errors.length > 0) {
-    send(res, 400, { error: errors[0], errors });
-    return false;
-  }
-  return true;
-}
-
-// Sanitize branch_id: alphanumeric, underscores, dashes only
+// Sanitize helpers
 function sanitizeBranchId(bid) {
   if (!bid) return null;
   return String(bid).replace(/[^a-zA-Z0-9_\-]/g, "").slice(0, 50);
 }
-
-// Sanitize username: alphanumeric, underscores only
 function sanitizeUsername(u) {
   if (!u) return "";
   return String(u).replace(/[^a-zA-Z0-9_\-\.@]/g, "").slice(0, 50).trim();
 }
 
-// Detect SQL injection / script injection patterns
+// Injection scan
 const INJECT_PATTERN = /(<script|<\/script|javascript:|on\w+\s*=|';\s*--|;\s*DROP\s+TABLE|UNION\s+SELECT)/i;
-function hasSQLInjection(str) {
-  return typeof str === "string" && INJECT_PATTERN.test(str);
-}
-
-// Deep scan object for injection attempts (skip large data arrays for performance)
+function hasSQLInjection(str) { return typeof str === "string" && INJECT_PATTERN.test(str); }
 function scanForInjection(obj, depth = 0) {
   if (depth > 4) return false;
   if (typeof obj === "string") return hasSQLInjection(obj);
-  if (Array.isArray(obj)) {
-    // Only scan first 5 items for performance
-    return obj.slice(0, 5).some(v => scanForInjection(v, depth + 1));
-  }
-  if (obj && typeof obj === "object") {
-    return Object.values(obj).some(v => scanForInjection(v, depth + 1));
-  }
+  if (Array.isArray(obj)) return obj.slice(0, 5).some(v => scanForInjection(v, depth + 1));
+  if (obj && typeof obj === "object") return Object.values(obj).some(v => scanForInjection(v, depth + 1));
   return false;
 }
 
@@ -810,9 +957,12 @@ async function handler(req, res) {
 
   if (req.method === "OPTIONS") { send(res, 200, {}); return; }
 
+  // ── Request logging ────────────────────────────────────────────
+  logger.request(req);
+
   // ── Global rate limit ──────────────────────────────────────────
   if (!rateCheck(ip, "api", RATE_MAX_API)) {
-    console.warn(`[RateLimit] ${ip} exceeded API limit`);
+    logger.warn("Rate limit exceeded", { ip, url });
     send(res, 429, { error:"Too many requests — please slow down" }); return;
   }
 
@@ -849,7 +999,7 @@ async function handler(req, res) {
     const session = requireSuperAdmin(req, res);
     if (!session) return;
     const body = await readBody(req);
-    if (!validate(res, [valArray(body, "branches")])) return;
+    if (!Array.isArray(body)) { send(res, 400, { error:"'branches' must be an array" }); return; }
     await saveBranchList(body);
     io.emit("shared_update", { table:"branches", data:body });
     send(res, 200, { ok:true });
@@ -862,12 +1012,9 @@ async function handler(req, res) {
     if (!session) return;
     const body = await readBody(req);
     if (scanForInjection(body)) { send(res, 400, { error:"Invalid input" }); return; }
-    const { branch_id, branch_name, address } = body;
-    if (!validate(res, [
-      valStr(branch_id,   "branch_id",   { max:50 }),
-      valStr(branch_name, "branch_name", { max:100 }),
-    ])) return;
-    const cleanBid = sanitizeBranchId(branch_id);
+    const v = parseBody(res, Schemas.branchAdd, body);
+    if (!v.ok) return;
+    const cleanBid = sanitizeBranchId(v.data.branch_id);
     if (!cleanBid) { send(res, 400, { error:"branch_id contains invalid characters" }); return; }
     const existing = await loadBranches();
     if (existing.find(b => b.branch_id === cleanBid)) {
@@ -875,12 +1022,12 @@ async function handler(req, res) {
     }
     await pool.query(
       "INSERT INTO branches(branch_id,branch_name,address,active) VALUES($1,$2,$3,true)",
-      [cleanBid, String(branch_name).trim().slice(0,100), String(address||"").slice(0,200)]
+      [cleanBid, String(v.data.branch_name).trim().slice(0,100), String(v.data.address||"").slice(0,200)]
     );
     await loadBranch(cleanBid);
     const updated = await loadBranches();
     io.emit("shared_update", { table:"branches", data:updated });
-    console.log(`[Branch] Added: ${cleanBid} by ${session.username}`);
+    logger.info("Branch added", { branch: cleanBid, by: session.username });
     send(res, 200, { ok:true, branches:updated });
     return;
   }
@@ -902,7 +1049,7 @@ async function handler(req, res) {
     await pool.query("DELETE FROM branch_data WHERE branch_id=$1", [cleanBid]);
     const updated = await loadBranches();
     io.emit("shared_update", { table:"branches", data:updated });
-    console.log(`[Branch] Deleted: ${cleanBid} by ${session.username}`);
+    logger.info("Branch deleted", { branch: cleanBid, by: session.username });
     send(res, 200, { ok:true, branches:updated });
     return;
   }
@@ -926,25 +1073,21 @@ async function handler(req, res) {
   if (req.method === "POST" && url === "/api/login") {
     // Strict rate limit on login (brute force protection)
     if (!rateCheck(ip, "login", RATE_MAX_LOGIN)) {
-      console.warn(`[RateLimit] ${ip} exceeded login limit`);
+      logger.warn("Login rate limit exceeded", { ip });
       send(res, 429, { error:"Too many login attempts — wait 1 minute" }); return;
     }
     const body = await readBody(req);
-    const { username, password } = body;
-    if (!validate(res, [
-      valStr(username, "username", { max:100 }),
-      valStr(password, "password", { max:200 }),
-    ])) return;
-    const cleanUser = sanitizeUsername(username);
+    const v = parseBody(res, Schemas.login, body);
+    if (!v.ok) return;
+    const cleanUser = sanitizeUsername(v.data.username);
     const shared = await loadShared();
     const user   = (shared.users||[]).find(u => u.username === cleanUser && u.active);
-    if (!user || !verifyPassword(password, user.password)) {
-      console.warn(`[LOGIN FAIL] ${cleanUser} from ${ip}`);
+    if (!user || !verifyPassword(v.data.password, user.password)) {
+      logger.warn('Login failed', { username: cleanUser, ip });
       send(res, 401, { error:"Invalid username or password" }); return;
     }
-    // Auto-migrate plain-text password
     if (!user.password.startsWith("pbkdf2:")) {
-      user.password = hashPassword(password);
+      user.password = hashPassword(v.data.password);
       shared.users  = shared.users.map(u => u.user_id === user.user_id ? user : u);
       await saveSharedKey("users", shared.users);
     }
@@ -955,7 +1098,7 @@ async function handler(req, res) {
       name:user.name, branch_id:user.branch_id, active:user.active,
       permissions:user.permissions||{}, avatar:user.avatar||""
     };
-    console.log(`[LOGIN] ${cleanUser} (${user.role}) from ${ip}`);
+    logger.info('Login OK', { username: cleanUser, role: user.role, ip });
     send(res, 200, { ok:true, token, refreshToken, user:safeUser,
       tokenExpiresIn: ACCESS_EXP, refreshExpiresIn: REFRESH_EXP });
     return;
@@ -969,7 +1112,7 @@ async function handler(req, res) {
       const body = await readBody(req);
       if (body?.refreshToken) revokeToken(body.refreshToken);
     } catch {}
-    console.log(`[LOGOUT] ${ip}`);
+    logger.info('Logout', { ip });
     send(res, 200, { ok:true });
     return;
   }
@@ -991,7 +1134,7 @@ async function handler(req, res) {
     revokeToken(rt); // rotate — old refresh token is now invalid
     const newToken   = createAccessToken(user);
     const newRefresh = createRefreshToken(user);
-    console.log(`[REFRESH] user_id=${payload.user_id} from ${ip}`);
+    logger.info("Token refreshed", { user_id: payload.user_id, ip });
     send(res, 200, { ok:true, token:newToken, refreshToken:newRefresh, tokenExpiresIn:ACCESS_EXP });
     return;
   }
@@ -1000,25 +1143,21 @@ async function handler(req, res) {
   if (req.method === "POST" && url === "/api/change-password") {
     const session = requireAuth(req, res);
     if (!session) return;
-    const { oldPassword, newPassword } = await readBody(req);
-    if (!validate(res, [
-      valStr(oldPassword, "oldPassword", { max:200 }),
-      valStr(newPassword, "newPassword", { min:6, max:200 }),
-    ])) return;
+    const body = await readBody(req);
+    const v = parseBody(res, Schemas.changePassword, body);
+    if (!v.ok) return;
     const shared = await loadShared();
     const user   = (shared.users||[]).find(u => u.user_id === session.user_id);
-    if (!user)                                       { send(res, 404, { error:"User not found" }); return; }
-    if (!verifyPassword(oldPassword, user.password)) { send(res, 401, { error:"Current password is incorrect" }); return; }
-    user.password  = hashPassword(newPassword);
+    if (!user)                                          { send(res, 404, { error:"User not found" }); return; }
+    if (!verifyPassword(v.data.oldPassword, user.password)) { send(res, 401, { error:"Current password is incorrect" }); return; }
+    user.password  = hashPassword(v.data.newPassword);
     shared.users   = shared.users.map(u => u.user_id === user.user_id ? user : u);
     await saveSharedKey("users", shared.users);
-    // Revoke current token — user must re-login with new password
     const authHeader = (req.headers["authorization"] || "").trim();
     if (authHeader.startsWith("Bearer ")) revokeToken(authHeader.slice(7).trim());
-    // Issue new tokens immediately so client doesn't need to log in again
     const newToken   = createAccessToken(user);
     const newRefresh = createRefreshToken(user);
-    console.log(`[PASSWORD] Changed: ${user.username} from ${ip}`);
+    logger.info('Password changed', { username: user.username, ip });
     send(res, 200, { ok:true, token:newToken, refreshToken:newRefresh });
     return;
   }
@@ -1053,7 +1192,7 @@ async function handler(req, res) {
     }
     // Injection scan
     if (typeof body === "object" && scanForInjection(body)) {
-      console.warn(`[SECURITY] Injection attempt on ${table} by ${session.username} from ${ip}`);
+      logger.warn("Injection attempt", { table, user: session.username, ip });
       send(res, 400, { error:"Invalid input detected" }); return;
     }
 
@@ -1075,12 +1214,12 @@ async function handler(req, res) {
         await saveSharedKey("users", merged);
         const safeMerged = merged.map(({ password:_, ...u }) => u);
         broadcastSharedUpdate("users", safeMerged);
-        console.log(`[SHARED] Saved: users (${merged.length} rows) by ${session.username}`);
+        logger.info("Saved shared/users", { rows: merged.length, by: session.username });
         send(res, 200, { ok:true }); return;
       }
       await saveSharedKey(table, body);
       broadcastSharedUpdate(table, body);
-      console.log(`[SHARED] Saved: ${table} by ${session.username}`);
+      logger.info("Saved shared table", { table, by: session.username });
       send(res, 200, { ok:true }); return;
     }
 
@@ -1098,7 +1237,7 @@ async function handler(req, res) {
         await saveBranchKey(bid, table, body);
         broadcastBranchUpdate(bid, table, body);
       }
-      console.log(`[${bid}] Saved: ${table} ${Array.isArray(body)?body.length+" rows":""} by ${session.username}`);
+      logger.info("Saved branch table", { branch: bid, table, rows: Array.isArray(body) ? body.length : 1, by: session.username });
       send(res, 200, { ok:true }); return;
     }
 
@@ -1148,11 +1287,11 @@ async function handler(req, res) {
           after:  reindexed.length,
           removed,
         });
-        console.log(`[migrate-recipes] ${b.branch_id}: removed=${removed}, kept=${reindexed.length}`);
+        logger.info("Recipes migrated", { branch: b.branch_id, removed, kept: reindexed.length });
       }
       send(res, 200, { ok:true, results });
     } catch(e) {
-      console.error("[migrate-recipes]", e.message);
+      logger.error("Recipe migration error", { error: e.message });
       send(res, 500, { error: e.message });
     }
     return;
@@ -1169,7 +1308,7 @@ async function handler(req, res) {
     await saveBranchKey(bid, "logs",   []);
     broadcastBranchUpdate(bid, "orders", []);
     broadcastBranchUpdate(bid, "logs",   []);
-    console.log(`[${bid}] Reset daily by ${session.username}`);
+    logger.info("Reset daily", { branch: bid, by: session.username });
     send(res, 200, { ok:true });
     return;
   }
@@ -1189,7 +1328,7 @@ async function handler(req, res) {
       broadcastBranchUpdate(b.branch_id, "logs",   []);
       cleared.push(b.branch_id);
     }
-    console.log(`[ADMIN] Cleared orders for: ${cleared.join(", ")} by ${session.username}`);
+    logger.info("Orders cleared", { branches: cleared, by: session.username });
     send(res, 200, { ok:true, cleared });
     return;
   }
@@ -1259,7 +1398,7 @@ async function handler(req, res) {
       fs.writeFileSync(printerPath,Buffer.from(cmd));
       send(res,200,{ok:true,via:printerPath}); return;
     } catch(e) {
-      console.error("[PRINT ERROR]",e.message);
+      logger.error("Print error", { error: e.message });
       send(res,500,{error:e.message}); return;
     }
   }
@@ -1277,8 +1416,8 @@ async function tgSend(text) {
       body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: "HTML" }),
     });
     const result = await r.json().catch(() => ({}));
-    if (!r.ok) console.error("[Telegram]", result.description);
-  } catch (e) { console.error("[Telegram]", e.message); }
+    if (!r.ok) logger.warn("Telegram send failed", { reason: result.description });
+  } catch (e) { logger.error("Telegram error", { error: e.message }); }
 }
 
 async function tgNotifyOrder(rec, branchName) {
@@ -1355,13 +1494,10 @@ async function tgNotifyShift(shiftId, orders, branchMap) {
     if (!session) return;
 
     const body = await readBody(req);
-    if (!validate(res, [
-      valArray(body.items, "items"),
-      valStr(body.method,   "method", { max:20 }),
-    ])) return;
+    const v = parseBody(res, Schemas.checkout, body);
+    if (!v.ok) return;
 
     const bid = sanitizeBranchId(body.branchId || session.branch_id || "branch_1");
-    // Verify branch access
     const isSuper = session.role === "admin" && session.branch_id === "all";
     if (!isSuper && session.branch_id !== bid) {
       send(res, 403, { error:"Branch access denied" }); return;
@@ -1445,7 +1581,7 @@ async function tgNotifyShift(shiftId, orders, branchMap) {
     broadcastBranchUpdate(bid, "orders",      newOrders);
     broadcastBranchUpdate(bid, "logs",        newLogs);
 
-    console.log(`[CHECKOUT] ${bid} | ${items.length} items | $${rec.total} | by ${session.username}`);
+    logger.info('Checkout', { branch: bid, items: items.length, total: rec.total, user: session.username });
 
     // ── Telegram notification (fire-and-forget) ────────────────
     const branches   = await loadBranches();
@@ -1462,8 +1598,9 @@ async function tgNotifyShift(shiftId, orders, branchMap) {
     const session = requireAdmin(req, res);
     if (!session) return;
     const body = await readBody(req);
-    const { shiftId } = body;
-    if (!shiftId) { send(res, 400, { error:"shiftId required" }); return; }
+    const v = parseBody(res, Schemas.shiftSummary, body);
+    if (!v.ok) return;
+    const { shiftId } = v.data;
     const branches = (await loadBranches()).filter(b => b.active);
     const allOrds  = [];
     const branchMap = {};
@@ -1473,7 +1610,7 @@ async function tgNotifyShift(shiftId, orders, branchMap) {
       (bd.orders||[]).forEach(o => allOrds.push({ ...o, branch_id: b.branch_id }));
     }
     await tgNotifyShift(shiftId, allOrds, branchMap);
-    console.log(`[SHIFT] Summary sent: ${shiftId} by ${session.username}`);
+    logger.info('Shift summary sent', { shiftId, by: session.username });
     send(res, 200, { ok:true });
     return;
   }
@@ -1484,6 +1621,18 @@ async function tgNotifyShift(shiftId, orders, branchMap) {
 // ═══════════════════════════════════════════════════════════════════
 //  START
 // ═══════════════════════════════════════════════════════════════════
+
+// ── Global error handler — catch unhandled async errors ──────────
+process.on("unhandledRejection", (reason, promise) => {
+  logger.error("Unhandled Promise Rejection", {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack:  reason instanceof Error ? reason.stack?.split("\n")[1]?.trim() : undefined,
+  });
+});
+process.on("uncaughtException", (err) => {
+  logger.error("Uncaught Exception", { error: err.message, stack: err.stack?.split("\n")[1]?.trim() });
+  // Don't exit — Railway will restart if needed; keep serving other requests
+});
 initDB()
   .then(() => {
     httpServer.listen(PORT, "0.0.0.0", async () => {
@@ -1496,6 +1645,6 @@ initDB()
     });
   })
   .catch(err => {
-    console.error("❌ DB Init failed:", err.message);
+    logger.error('DB Init failed', { error: err.message });
     process.exit(1);
   });
