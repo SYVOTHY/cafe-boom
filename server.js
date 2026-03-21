@@ -103,78 +103,88 @@ const logger = {
 //    const { username, password } = result.data;
 // ═══════════════════════════════════════════════════════════════════
 const z = (() => {
-  // Field validator builder
-  function field(name, check) {
+  // ── String validator ────────────────────────────────────────────
+  const string = (name) => {
     const validators = [];
+    let _optional = false;
     const self = {
-      _name: name,
-      _optional: false,
-      optional()   { self._optional = true; return self; },
-      // Run all validators; return first error string or null
+      optional()          { _optional = true; return self; },
+      min(n)              { validators.push(v => typeof v !== "string" || v.trim().length < n ? `'${name}' min ${n} chars` : null); return self; },
+      max(n)              { validators.push(v => typeof v !== "string" || v.length > n      ? `'${name}' max ${n} chars` : null); return self; },
+      pattern(re, msg)    { validators.push(v => re.test(String(v)) ? null : (msg || `'${name}' invalid format`)); return self; },
+      noScript()          { validators.push(v => /(<script|javascript:|on\w+=)/i.test(String(v)) ? `'${name}' contains invalid content` : null); return self; },
       _run(val) {
-        if (val === undefined || val === null || val === "") {
-          return self._optional ? null : `'${name}' is required`;
-        }
-        for (const v of validators) {
-          const err = v(val);
-          if (err) return err;
-        }
+        if (val === undefined || val === null || val === "") return _optional ? null : `'${name}' is required`;
+        for (const fn of validators) { const e = fn(val); if (e) return e; }
         return null;
       },
-      // Fluent builder helpers
-      _add(fn) { validators.push(fn); return self; },
     };
     return self;
-  }
-
-  const string = (name) => {
-    const f = field(name);
-    return {
-      ...f,
-      min(n) { return f._add(v => typeof v !== "string" || v.trim().length < n ? `'${name}' min ${n} chars` : null); },
-      max(n) { return f._add(v => typeof v !== "string" || v.length > n ? `'${name}' max ${n} chars` : null); },
-      pattern(re, msg) { return f._add(v => re.test(v) ? null : msg || `'${name}' invalid format`); },
-      noScript() { return f._add(v => /(<script|javascript:|on\w+=)/i.test(v) ? `'${name}' contains invalid content` : null); },
-      optional() { f._optional = true; return this; },
-      _run: f._run,
-    };
   };
 
+  // ── Number validator ────────────────────────────────────────────
   const number = (name) => {
-    const f = field(name);
-    return {
-      ...f,
-      min(n) { return f._add(v => isNaN(Number(v)) || Number(v) < n ? `'${name}' min ${n}` : null); },
-      max(n) { return f._add(v => isNaN(Number(v)) || Number(v) > n ? `'${name}' max ${n}` : null); },
-      optional() { f._optional = true; return this; },
-      _run: f._run,
+    const validators = [];
+    let _optional = false;
+    const self = {
+      optional()   { _optional = true; return self; },
+      min(n)       { validators.push(v => isNaN(Number(v)) || Number(v) < n ? `'${name}' min ${n}` : null); return self; },
+      max(n)       { validators.push(v => isNaN(Number(v)) || Number(v) > n ? `'${name}' max ${n}` : null); return self; },
+      _run(val) {
+        if (val === undefined || val === null) return _optional ? null : `'${name}' is required`;
+        if (isNaN(Number(val)) || !isFinite(Number(val))) return `'${name}' must be a valid number`;
+        for (const fn of validators) { const e = fn(val); if (e) return e; }
+        return null;
+      },
     };
+    return self;
   };
 
+  // ── Array validator ─────────────────────────────────────────────
   const array = (name) => {
-    const f = field(name);
-    return {
-      ...f,
-      minLength(n) { return f._add(v => !Array.isArray(v) || v.length < n ? `'${name}' must have at least ${n} item(s)` : null); },
-      maxLength(n) { return f._add(v => !Array.isArray(v) || v.length > n ? `'${name}' max ${n} items` : null); },
-      optional() { f._optional = true; return this; },
-      _run(val) { return !Array.isArray(val) && !f._optional ? `'${name}' must be an array` : f._run(val); },
+    const validators = [];
+    let _optional = false;
+    const self = {
+      optional()      { _optional = true; return self; },
+      minLength(n)    { validators.push(v => !Array.isArray(v) || v.length < n ? `'${name}' needs ≥${n} items` : null); return self; },
+      maxLength(n)    { validators.push(v => !Array.isArray(v) || v.length > n ? `'${name}' max ${n} items`  : null); return self; },
+      _run(val) {
+        if (val === undefined || val === null) return _optional ? null : `'${name}' is required`;
+        if (!Array.isArray(val)) return `'${name}' must be an array`;
+        for (const fn of validators) { const e = fn(val); if (e) return e; }
+        return null;
+      },
     };
+    return self;
   };
 
+  // ── Enum validator ──────────────────────────────────────────────
   const enumField = (name, values) => {
-    const f = field(name);
-    f._add(v => values.includes(v) ? null : `'${name}' must be one of: ${values.join(", ")}`);
-    return { ...f, optional() { f._optional = true; return this; }, _run: f._run };
+    let _optional = false;
+    const self = {
+      optional() { _optional = true; return self; },
+      _run(val) {
+        if (val === undefined || val === null) return _optional ? null : `'${name}' is required`;
+        return values.includes(val) ? null : `'${name}' must be one of: ${values.join(", ")}`;
+      },
+    };
+    return self;
   };
 
+  // ── Boolean validator ───────────────────────────────────────────
   const boolean = (name) => {
-    const f = field(name);
-    f._add(v => typeof v === "boolean" ? null : `'${name}' must be boolean`);
-    return { ...f, optional() { f._optional = true; return this; }, _run: f._run };
+    let _optional = false;
+    const self = {
+      optional() { _optional = true; return self; },
+      _run(val) {
+        if (val === undefined || val === null) return _optional ? null : `'${name}' is required`;
+        return typeof val === "boolean" ? null : `'${name}' must be boolean`;
+      },
+    };
+    return self;
   };
 
-  // Schema builder
+  // ── Object schema ───────────────────────────────────────────────
   function object(shape) {
     return {
       parse(data) {
@@ -189,7 +199,7 @@ const z = (() => {
           else if (data[key] !== undefined && data[key] !== null) out[key] = data[key];
         }
         if (errors.length) return { ok:false, error:errors[0], errors, data:null };
-        return { ok:true, error:null, errors:[], data:{ ...data, ...out } }; // merge unknown fields
+        return { ok:true, error:null, errors:[], data:{ ...data, ...out } };
       },
     };
   }
