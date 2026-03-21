@@ -401,7 +401,6 @@ const BRANCH_ADMIN_DEFAULT_PERMS = {
   pos: true, tables: true, menu: true, orders: true, report: true, finance: true,
   inventory: true, users: true, branches: false, theme: false, backup: false,
 };
-};
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
 const MILK = ["គ្មានទឹកដោះ", "ទឹកដោះគោ", "ទឹកសណ្ដែក", "Oat", "មិនថែមអ្វីទេ"];
