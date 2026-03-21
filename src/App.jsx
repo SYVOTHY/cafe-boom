@@ -74,9 +74,9 @@ const parseKhNum = (s) => {
   return parseFloat(str);
 };
 
-// ── Telegram Notification ─────────────────────────────────────────
-const TG_TOKEN   = "8503740689:AAEN1Hk9HEbMNWjsArqjzZb_WgTHo55-ZkU";
-const TG_CHAT_ID = "-5197630379";
+// ── Telegram — all sending happens on the server (/api/checkout, /api/shift-summary)
+// TG_BOT_TOKEN and TG_CHAT_ID are stored in Railway .env — never exposed to client
+// Client only calls server endpoints; server sends to Telegram securely
 
 // Helper: resolve branch name from branches list or fallback
 function getBranchDisplayName(branchId, branches) {
@@ -110,90 +110,29 @@ function getUserBranchBadge(user, branches) {
 // ── Shift Summary Telegram ────────────────────────────────────────
 // Shifts: Morning 05:00–13:00 | Afternoon 12:00–19:00
 const SHIFTS = [
-  { id:"morning",   label:"ព្រឹក",   icon:"🌅", start:5,  end:13 },
-  { id:"afternoon", label:"រសៀល",   icon:"☀️",  start:12, end:19 },
+  { id:"morning",   label:"ព្រឹក",  icon:"🌅", start:5,  end:13 },
+  { id:"afternoon", label:"រសៀល",  icon:"☀️",  start:12, end:19 },
 ];
 
-// Build & send shift summary for ALL branches
-async function sendShiftSummary(shiftId, allOrdersData, branchListData) {
-  const shift = SHIFTS.find(s => s.id === shiftId) || SHIFTS[0];
-  const today = new Date().toISOString().slice(0, 10);
-  const now   = new Date().toLocaleString("km-KH");
-
-  // Filter orders: today + within shift hours
-  const shiftOrders = (allOrdersData || []).filter(o => {
-    try {
-      const d = new Date(o.order_id);
-      const dateOk  = d.toISOString().slice(0, 10) === today;
-      const hourOk  = d.getHours() >= shift.start && d.getHours() < shift.end;
-      return dateOk && hourOk;
-    } catch { return false; }
+// ── Shift summary — calls backend (/api/shift-summary) ────────────
+// Backend reads all branches + sends Telegram with TG_BOT_TOKEN from .env
+async function sendShiftSummary(shiftId) {
+  const r = await apiCall("/api/shift-summary", {
+    method: "POST",
+    body: JSON.stringify({ shiftId }),
   });
-
-  // Group by branch
-  const byBranch = {};
-  shiftOrders.forEach(o => {
-    const bid = o.branch_id || "unknown";
-    if (!byBranch[bid]) byBranch[bid] = { orders:[], revenue:0, items:0 };
-    byBranch[bid].orders.push(o);
-    byBranch[bid].revenue += (Number(o.total||0) + Number(o.tax||0));
-    byBranch[bid].items   += (o.items||[]).reduce((s,i)=>s+(i.qty||1),0);
-  });
-
-  // Group by cashier
-  const byCashier = {};
-  shiftOrders.forEach(o => {
-    const name = o.cashier || "unknown";
-    if (!byCashier[name]) byCashier[name] = { orders:0, revenue:0, items:0 };
-    byCashier[name].orders++;
-    byCashier[name].revenue += (Number(o.total||0) + Number(o.tax||0));
-    byCashier[name].items   += (o.items||[]).reduce((s,i)=>s+(i.qty||1),0);
-  });
-
-  const totalRev   = shiftOrders.reduce((s,o)=>s+Number(o.total||0)+Number(o.tax||0),0);
-  const totalItems = shiftOrders.reduce((s,o)=>s+(o.items||[]).reduce((ss,i)=>ss+(i.qty||1),0),0);
-
-  // Build branch lines
-  const branchLines = Object.entries(byBranch).map(([bid, bd]) => {
-    const bName = (branchListData||[]).find(b=>b.branch_id===bid)?.branch_name
-      || localStorage.getItem("cb_bn_"+bid) || bid;
-    return `  🏪 ${bName}: <b>$${bd.revenue.toFixed(2)}</b> · ${bd.orders.length} Orders · ${bd.items} មុខ`;
-  }).join("\n");
-
-  // Build cashier lines
-  const cashierLines = Object.entries(byCashier)
-    .sort((a,b)=>b[1].revenue-a[1].revenue)
-    .map(([name,d])=>`  👤 ${name}: <b>$${d.revenue.toFixed(2)}</b> · ${d.orders} Orders`)
-    .join("\n");
-
-  const text = [
-    `${shift.icon} <b>Cafe Bloom — ប្តូរវេន${shift.label}!</b>`,
-    `⏰ <b>វេន:</b> ${shift.start}:00 → ${shift.end}:00`,
-    `📅 <b>ថ្ងៃ:</b> ${today}  |  🕐 ${now}`,
-    ``,
-    `📊 <b>សង្ខេប:</b>`,
-    `  💰 ចំណូលសរុប: <b>$${totalRev.toFixed(2)}</b>`,
-    `  🛒 Orders: <b>${shiftOrders.length}</b>`,
-    `  🍽️ មុខ: <b>${totalItems}</b>`,
-    ``,
-    ...(branchLines ? [`🏪 <b>តាម​សាខា:</b>`, branchLines, ``] : []),
-    ...(cashierLines ? [`👥 <b>តាម​បុគ្គលិក:</b>`, cashierLines] : []),
-    `─────────────────`,
-    `✅ <b>ប្តូរវេនរួចរាល់!</b>`,
-  ].join("\n");
-
-  await tgSend(text);
+  if (!r.ok) {
+    const d = await r.json().catch(()=>({}));
+    throw new Error(d.error || "Shift summary failed");
+  }
 }
 
-// Track last sent shift to avoid duplicate sends
+// Auto-scheduler — calls backend at shift end times
 const _shiftSent = {};
-
-// Auto-check every minute if it's time to send shift summary
-function startShiftScheduler(getOrders, getBranchList) {
+function startShiftScheduler() {
   return setInterval(() => {
     const now = new Date();
     const hm  = now.getHours() * 60 + now.getMinutes();
-    // Send at exactly 13:00 (780) for morning shift and 19:00 (1140) for afternoon
     const triggers = [
       { hm: 13 * 60, shiftId: "morning"   },
       { hm: 19 * 60, shiftId: "afternoon" },
@@ -203,80 +142,13 @@ function startShiftScheduler(getOrders, getBranchList) {
       const key = today + "_" + t.shiftId;
       if (Math.abs(hm - t.hm) <= 1 && !_shiftSent[key]) {
         _shiftSent[key] = true;
-        console.log(`[ShiftSummary] Sending ${t.shiftId} summary at ${now.toLocaleTimeString()}`);
-        sendShiftSummary(t.shiftId, getOrders(), getBranchList()).catch(e=>console.error("[ShiftSummary]",e));
+        console.log(`[ShiftScheduler] Calling /api/shift-summary: ${t.shiftId}`);
+        sendShiftSummary(t.shiftId).catch(e => console.error("[ShiftScheduler]", e.message));
       }
     }
-  }, 30 * 1000); // check every 30 seconds
+  }, 30 * 1000);
 }
 
-async function tgSend(text) {
-  try {
-    const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: "HTML" }),
-    });
-    const result = await r.json().catch(() => ({}));
-    if (!r.ok) console.error("❌ Telegram:", result.description);
-    else       console.log("✅ Telegram OK");
-  } catch (e) { console.error("❌ Telegram:", e.message); }
-}
-
-async function sendTelegram(rec) {
-  const branch = localStorage.getItem("cb_current_branch_name") || rec.branch_id || "Cafe Bloom";
-  const method = rec.method === "cash" ? "💵 សាច់ប្រាក់"
-    : rec.method === "qr"   ? "📱 QR Code"
-    : "🏦 ធនាគារ";
-  const itemLines = (rec.items || [])
-    .map(i => `  • ${i.emoji || "☕"} ${i.product_name} ×${i.qty}  =  $${(i.price * i.qty).toFixed(2)}`)
-    .join("\n");
-  const text = [
-    `☕ <b>Cafe Bloom — ការទូទាត់ថ្មី!</b>`,
-    `🏪 <b>សាខា:</b> ${branch}`,
-    ``,
-    `🕐 <b>ម៉ោង:</b> ${rec.ts}`,
-    rec.table ? `🪑 <b>តុ:</b> ${rec.table}` : `🥡 Take Away`,
-    ``,
-    `📋 <b>មុខម្ហូប:</b>`,
-    itemLines,
-    ``,
-    `─────────────────`,
-    `💰 <b>សរុប:</b>  $${Number(rec.total).toFixed(2)}`,
-    `🏛 <b>VAT 10%:</b>  $${Number(rec.tax).toFixed(2)}`,
-    `✅ <b>សរុបរួម:</b>  <b>$${(Number(rec.total) + Number(rec.tax)).toFixed(2)}</b>`,
-    `💳 <b>វិធីទូទាត់:</b> ${method}`,
-  ].join("\n");
-  await tgSend(text);
-}
-
-// sendTelegramWithBranch — uses explicit branch name (from user's branch_id)
-async function sendTelegramWithBranch(rec, branchName) {
-  const branch = branchName || localStorage.getItem("cb_current_branch_name") || rec.branch_id || "Cafe Bloom";
-  const method = rec.method === "cash" ? "💵 សាច់ប្រាក់"
-    : rec.method === "qr"   ? "📱 QR Code"
-    : "🏦 ធនាគារ";
-  const itemLines = (rec.items || [])
-    .map(i => `  • ${i.emoji || "☕"} ${i.product_name} ×${i.qty}  =  $${(i.price * i.qty).toFixed(2)}`)
-    .join("\n");
-  const text = [
-    `☕ <b>Cafe Bloom — ការទូទាត់ថ្មី!</b>`,
-    `🏪 <b>សាខា:</b> ${branch}`,
-    ``,
-    `🕐 <b>ម៉ោង:</b> ${rec.ts}`,
-    rec.table ? `🪑 <b>តុ:</b> ${rec.table}` : `🥡 Take Away`,
-    ``,
-    `📋 <b>មុខម្ហូប:</b>`,
-    itemLines,
-    ``,
-    `─────────────────`,
-    `💰 <b>សរុប:</b>  $${Number(rec.total).toFixed(2)}`,
-    `🏛 <b>VAT 10%:</b>  $${Number(rec.tax).toFixed(2)}`,
-    `✅ <b>សរុបរួម:</b>  <b>$${(Number(rec.total) + Number(rec.tax)).toFixed(2)}</b>`,
-    `💳 <b>វិធីទូទាត់:</b> ${method}`,
-  ].join("\n");
-  await tgSend(text);
-}
 
 // API alias for compatibility with old page components
 const API = CLOUD_URL;
@@ -288,9 +160,61 @@ const DEFAULT_THEME = {
   textMain: "#EDE8E1", textDim: "#666666", borderCol: "#1E1B1F",
 };
 
-// ── API helpers ───────────────────────────────────────────────────
+// ── Token storage helpers ─────────────────────────────────────────
+const TokenStore = {
+  getAccess:   ()    => localStorage.getItem("pos_token"),
+  getRefresh:  ()    => localStorage.getItem("pos_refresh_token"),
+  getExpiry:   ()    => parseInt(localStorage.getItem("pos_token_exp") || "0"),
+  setTokens:   (t, r, expiresIn) => {
+    localStorage.setItem("pos_token", t);
+    if (r) localStorage.setItem("pos_refresh_token", r);
+    if (expiresIn) localStorage.setItem("pos_token_exp", String(Date.now() + expiresIn - 60000)); // 1min buffer
+  },
+  clear: () => {
+    localStorage.removeItem("pos_token");
+    localStorage.removeItem("pos_refresh_token");
+    localStorage.removeItem("pos_token_exp");
+  },
+};
+
+// In-flight refresh promise to prevent duplicate refreshes
+let _refreshPromise = null;
+
+async function refreshAccessToken() {
+  const refreshToken = TokenStore.getRefresh();
+  if (!refreshToken) return false;
+  try {
+    const r = await fetch(CLOUD_URL + "/api/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "ngrok-skip-browser-warning": "true" },
+      body: JSON.stringify({ refreshToken }),
+    });
+    if (!r.ok) { TokenStore.clear(); return false; }
+    const d = await r.json();
+    if (d.token) {
+      TokenStore.setTokens(d.token, d.refreshToken, d.tokenExpiresIn);
+      console.log("[Auth] Token refreshed ✅");
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.warn("[Auth] Refresh failed:", e.message);
+    return false;
+  }
+}
+
+// ── API call with auto-refresh ─────────────────────────────────────
 async function apiCall(path, opts = {}) {
-  const token = localStorage.getItem("pos_token");
+  // Auto-refresh if token is expiring within 1 minute
+  const expiry = TokenStore.getExpiry();
+  if (expiry > 0 && Date.now() > expiry) {
+    if (!_refreshPromise) {
+      _refreshPromise = refreshAccessToken().finally(() => { _refreshPromise = null; });
+    }
+    await _refreshPromise;
+  }
+
+  const token = TokenStore.getAccess();
   const r = await fetch(CLOUD_URL + path, {
     ...opts,
     headers: {
@@ -300,6 +224,26 @@ async function apiCall(path, opts = {}) {
       ...(opts.headers || {}),
     },
   });
+
+  // If 401 → try one token refresh then retry once
+  if (r.status === 401 && path !== "/api/login" && path !== "/api/refresh") {
+    if (!_refreshPromise) {
+      _refreshPromise = refreshAccessToken().finally(() => { _refreshPromise = null; });
+    }
+    const refreshed = await _refreshPromise;
+    if (refreshed) {
+      const newToken = TokenStore.getAccess();
+      return fetch(CLOUD_URL + path, {
+        ...opts,
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+          ...(newToken ? { Authorization: "Bearer " + newToken } : {}),
+          ...(opts.headers || {}),
+        },
+      });
+    }
+  }
   return r;
 }
 
@@ -700,7 +644,7 @@ function CafeBloom() {
 
   // ── Auth check on mount ─────────────────────────────────────────
   useEffect(() => {
-    const token = localStorage.getItem("pos_token");
+    const token = TokenStore.getAccess();
     if (!token) { setAuthChecked(true); return; }
     apiCall("/api/me").then(r => r.ok ? r.json() : null)
       .then(u => { if (u?.user_id) setCurrentUser(u); })
@@ -717,7 +661,8 @@ function CafeBloom() {
       });
       const d = await r.json();
       if (!r.ok) { setLoginError(d.error || "Login failed"); return; }
-      localStorage.setItem("pos_token", d.token);
+      // Store both access token + refresh token
+      TokenStore.setTokens(d.token, d.refreshToken, d.tokenExpiresIn);
       setCurrentUser(d.user);
       // Resolve branch name immediately after login
       if (d.user?.branch_id && d.user.branch_id !== "all") {
@@ -746,8 +691,12 @@ function CafeBloom() {
   }, []);
 
   const doLogout = useCallback(async () => {
-    await apiCall("/api/logout", { method: "POST" }).catch(() => {});
-    localStorage.removeItem("pos_token");
+    const refreshToken = TokenStore.getRefresh();
+    await apiCall("/api/logout", {
+      method: "POST",
+      body: JSON.stringify({ refreshToken }),
+    }).catch(() => {});
+    TokenStore.clear();
     setCurrentUser(null);
   }, []);
 
@@ -840,10 +789,7 @@ function CafeBloom() {
     if (!currentUser) return;
     const isGA = currentUser.role === "admin" && currentUser.branch_id === "all";
     if (!isGA) return;
-    const timer = startShiftScheduler(
-      () => shiftOrdersRef.current,
-      () => shiftBranchRef.current
-    );
+    const timer = startShiftScheduler();
     console.log("[ShiftScheduler] Started for global admin");
     return () => { clearInterval(timer); console.log("[ShiftScheduler] Stopped"); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1534,63 +1480,54 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
   const checkout = async () => {
     if (!cart.length || txRunning) return;
     setTxRunning(true);
-
-    let currentIngs = [...ings];
-    const logEntries = [];
     const ts = new Date().toLocaleString("km-KH");
-
-    for (const item of cart) {
-      const result = runTransaction(currentIngs, recipes, item.product_id, item.qty);
-      if (!result.success) {
-        notify(`❌ ${result.reason} ស្តុកមិនគ្រប់!`, "error");
+    try {
+      // ── Backend handles: stock check + deduction + order save + Telegram ──
+      const r = await apiCall("/api/checkout", {
+        method: "POST",
+        body: JSON.stringify({
+          items: cart.map(i => ({
+            product_id:   i.product_id,
+            product_name: i.product_name,
+            qty:          i.qty,
+            price:        i.price,
+            emoji:        i.emoji || "☕",
+            options:      i.options || [],
+            sugar:        i.sugar,
+            milk:         i.milk,
+          })),
+          method:   payMethod,
+          table:    selTable,
+          total:    cartTotal,
+          tax:      cartTax,
+          branchId: branchId,
+          cashier:  currentUser?.name || currentUser?.username || "unknown",
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        notify(`❌ ${d.error || "Checkout failed"}`, "error");
         setTxRunning(false);
         return;
       }
-      // Collect log entries
-      result.checks.forEach(c => {
-        logEntries.push({
-          log_id: Date.now() + c.ing.ingredient_id + Math.random(),
-          ts, product: item.product_name,
-          ingredient: c.ing?.ingredient_name,
-          before: fmtN(c.ing?.current_stock),
-          deducted: fmtN(c.need),
-          after: fmtN(c.ing?.current_stock - c.need),
-          unit: c.ing?.unit,
-        });
-      });
-      currentIngs = result.newIngredients;
+      // Server returned updated ingredients + order — sync local state
+      // (socket broadcast will also update other clients)
+      const rec = d.order;
+      if (d.newIngredients) setIngs(d.newIngredients.map(({ _ts, ...i }) => i));
+      if (d.logs?.length)   setLogs(p => [...d.logs, ...p]);
+      if (d.order) {
+        setOrders(p => [rec, ...p]);
+        setReceipt(rec);
+      }
+      if (selTable) setTables(p => p.map(t => t.table_id === selTable ? { ...t, status:"busy" } : t));
+      setCart([]);
+      setSelTable(null);
+      notify("✅ ការទូទាត់ជោគជ័យ!");
+    } catch (e) {
+      notify(`❌ ${e.message}`, "error");
+    } finally {
+      setTxRunning(false);
     }
-
-    // COMMIT
-    setIngs(currentIngs);
-    setLogs(p => [...logEntries, ...p]);
-
-    // Mark table busy
-    if (selTable) {
-      setTables(p => p.map(t => t.table_id === selTable ? { ...t, status: "busy" } : t));
-    }
-
-    const rec = {
-      order_id: Date.now(),
-      items: [...cart], table: selTable,
-      total: cartTotal, tax: cartTax,
-      method: payMethod, ts,
-      cashier: currentUser?.name || currentUser?.username || "unknown",
-      branch_id: branchId,
-    };
-    setOrders(p => [rec, ...p]);
-    setReceipt(rec);
-    setCart([]);
-    setSelTable(null);
-    setTxRunning(false);
-    notify("✅ ការទូទាត់ជោគជ័យ!");
-
-    // 📲 Send Telegram notification (await + log result)
-    // Use branch_id from currentUser for correct branch name in notification
-    resolveBranchName(branchId, branchList)
-      .then(bn => sendTelegramWithBranch(rec, bn))
-      .then(()=>console.log('[Telegram] sent'))
-      .catch(e=>console.error('[Telegram]',e.message));
   };
 
   return (
@@ -4372,17 +4309,21 @@ function ReportPage({ orders, ings, prods, recipes, lowStock, isAdmin, isGlobalA
           )}
         </div>
 
-        {/* Telegram buttons — manual shift summary */}
+        {/* Telegram buttons — manual shift summary (backend sends via TG_BOT_TOKEN in .env) */}
         <div style={{ marginTop: 20, display:"flex", gap:8, flexWrap:"wrap" }}>
           <button onClick={async () => {
-            await sendShiftSummary("morning", orders, branchList);
-            notify("✅ ផ្ញើ Summary វេនព្រឹក រួចហើយ!");
+            try {
+              await sendShiftSummary("morning");
+              notify("✅ ផ្ញើ Summary វេនព្រឹក រួចហើយ!");
+            } catch(e) { notify("❌ " + e.message, "error"); }
           }} style={{ ...btnGold, display:"flex", alignItems:"center", gap:8, fontSize:13 }}>
             🌅 ផ្ញើ Summary វេនព្រឹក (05:00–13:00)
           </button>
           <button onClick={async () => {
-            await sendShiftSummary("afternoon", orders, branchList);
-            notify("✅ ផ្ញើ Summary វេនរសៀល រួចហើយ!");
+            try {
+              await sendShiftSummary("afternoon");
+              notify("✅ ផ្ញើ Summary វេនរសៀល រួចហើយ!");
+            } catch(e) { notify("❌ " + e.message, "error"); }
           }} style={{ ...btnGold, display:"flex", alignItems:"center", gap:8, fontSize:13, background:"linear-gradient(135deg,#1A6A4A,#27AE60)" }}>
             ☀️ ផ្ញើ Summary វេនរសៀល (12:00–19:00)
           </button>
