@@ -1629,8 +1629,8 @@ async function handler(req, res) {
 
 
 
-  // ── DB BACKUP — pg_dump full PostgreSQL dump ─────────────────────
-  // GET /api/db-backup  → returns .sql dump file (Super Admin only)
+  // ── DB BACKUP — pure Node.js SQL export (no pg_dump needed) ────
+  // GET /api/db-backup  → .sql file with INSERT statements (Super Admin only)
   if (req.method === "GET" && url === "/api/db-backup") {
     const session = requireSuperAdmin(req, res);
     if (!session) return;
@@ -1640,154 +1640,193 @@ async function handler(req, res) {
     }
 
     try {
-      const { spawn } = await import("child_process");
       const ts       = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       const filename = `cafe-boom-backup-${ts}.sql`;
+      const lines    = [];
 
-      // Parse DATABASE_URL → pg_dump connection args
       const dbUrl  = new URL(DATABASE_URL);
-      const host   = dbUrl.hostname;
-      const port   = dbUrl.port   || "5432";
-      const user   = dbUrl.username;
       const dbName = dbUrl.pathname.slice(1);
-      const pass   = decodeURIComponent(dbUrl.password || "");
 
-      const pgEnv  = { ...process.env, PGPASSWORD: pass };
-      const pgArgs = [
-        "-h", host, "-p", port, "-U", user, "-d", dbName,
-        "--no-password",
-        "--format=plain",     // plain SQL
-        "--encoding=UTF8",
-        "--no-owner",
-        "--no-acl",
-        "--clean",            // DROP before CREATE (safer restore)
-        "--if-exists",        // avoid errors if tables don't exist on clean
-      ];
+      lines.push(`-- =====================================================`);
+      lines.push(`-- Cafe Boom POS — Full Database Backup`);
+      lines.push(`-- Created : ${new Date().toISOString()}`);
+      lines.push(`-- Database: ${dbName}`);
+      lines.push(`-- Server  : ${dbUrl.hostname}`);
+      lines.push(`-- Restore : Run this file against a PostgreSQL database`);
+      lines.push(`-- =====================================================`);
+      lines.push(``);
+      lines.push(`SET client_encoding = 'UTF8';`);
+      lines.push(`SET standard_conforming_strings = on;`);
+      lines.push(``);
 
-      logger.info("pg_dump started", { host, db: dbName, by: session.username });
+      // Helper: escape SQL string value
+      const esc = (v) => {
+        if (v === null || v === undefined) return "NULL";
+        if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
+        if (typeof v === "number") return String(v);
+        if (v instanceof Date)     return `'${v.toISOString()}'`;
+        // Escape string: double single-quotes
+        return `'${String(v).replace(/'/g, "''")}'`;
+      };
 
-      // Buffer ALL output before responding — so we can detect errors
-      const sqlChunks = [];
-      const errChunks = [];
-      let exitCode    = null;
+      // Helper: dump one table
+      const dumpTable = async (tableName, createSQL) => {
+        lines.push(`-- -------------------------------------------------`);
+        lines.push(`-- Table: ${tableName}`);
+        lines.push(`-- -------------------------------------------------`);
+        lines.push(createSQL);
+        lines.push(``);
 
-      await new Promise((resolve, reject) => {
-        const pg = spawn("pg_dump", pgArgs, { env: pgEnv });
+        const { rows } = await pool.query(`SELECT * FROM ${tableName} ORDER BY 1`);
+        if (rows.length === 0) {
+          lines.push(`-- (no rows)`);
+          lines.push(``);
+          return;
+        }
+        const cols = Object.keys(rows[0]);
+        for (const row of rows) {
+          const vals = cols.map(c => esc(row[c])).join(", ");
+          lines.push(`INSERT INTO ${tableName} (${cols.join(", ")}) VALUES (${vals}) ON CONFLICT DO NOTHING;`);
+        }
+        lines.push(``);
+        logger.info(`Dumped table`, { table: tableName, rows: rows.length });
+      };
 
-        pg.stdout.on("data", d => sqlChunks.push(d));
-        pg.stderr.on("data", d => errChunks.push(d));
+      // ── branches ──────────────────────────────────────────────────
+      await dumpTable("branches", `
+CREATE TABLE IF NOT EXISTS branches (
+  branch_id   TEXT PRIMARY KEY,
+  branch_name TEXT NOT NULL,
+  address     TEXT DEFAULT '',
+  active      BOOLEAN DEFAULT true
+);`);
 
-        pg.on("close", code => { exitCode = code; resolve(); });
-        pg.on("error", err => reject(err));
+      // ── shared_data ───────────────────────────────────────────────
+      await dumpTable("shared_data", `
+CREATE TABLE IF NOT EXISTS shared_data (
+  key   TEXT PRIMARY KEY,
+  value JSONB NOT NULL
+);`);
+
+      // ── branch_data ───────────────────────────────────────────────
+      await dumpTable("branch_data", `
+CREATE TABLE IF NOT EXISTS branch_data (
+  branch_id TEXT NOT NULL,
+  key       TEXT NOT NULL,
+  value     JSONB NOT NULL,
+  PRIMARY KEY (branch_id, key)
+);`);
+
+      // ── Summary ───────────────────────────────────────────────────
+      const { rows: branchRows }      = await pool.query("SELECT COUNT(*) c FROM branches");
+      const { rows: sharedRows }      = await pool.query("SELECT COUNT(*) c FROM shared_data");
+      const { rows: branchDataRows }  = await pool.query("SELECT COUNT(*) c FROM branch_data");
+
+      lines.push(`-- =====================================================`);
+      lines.push(`-- Summary`);
+      lines.push(`--   branches  : ${branchRows[0].c} rows`);
+      lines.push(`--   shared_data : ${sharedRows[0].c} rows`);
+      lines.push(`--   branch_data : ${branchDataRows[0].c} rows`);
+      lines.push(`-- =====================================================`);
+
+      const sql    = lines.join("\n");
+      const buffer = Buffer.from(sql, "utf8");
+
+      logger.info("Backup complete", {
+        file: filename, kb: (buffer.length / 1024).toFixed(1), by: session.username
       });
-
-      const sqlBuffer = Buffer.concat(sqlChunks);
-      const errText   = Buffer.concat(errChunks).toString("utf8");
-
-      logger.info("pg_dump finished", { code: exitCode, bytes: sqlBuffer.length, stderr: errText.slice(0, 200) });
-
-      if (exitCode !== 0 || sqlBuffer.length < 100) {
-        // pg_dump failed or produced empty output
-        logger.error("pg_dump failed", { code: exitCode, stderr: errText.slice(0, 500) });
-        send(res, 500, {
-          error: `pg_dump failed (exit ${exitCode})`,
-          detail: errText.slice(0, 500) || "Empty output — pg_dump may not be installed",
-          hint:  "Railway includes pg_dump. Check DATABASE_URL format and SSL.",
-        });
-        return;
-      }
-
-      // Add backup header comment
-      const header = Buffer.from(
-        `-- Cafe Boom POS — PostgreSQL Backup\n` +
-        `-- Created: ${new Date().toISOString()}\n` +
-        `-- Host: ${host}  DB: ${dbName}\n` +
-        `-- Size: ${(sqlBuffer.length / 1024).toFixed(1)} KB\n` +
-        `-- Restore: psql -h HOST -U USER -d DBNAME < this_file.sql\n\n`
-      );
-
-      const finalBuffer = Buffer.concat([header, sqlBuffer]);
 
       res.writeHead(200, {
         "Content-Type":        "application/octet-stream",
         "Content-Disposition": `attachment; filename="${filename}"`,
-        "Content-Length":      String(finalBuffer.length),
+        "Content-Length":      String(buffer.length),
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type,Authorization,ngrok-skip-browser-warning",
         "Cache-Control": "no-cache",
       });
-      res.end(finalBuffer);
-
-      logger.info("pg_dump sent", { file: filename, kb: (finalBuffer.length/1024).toFixed(1), by: session.username });
+      res.end(buffer);
       return;
 
     } catch (e) {
-      logger.error("Backup spawn error", { error: e.message });
-      send(res, 503, {
-        error: "pg_dump not available: " + e.message,
-        hint:  "Make sure postgresql-client is installed on the server",
-      }); return;
+      logger.error("Backup error", { error: e.message });
+      send(res, 500, { error: "Backup failed: " + e.message }); return;
     }
   }
 
-  // ── DB RESTORE — psql restore from .sql dump ──────────────────────
-  // POST /api/db-restore  → uploads .sql and pipes to psql (Super Admin only)
+  // ── DB RESTORE — pure Node.js SQL restore via pg Pool ────────────
+  // POST /api/db-restore  → parses .sql and executes via pool (Super Admin only)
   if (req.method === "POST" && url === "/api/db-restore") {
     const session = requireSuperAdmin(req, res);
     if (!session) return;
 
-    if (!DATABASE_URL) {
-      send(res, 503, { error: "DATABASE_URL not configured" }); return;
-    }
-
     try {
-      const { spawn } = await import("child_process");
+      // Read full SQL body
+      const sqlText = await new Promise((resolve, reject) => {
+        const chunks = [];
+        req.on("data", d => chunks.push(d));
+        req.on("end",  () => resolve(Buffer.concat(chunks).toString("utf8")));
+        req.on("error", reject);
+      });
 
-      const dbUrl = new URL(DATABASE_URL);
-      const pgEnv = {
-        ...process.env,
-        PGPASSWORD: decodeURIComponent(dbUrl.password || ""),
-      };
-      const psqlArgs = [
-        "-h", dbUrl.hostname,
-        "-p", dbUrl.port || "5432",
-        "-U", dbUrl.username,
-        "-d", dbUrl.pathname.slice(1),
-        "--no-password",
-        "-v", "ON_ERROR_STOP=1",   // stop on first error
-      ];
+      if (!sqlText || sqlText.trim().length < 50) {
+        send(res, 400, { error: "SQL file is empty or too small" }); return;
+      }
 
-      logger.info("psql restore started", { by: session.username });
+      logger.info("SQL restore started", { bytes: sqlText.length, by: session.username });
 
-      const ps = spawn("psql", psqlArgs, { env: pgEnv });
+      // Split SQL into individual statements (split on ";" at end of line)
+      // Skip comment lines and blank lines
+      const statements = sqlText
+        .split(/;[ \t]*\n/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && !s.startsWith("--") && !s.startsWith("SET ") && s !== "");
 
-      let stderr = "";
-      ps.stderr.on("data", d => { stderr += d.toString(); });
+      const client = await pool.connect();
+      let ok = 0, skipped = 0, errors = [];
 
-      // Pipe request body (SQL file) → psql stdin
-      req.pipe(ps.stdin);
-
-      ps.on("close", (code) => {
-        if (code !== 0) {
-          logger.error("psql restore failed", { code, stderr: stderr.slice(0, 500) });
-          send(res, 500, { error: "Restore failed (code " + code + ")", detail: stderr.slice(0, 300) });
-        } else {
-          logger.info("psql restore complete", { by: session.username });
-          send(res, 200, { ok: true, message: "Restore complete — reload the app" });
-          // Broadcast to all clients to reload
-          io.emit("shared_update", { table: "reload", data: {} });
+      try {
+        await client.query("BEGIN");
+        for (const stmt of statements) {
+          // Skip pure comment blocks
+          if (stmt.replace(/--[^\n]*/g, "").trim().length === 0) { skipped++; continue; }
+          try {
+            await client.query(stmt);
+            ok++;
+          } catch (e) {
+            // ON CONFLICT DO NOTHING errors are fine to skip
+            if (e.code === "23505") { skipped++; continue; } // duplicate key
+            errors.push({ stmt: stmt.slice(0, 80), error: e.message });
+            if (errors.length > 10) break; // stop on too many errors
+          }
         }
-      });
 
-      ps.on("error", (e) => {
-        logger.error("psql spawn error", { error: e.message });
-        send(res, 503, { error: "psql not available: " + e.message });
-      });
+        if (errors.length > 5) {
+          await client.query("ROLLBACK");
+          logger.error("Restore rollback — too many errors", { errors: errors.length });
+          send(res, 500, {
+            error: `Restore aborted — ${errors.length} errors`,
+            detail: errors.slice(0, 3).map(e => e.stmt + ": " + e.error).join(" | "),
+          }); return;
+        }
 
+        await client.query("COMMIT");
+        logger.info("SQL restore complete", { ok, skipped, errors: errors.length, by: session.username });
+
+        // Broadcast reload to all connected clients
+        io.emit("shared_update", { table: "reload", data: {} });
+
+        send(res, 200, {
+          ok: true,
+          message: `Restore complete — ${ok} statements, ${skipped} skipped, ${errors.length} errors`,
+          errors: errors.slice(0, 5),
+        });
+      } finally {
+        client.release();
+      }
       return;
     } catch (e) {
       logger.error("Restore error", { error: e.message });
-      send(res, 500, { error: e.message }); return;
+      send(res, 500, { error: "Restore failed: " + e.message }); return;
     }
   }
 
