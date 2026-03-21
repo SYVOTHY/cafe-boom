@@ -7227,12 +7227,22 @@ function BackupPage({ branchList, notify, setTheme }) {
       });
       if (!r.ok) {
         const d = await r.json().catch(() => ({}));
-        setProgress(p => [...p, `❌ ${d.error || "Backup failed (HTTP " + r.status + ")"}`]);
+        setProgress(p => [...p,
+          `❌ ${d.error || "Backup failed (HTTP " + r.status + ")"}`,
+          ...(d.detail ? [`   📋 Detail: ${d.detail.slice(0,200)}`] : []),
+          ...(d.hint   ? [`   💡 ${d.hint}`] : []),
+        ]);
         notify("❌ Backup failed", "error");
         return;
       }
-      // Stream blob → download
+      // Verify content type and size
+      const contentLength = r.headers.get("content-length");
       const blob = await r.blob();
+      if (blob.size < 100) {
+        setProgress(p => [...p, `❌ File ទទេ (${blob.size} bytes) — pg_dump ប្រហែលជាមិនដំណើរការ`]);
+        notify("❌ Backup file empty", "error");
+        return;
+      }
       const ts   = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       const filename = `cafe-boom-${ts}.sql`;
       const url  = URL.createObjectURL(blob);
