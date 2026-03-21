@@ -1630,7 +1630,7 @@ async function handler(req, res) {
 
 
   // ── DB BACKUP — pg_dump full PostgreSQL dump ─────────────────────
-  // GET /api/db-backup  → streams .sql dump file (Super Admin only)
+  // GET /api/db-backup  → returns .sql dump file (Super Admin only)
   if (req.method === "GET" && url === "/api/db-backup") {
     const session = requireSuperAdmin(req, res);
     if (!session) return;
@@ -1644,66 +1644,89 @@ async function handler(req, res) {
       const ts       = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
       const filename = `cafe-boom-backup-${ts}.sql`;
 
-      // Parse DATABASE_URL → pg_dump env vars
+      // Parse DATABASE_URL → pg_dump connection args
       const dbUrl  = new URL(DATABASE_URL);
-      const pgEnv  = {
-        ...process.env,
-        PGPASSWORD: decodeURIComponent(dbUrl.password || ""),
-      };
+      const host   = dbUrl.hostname;
+      const port   = dbUrl.port   || "5432";
+      const user   = dbUrl.username;
+      const dbName = dbUrl.pathname.slice(1);
+      const pass   = decodeURIComponent(dbUrl.password || "");
+
+      const pgEnv  = { ...process.env, PGPASSWORD: pass };
       const pgArgs = [
-        "-h", dbUrl.hostname,
-        "-p", dbUrl.port || "5432",
-        "-U", dbUrl.username,
-        "-d", dbUrl.pathname.slice(1),   // remove leading "/"
+        "-h", host, "-p", port, "-U", user, "-d", dbName,
         "--no-password",
-        "--verbose",
-        "--format=plain",                 // plain SQL — human readable + importable
+        "--format=plain",     // plain SQL
         "--encoding=UTF8",
-        "--no-owner",                     // skip ownership (works on any PG instance)
+        "--no-owner",
         "--no-acl",
+        "--clean",            // DROP before CREATE (safer restore)
+        "--if-exists",        // avoid errors if tables don't exist on clean
       ];
 
-      logger.info("pg_dump started", { by: session.username });
+      logger.info("pg_dump started", { host, db: dbName, by: session.username });
 
-      const pg = spawn("pg_dump", pgArgs, { env: pgEnv });
+      // Buffer ALL output before responding — so we can detect errors
+      const sqlChunks = [];
+      const errChunks = [];
+      let exitCode    = null;
 
-      // Stream directly to client
+      await new Promise((resolve, reject) => {
+        const pg = spawn("pg_dump", pgArgs, { env: pgEnv });
+
+        pg.stdout.on("data", d => sqlChunks.push(d));
+        pg.stderr.on("data", d => errChunks.push(d));
+
+        pg.on("close", code => { exitCode = code; resolve(); });
+        pg.on("error", err => reject(err));
+      });
+
+      const sqlBuffer = Buffer.concat(sqlChunks);
+      const errText   = Buffer.concat(errChunks).toString("utf8");
+
+      logger.info("pg_dump finished", { code: exitCode, bytes: sqlBuffer.length, stderr: errText.slice(0, 200) });
+
+      if (exitCode !== 0 || sqlBuffer.length < 100) {
+        // pg_dump failed or produced empty output
+        logger.error("pg_dump failed", { code: exitCode, stderr: errText.slice(0, 500) });
+        send(res, 500, {
+          error: `pg_dump failed (exit ${exitCode})`,
+          detail: errText.slice(0, 500) || "Empty output — pg_dump may not be installed",
+          hint:  "Railway includes pg_dump. Check DATABASE_URL format and SSL.",
+        });
+        return;
+      }
+
+      // Add backup header comment
+      const header = Buffer.from(
+        `-- Cafe Boom POS — PostgreSQL Backup\n` +
+        `-- Created: ${new Date().toISOString()}\n` +
+        `-- Host: ${host}  DB: ${dbName}\n` +
+        `-- Size: ${(sqlBuffer.length / 1024).toFixed(1)} KB\n` +
+        `-- Restore: psql -h HOST -U USER -d DBNAME < this_file.sql\n\n`
+      );
+
+      const finalBuffer = Buffer.concat([header, sqlBuffer]);
+
       res.writeHead(200, {
-        "Content-Type":        "application/sql",
+        "Content-Type":        "application/octet-stream",
         "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Length":      String(finalBuffer.length),
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type,Authorization,ngrok-skip-browser-warning",
         "Cache-Control": "no-cache",
       });
+      res.end(finalBuffer);
 
-      pg.stdout.pipe(res);
+      logger.info("pg_dump sent", { file: filename, kb: (finalBuffer.length/1024).toFixed(1), by: session.username });
+      return;
 
-      pg.stderr.on("data", d => logger.debug("pg_dump", { msg: d.toString().slice(0, 100) }));
-
-      pg.on("close", (code) => {
-        if (code !== 0) {
-          logger.error("pg_dump failed", { code });
-          // Response already started — can't send JSON, just end
-          if (!res.writableEnded) res.end();
-        } else {
-          logger.info("pg_dump complete", { file: filename, by: session.username });
-          if (!res.writableEnded) res.end();
-        }
-      });
-
-      pg.on("error", (e) => {
-        logger.error("pg_dump spawn error", { error: e.message });
-        if (!res.headersSent) {
-          send(res, 503, { error: "pg_dump not available: " + e.message });
-        } else {
-          if (!res.writableEnded) res.end();
-        }
-      });
-
-      return; // response handled by stream
     } catch (e) {
-      logger.error("Backup error", { error: e.message });
-      send(res, 500, { error: e.message }); return;
+      logger.error("Backup spawn error", { error: e.message });
+      send(res, 503, {
+        error: "pg_dump not available: " + e.message,
+        hint:  "Make sure postgresql-client is installed on the server",
+      }); return;
     }
   }
 
