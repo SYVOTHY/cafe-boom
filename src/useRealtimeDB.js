@@ -1,9 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════
-//  useRealtimeDB.js  —  React Hook
-//  FIX: handles async initSocket + graceful fallback if socket missing
+//  useRealtimeDB.js  —  React Hook  (with presence tracking)
 // ═══════════════════════════════════════════════════════════════════
 import { useState, useEffect, useRef, useCallback } from "react";
-import { initSocket, onBranchUpdate, onSharedUpdate, isConnected } from "./socket.js";
+import { initSocket, onBranchUpdate, onSharedUpdate, onPresenceUpdate, isConnected } from "./socket.js";
 
 const BRANCH_TABLES = new Set(["orders","logs","tables","ingredients","expenses","recipes"]);
 
@@ -16,22 +15,22 @@ function authHeaders() {
   };
 }
 
-export function useRealtimeDB(serverUrl, branchId) {
+export function useRealtimeDB(serverUrl, branchId, currentUser) {
   const [db,           setDb]          = useState(null);
   const [loading,      setLoading]     = useState(true);
   const [socketOnline, setSocketOnline] = useState(false);
-  const dbRef         = useRef(null);
-  const lastWriteRef  = useRef({});
+  const [onlineUsers,  setOnlineUsers] = useState([]); // presence list
+  const dbRef        = useRef(null);
+  const lastWriteRef = useRef({});
 
-  // ── Initial load from REST API ──────────────────────────────────
+  // ── Initial load ──────────────────────────────────────────────────
   const loadFull = useCallback(async () => {
-    setLoading(true);   // always show loading state during fetch
+    setLoading(true);
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 8000);
       const r = await fetch(`${serverUrl}/api/db?branch=${branchId}`, {
-        signal: controller.signal,
-        headers: authHeaders(),
+        signal: controller.signal, headers: authHeaders(),
       });
       clearTimeout(timer);
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -50,21 +49,16 @@ export function useRealtimeDB(serverUrl, branchId) {
     }
   }, [serverUrl, branchId]);
 
-  // ── Save a table via REST ───────────────────────────────────────
+  // ── Save a table via REST ─────────────────────────────────────────
   const saveTable = useCallback(async (table, data, retries = 3) => {
     const isShared = !BRANCH_TABLES.has(table);
     const url = `${serverUrl}/api/db/${table}${isShared ? "" : "?branch=" + branchId}`;
     lastWriteRef.current[table] = Date.now();
     dbRef.current = { ...dbRef.current, [table]: data };
     setDb(prev => ({ ...prev, [table]: data }));
-
     for (let i = 0; i < retries; i++) {
       try {
-        const r = await fetch(url, {
-          method: "POST",
-          headers: authHeaders(),
-          body: JSON.stringify(data),
-        });
+        const r = await fetch(url, { method:"POST", headers: authHeaders(), body: JSON.stringify(data) });
         if (r.ok) { console.log(`[RealtimeDB] Saved: ${table}`); return true; }
         if (r.status === 401) { console.error(`[RealtimeDB] Auth error: ${table}`); return false; }
       } catch (e) {
@@ -76,8 +70,7 @@ export function useRealtimeDB(serverUrl, branchId) {
     return false;
   }, [serverUrl, branchId]);
 
-  // ── Socket.io setup (async — won't crash if socket.io-client missing) ──
-  // Safety net: if loading is stuck after 12s, force it off
+  // Safety net: loading stuck → force off
   useEffect(() => {
     const t = setTimeout(() => {
       setLoading(prev => {
@@ -87,66 +80,57 @@ export function useRealtimeDB(serverUrl, branchId) {
     }, 12000);
     return () => clearTimeout(t);
   }, [serverUrl, branchId]);
+
+  // ── Socket setup ──────────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
-
-    // 1) Load initial data
     loadFull();
-
-    // 2) Connect socket (async — graceful fallback if unavailable)
     let sockRef = null;
 
     const setupSocket = async () => {
       try {
-        const sock = await initSocket(serverUrl, branchId);
-        if (!sock || !mounted) return;   // socket.io-client missing or unmounted
-
+        // Pass currentUser so socket can announce presence
+        const sock = await initSocket(serverUrl, branchId, currentUser);
+        if (!sock || !mounted) return;
         sockRef = sock;
 
-        const checkOnline = () => {
-          if (mounted) setSocketOnline(isConnected());
-        };
-
+        const checkOnline = () => { if (mounted) setSocketOnline(isConnected()); };
         sock.on("connect",    checkOnline);
         sock.on("disconnect", checkOnline);
         checkOnline();
 
-        // 3) Branch-specific updates
         const offBranch = onBranchUpdate(({ branch_id, table, data }) => {
           if (branch_id !== branchId) return;
-
           if (table === "ingredients" && Array.isArray(data) && data.length > 0 && data[0]._ts) {
-            const incomingTs = data[0]._ts;
+            const incomingTs  = data[0]._ts;
             const myLastWrite = lastWriteRef.current[table] || 0;
-            if (incomingTs < myLastWrite - 500) {
-              console.log(`[Socket] Ignoring stale ${table}`);
-              return;
-            }
+            if (incomingTs < myLastWrite - 500) { console.log(`[Socket] Ignoring stale ${table}`); return; }
           }
-
           console.log(`[Socket] Branch update: ${table} (${branch_id})`);
           const cleanData = (table === "ingredients" && Array.isArray(data))
-            ? data.map(({ _ts, ...rest }) => rest)
-            : data;
+            ? data.map(({ _ts, ...rest }) => rest) : data;
           dbRef.current = { ...dbRef.current, [table]: cleanData };
           if (mounted) setDb(prev => ({ ...prev, [table]: cleanData }));
         });
 
-        // 4) Shared data updates
         const offShared = onSharedUpdate(({ table, data }) => {
           console.log(`[Socket] Shared update: ${table}`);
           dbRef.current = { ...dbRef.current, [table]: data };
           if (mounted) setDb(prev => ({ ...prev, [table]: data }));
         });
 
-        // Store cleanup refs on sock object for useEffect cleanup
-        sock.__offBranch = offBranch;
-        sock.__offShared = offShared;
+        // Presence updates
+        const offPresence = onPresenceUpdate((list) => {
+          if (mounted) setOnlineUsers(Array.isArray(list) ? list : []);
+        });
+
+        sock.__offBranch   = offBranch;
+        sock.__offShared   = offShared;
+        sock.__offPresence = offPresence;
         sock.__checkOnline = checkOnline;
 
       } catch (e) {
         console.warn("[RealtimeDB] Socket setup error:", e.message);
-        // App still works via REST polling — just no real-time
       }
     };
 
@@ -157,11 +141,12 @@ export function useRealtimeDB(serverUrl, branchId) {
       if (sockRef) {
         sockRef.__offBranch?.();
         sockRef.__offShared?.();
+        sockRef.__offPresence?.();
         sockRef.off("connect",    sockRef.__checkOnline);
         sockRef.off("disconnect", sockRef.__checkOnline);
       }
     };
-  }, [serverUrl, branchId, loadFull]);
+  }, [serverUrl, branchId, loadFull, currentUser?.user_id]);
 
-  return { db, loading, socketOnline, saveTable, reload: loadFull };
+  return { db, loading, socketOnline, saveTable, reload: loadFull, onlineUsers };
 }
