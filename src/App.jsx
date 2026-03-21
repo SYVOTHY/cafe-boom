@@ -4414,7 +4414,7 @@ const CAT_COLORS = ["#E74C3C","#F39C12","#9B59B6","#5BA3E0","#27AE60","#7F8C8D",
 const CAT_EMOJIS = ["💰","⚡","🏛️","🏠","🧴","📦","🚗","💊","🍱","📱","🔧","💡","🎁","📋","🏦"];
 
 
-function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalAdmin, isBranchAdmin, branchId, branchList, currentUser }) {
+function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalAdmin, isBranchAdmin, branchId, branchList, currentUser, theme: shared, setTheme }) {
   const MON_KH = ["មករា","កុម្ភៈ","មីនា","មេសា","ឧសភា","មិថុនា","កក្កដា","សីហា","កញ្ញា","តុលា","វិច្ឆិកា","ធ្នូ"];
   const [selMonth,   setSelMonth]   = useState(() => new Date().toISOString().slice(0,7));
   const [finPeriod,  setFinPeriod]  = useState("month"); // "day" | "month" | "year"
@@ -4469,11 +4469,20 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     return allOrders.filter(o => o.branch_id === selBranch);
   })();
 
-  // Load expense_cats from array meta entry
+  // Load expense_cats — try multiple sources so all users see the same categories:
+  // 1) _meta in current branch's expenses array
+  // 2) theme.expenseCats (synced across all devices via shared DB)
+  // 3) DEFAULT_EXPENSE_CATS fallback
   const expCats = (() => {
-    if (!Array.isArray(expenses)) return DEFAULT_EXPENSE_CATS;
-    const meta = expenses.find(e => e && e._meta);
-    return (meta && meta._cats && meta._cats.length > 0) ? meta._cats : DEFAULT_EXPENSE_CATS;
+    if (Array.isArray(expenses)) {
+      const meta = expenses.find(e => e && e._meta);
+      if (meta && meta._cats && meta._cats.length > 0) return meta._cats;
+    }
+    // Fallback to theme (shared across all branches)
+    if (Array.isArray(shared?.theme?.expenseCats) && shared?.theme?.expenseCats.length > 0) {
+      return shared.theme.expenseCats;
+    }
+    return DEFAULT_EXPENSE_CATS;
   })();
 
   const monthOrders = sourceOrders.filter(o => {
@@ -4555,12 +4564,14 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
   }).filter(Boolean))].sort().reverse();
   if (!orderMonths.includes(selMonth)) orderMonths.unshift(selMonth);
 
-  // ── Save cats to meta ──────────────────────────────────────────────
+  // ── Save cats to meta + theme (shared) ───────────────────────────
   const saveCats = (newCats) => {
-    // Keep all monthly records, replace/add _meta entry
+    // Save to expenses _meta (branch-level)
     const monthRecs = Array.isArray(expenses) ? expenses.filter(e => e && !e._meta) : [];
     const meta = { _meta: true, _cats: newCats };
     setExpenses([...monthRecs, meta]);
+    // Also save to theme.expenseCats (shared — global admin can see)
+    if (setTheme) setTheme(prev => ({ ...prev, expenseCats: newCats }));
   };
 
   // Helper: get _cats from expenses array (same as expCats but callable)
