@@ -1418,7 +1418,10 @@ async function handler(req, res) {
 //  TELEGRAM HELPER  (server-side — token never exposed to client)
 // ═══════════════════════════════════════════════════════════════════
 async function tgSend(text) {
-  if (!TG_ENABLED) return;
+  if (!TG_ENABLED) {
+    logger.warn("Telegram skipped — TG_BOT_TOKEN/TG_CHAT_ID not set in Railway env vars");
+    return;
+  }
   try {
     const r = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
       method: "POST",
@@ -1427,7 +1430,9 @@ async function tgSend(text) {
     });
     const result = await r.json().catch(() => ({}));
     if (!r.ok) logger.warn("Telegram send failed", { reason: result.description });
+    else logger.info("Telegram sent ✅");
   } catch (e) { logger.error("Telegram error", { error: e.message }); }
+}
 }
 
 async function tgNotifyOrder(rec, branchName) {
