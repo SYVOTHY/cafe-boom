@@ -38,6 +38,12 @@ const DATABASE_URL   = process.env.DATABASE_URL;   // set by Railway PostgreSQL 
 // JWT secret — stable across restarts (use env var or derive from DB URL)
 const JWT_SECRET = process.env.JWT_SECRET || DATABASE_URL.slice(-32) || "cafe_bloom_secret_2025";
 
+// ── Telegram config (MUST be set in Railway environment variables) ─
+const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN || "";    // set in Railway env
+const TG_CHAT_ID   = process.env.TG_CHAT_ID   || "";    // set in Railway env
+const TG_ENABLED   = TG_BOT_TOKEN.length > 10 && TG_CHAT_ID.length > 3;
+if (!TG_ENABLED) console.warn("[Telegram] TG_BOT_TOKEN or TG_CHAT_ID not set — notifications disabled");
+
 if (!DATABASE_URL) {
   console.error("❌ DATABASE_URL មិនទាន់​កំណត់! បន្ថែម PostgreSQL plugin នៅ Railway។");
   process.exit(1);
@@ -389,7 +395,7 @@ function normalizeRows(rows) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  PASSWORD  (PBKDF2-SHA512)
+//  PASSWORD  (PBKDF2-SHA512, 100k iterations, timing-safe compare)
 // ═══════════════════════════════════════════════════════════════════
 function hashPassword(pw) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -398,58 +404,141 @@ function hashPassword(pw) {
 }
 
 function verifyPassword(pw, stored) {
-  if (!stored) return false;
-  if (!stored.startsWith("pbkdf2:")) return stored === pw;
+  if (!stored || typeof pw !== "string") return false;
+  if (!stored.startsWith("pbkdf2:")) {
+    // Legacy plain-text — constant-time compare to prevent timing attacks
+    try {
+      return crypto.timingSafeEqual(Buffer.from(stored), Buffer.from(pw));
+    } catch { return stored === pw; }
+  }
   const parts = stored.split(":");
   if (parts.length < 3) return false;
-  const salt = parts[1];
-  const hash = parts[2];
+  const [, salt, hash] = parts;
   if (!salt || !hash) return false;
   try {
     const check = crypto.pbkdf2Sync(pw, salt, 100000, 64, "sha512").toString("hex");
-    // Ensure both buffers are same length before timingSafeEqual
     if (check.length !== hash.length) return false;
     return crypto.timingSafeEqual(Buffer.from(check, "hex"), Buffer.from(hash, "hex"));
   } catch (e) {
-    console.error("[verifyPassword] Error:", e.message);
+    console.error("[verifyPassword]", e.message);
     return false;
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  SESSIONS — Stateless HMAC tokens (survive server restarts!)
-//  Format: base64url(payload_json) + "." + base64url(hmac_sha256)
+//  JWT  —  HS256 (standard 3-part: header.payload.signature)
+//  Survives server restarts, validated with HMAC-SHA256.
+//  Access token:  2h  (short-lived, sent on every request)
+//  Refresh token: 30d (long-lived, stored in client localStorage)
 // ═══════════════════════════════════════════════════════════════════
-function b64u(buf) { return Buffer.from(buf).toString("base64").replace(/\+/g,"-").replace(/\//g,"_").replace(/=/g,""); }
-function fromb64u(s) { return Buffer.from(s.replace(/-/g,"+").replace(/_/g,"/"), "base64"); }
+const JWT_ALG    = "HS256";
+const ACCESS_EXP = 2 * 3600 * 1000;        // 2 hours in ms
+const REFRESH_EXP = SESSION_HOURS * 3600 * 1000; // 30 days default
 
-function createSession(user) {
-  const payload = {
-    user_id:user.user_id, username:user.username,
-    role:user.role, name:user.name, branch_id:user.branch_id,
-    exp: Date.now() + SESSION_HOURS * 3600 * 1000
-  };
-  const data = b64u(JSON.stringify(payload));
-  const sig  = b64u(crypto.createHmac("sha256", JWT_SECRET).update(data).digest());
-  return data + "." + sig;
+// Token blacklist — revoked tokens (logout, password change)
+// In-memory; survives till server restart (acceptable for POS use case)
+const _revokedTokens = new Set();
+// Auto-clean expired entries every hour
+setInterval(() => {
+  const now = Date.now();
+  for (const t of _revokedTokens) {
+    try {
+      const payload = _jwtDecodePayload(t);
+      if (payload && payload.exp < now) _revokedTokens.delete(t);
+    } catch { _revokedTokens.delete(t); }
+  }
+}, 3600 * 1000);
+
+function _b64u(buf) {
+  return Buffer.from(buf).toString("base64")
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+function _fromb64u(s) {
+  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 }
 
-function getSession(req) {
-  const raw = (req.headers["authorization"]||"").replace("Bearer ","").trim();
-  if (!raw) return null;
-  const dot = raw.lastIndexOf(".");
-  if (dot < 0) return null;
-  const data = raw.slice(0, dot);
-  const sig  = raw.slice(dot + 1);
-  // Verify signature
-  const expected = b64u(crypto.createHmac("sha256", JWT_SECRET).update(data).digest());
-  if (sig !== expected) return null;
+function _jwtSign(payload) {
+  const header  = _b64u(JSON.stringify({ alg: JWT_ALG, typ: "JWT" }));
+  const body    = _b64u(JSON.stringify(payload));
+  const sig     = _b64u(crypto.createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest());
+  return `${header}.${body}.${sig}`;
+}
+
+function _jwtVerify(token) {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [header, body, sig] = parts;
+  const expected = _b64u(crypto.createHmac("sha256", JWT_SECRET).update(`${header}.${body}`).digest());
+  // Timing-safe compare
   try {
-    const payload = JSON.parse(fromb64u(data).toString());
-    if (payload.exp < Date.now()) return null; // expired
+    if (sig.length !== expected.length) return null;
+    const sigBuf = Buffer.from(sig);
+    const expBuf = Buffer.from(expected);
+    if (!crypto.timingSafeEqual(sigBuf, expBuf)) return null;
+  } catch { return null; }
+  try {
+    const payload = JSON.parse(_fromb64u(body).toString());
+    if (payload.exp && payload.exp < Date.now()) return null; // expired
     return payload;
   } catch { return null; }
 }
+
+function _jwtDecodePayload(token) {
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return null;
+    return JSON.parse(_fromb64u(parts[1]).toString());
+  } catch { return null; }
+}
+
+// ── Create access token (short-lived, 2h) ────────────────────────
+function createAccessToken(user) {
+  return _jwtSign({
+    jti:       crypto.randomBytes(8).toString("hex"), // unique token ID
+    iss:       "cafe-bloom-pos",
+    sub:       String(user.user_id),
+    user_id:   user.user_id,
+    username:  user.username,
+    role:      user.role,
+    name:      user.name,
+    branch_id: user.branch_id,
+    type:      "access",
+    iat:       Date.now(),
+    exp:       Date.now() + ACCESS_EXP,
+  });
+}
+
+// ── Create refresh token (long-lived, 30d) ────────────────────────
+function createRefreshToken(user) {
+  return _jwtSign({
+    jti:     crypto.randomBytes(8).toString("hex"),
+    sub:     String(user.user_id),
+    user_id: user.user_id,
+    type:    "refresh",
+    iat:     Date.now(),
+    exp:     Date.now() + REFRESH_EXP,
+  });
+}
+
+// ── Revoke a token (logout / password change) ─────────────────────
+function revokeToken(token) {
+  if (token) _revokedTokens.add(token);
+}
+
+// ── Parse & validate token from Authorization header ──────────────
+// Returns payload or null
+function getSession(req) {
+  const authHeader = (req.headers["authorization"] || "").trim();
+  if (!authHeader.startsWith("Bearer ")) return null;
+  const token = authHeader.slice(7).trim();
+  if (!token) return null;
+  if (_revokedTokens.has(token)) return null; // blacklisted
+  return _jwtVerify(token);
+}
+
+// ── Keep backward-compat alias ────────────────────────────────────
+const createSession = createAccessToken;
 
 // ═══════════════════════════════════════════════════════════════════
 //  HTTP + SOCKET.IO  SERVER
@@ -859,22 +948,51 @@ async function handler(req, res) {
       shared.users  = shared.users.map(u => u.user_id === user.user_id ? user : u);
       await saveSharedKey("users", shared.users);
     }
-    const token   = createSession(user);
+    const token        = createAccessToken(user);
+    const refreshToken = createRefreshToken(user);
     const safeUser = {
       user_id:user.user_id, username:user.username, role:user.role,
       name:user.name, branch_id:user.branch_id, active:user.active,
       permissions:user.permissions||{}, avatar:user.avatar||""
     };
     console.log(`[LOGIN] ${cleanUser} (${user.role}) from ${ip}`);
-    send(res, 200, { ok:true, token, user:safeUser });
+    send(res, 200, { ok:true, token, refreshToken, user:safeUser,
+      tokenExpiresIn: ACCESS_EXP, refreshExpiresIn: REFRESH_EXP });
     return;
   }
 
-  // ── LOGOUT ──────────────────────────────────────────────────────
+  // ── LOGOUT — revoke token in blacklist ────────────────────────────
   if (req.method === "POST" && url === "/api/logout") {
-    // JWT is stateless — client just discards the token
-    // Optionally add a token blacklist here for extra security
+    const authHeader = (req.headers["authorization"] || "").trim();
+    if (authHeader.startsWith("Bearer ")) revokeToken(authHeader.slice(7).trim());
+    try {
+      const body = await readBody(req);
+      if (body?.refreshToken) revokeToken(body.refreshToken);
+    } catch {}
+    console.log(`[LOGOUT] ${ip}`);
     send(res, 200, { ok:true });
+    return;
+  }
+
+  // ── REFRESH TOKEN — rotate to new access + refresh pair ──────────
+  if (req.method === "POST" && url === "/api/refresh") {
+    let body = {};
+    try { body = await readBody(req); } catch {}
+    const rt = body?.refreshToken;
+    if (!rt) { send(res, 400, { error:"refreshToken required" }); return; }
+    if (_revokedTokens.has(rt)) { send(res, 401, { error:"Token revoked — log in again" }); return; }
+    const payload = _jwtVerify(rt);
+    if (!payload || payload.type !== "refresh") {
+      send(res, 401, { error:"Invalid or expired refresh token" }); return;
+    }
+    const shared = await loadShared();
+    const user   = (shared.users||[]).find(u => u.user_id === payload.user_id && u.active);
+    if (!user) { send(res, 401, { error:"User not found or inactive" }); return; }
+    revokeToken(rt); // rotate — old refresh token is now invalid
+    const newToken   = createAccessToken(user);
+    const newRefresh = createRefreshToken(user);
+    console.log(`[REFRESH] user_id=${payload.user_id} from ${ip}`);
+    send(res, 200, { ok:true, token:newToken, refreshToken:newRefresh, tokenExpiresIn:ACCESS_EXP });
     return;
   }
 
@@ -894,8 +1012,14 @@ async function handler(req, res) {
     user.password  = hashPassword(newPassword);
     shared.users   = shared.users.map(u => u.user_id === user.user_id ? user : u);
     await saveSharedKey("users", shared.users);
+    // Revoke current token — user must re-login with new password
+    const authHeader = (req.headers["authorization"] || "").trim();
+    if (authHeader.startsWith("Bearer ")) revokeToken(authHeader.slice(7).trim());
+    // Issue new tokens immediately so client doesn't need to log in again
+    const newToken   = createAccessToken(user);
+    const newRefresh = createRefreshToken(user);
     console.log(`[PASSWORD] Changed: ${user.username} from ${ip}`);
-    send(res, 200, { ok:true });
+    send(res, 200, { ok:true, token:newToken, refreshToken:newRefresh });
     return;
   }
 
@@ -1138,6 +1262,220 @@ async function handler(req, res) {
       console.error("[PRINT ERROR]",e.message);
       send(res,500,{error:e.message}); return;
     }
+  }
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  TELEGRAM HELPER  (server-side — token never exposed to client)
+// ═══════════════════════════════════════════════════════════════════
+async function tgSend(text) {
+  if (!TG_ENABLED) return;
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: "HTML" }),
+    });
+    const result = await r.json().catch(() => ({}));
+    if (!r.ok) console.error("[Telegram]", result.description);
+  } catch (e) { console.error("[Telegram]", e.message); }
+}
+
+async function tgNotifyOrder(rec, branchName) {
+  const method = rec.method === "cash" ? "\u{1F4B5} \u179F\u17B6\u1785\u17CB\u1794\u17D2\u179A\u17B6\u1780"
+    : rec.method === "qr" ? "\u{1F4F1} QR Code" : "\u{1F3E6} \u178A\u1793\u17B6\u1782\u17B6\u179A";
+  const itemLines = (rec.items || [])
+    .map(i => `  \u2022 ${i.emoji || "\u2615"} ${i.product_name} \xd7${i.qty}  =  $${(i.price * i.qty).toFixed(2)}`)
+    .join("\n");
+  const text = [
+    `\u2615 <b>Cafe Bloom \u2014 \u1780\u17B6\u179A\u178F\u16B9\u178F\u17B6\u178F\u17CE\u1790\u17D2\u1798\u17B8!</b>`,
+    `\u{1FA96} <b>\u179F\u17B6\u1781\u17B6:</b> ${branchName}`,
+    ``,
+    `\u{1F550} <b>\u1798\u17D2\u17A2\u1784:</b> ${rec.ts}`,
+    rec.table ? `\u{1FA91} <b>\u178F\u17BB:</b> ${rec.table}` : `\u{1F961} Take Away`,
+    ``,
+    `\u{1F4CB} <b>\u1798\u17BB\u1781\u1798\u17D2\u17A0\u16B4\u1794:</b>`,
+    itemLines,
+    ``,
+    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
+    `\u{1F4B0} <b>\u179F\u179A\u17BB\u1794:</b>  $${Number(rec.total).toFixed(2)}`,
+    `\u{1F3DB} <b>VAT 10%:</b>  $${Number(rec.tax).toFixed(2)}`,
+    `\u2705 <b>\u179F\u179A\u17BB\u1794\u179A\u17BD\u1798:</b>  <b>$${(Number(rec.total) + Number(rec.tax)).toFixed(2)}</b>`,
+    `\u{1F4B3} <b>\u179C\u17B7\u1792\u17B9\u178F\u16B9\u178F\u17B6\u178F\u17CB:</b> ${method}`,
+  ].join("\n");
+  await tgSend(text);
+}
+
+async function tgNotifyShift(shiftId, orders, branchMap) {
+  const shifts = { morning: { label: "\u{1F305} \u1796\u17D2\u179A\u17B9\u1780", start:5, end:13 },
+                   afternoon: { label: "\u2600\uFE0F \u179A\u179F\u17B9\u1799", start:12, end:19 } };
+  const shift = shifts[shiftId] || shifts.morning;
+  const today = new Date().toISOString().slice(0,10);
+  const shiftOrders = (orders||[]).filter(o => {
+    try {
+      const d = new Date(o.order_id);
+      return d.toISOString().slice(0,10) === today && d.getHours() >= shift.start && d.getHours() < shift.end;
+    } catch { return false; }
+  });
+  const totalRev   = shiftOrders.reduce((s,o)=>s+Number(o.total||0)+Number(o.tax||0),0);
+  const totalItems = shiftOrders.reduce((s,o)=>s+(o.items||[]).reduce((ss,i)=>ss+(i.qty||1),0),0);
+  const byBranch = {};
+  shiftOrders.forEach(o => {
+    const bid = o.branch_id || "?";
+    if (!byBranch[bid]) byBranch[bid] = { rev:0, orders:0 };
+    byBranch[bid].rev    += Number(o.total||0) + Number(o.tax||0);
+    byBranch[bid].orders += 1;
+  });
+  const branchLines = Object.entries(byBranch).map(([bid, bd]) => {
+    const name = branchMap[bid] || bid;
+    return `  \u{1FA96} ${name}: <b>$${bd.rev.toFixed(2)}</b> \u00b7 ${bd.orders} Orders`;
+  }).join("\n");
+  const text = [
+    `${shift.label} <b>Cafe Bloom \u2014 \u1794\u17D2\u178F\u17BC\u179C\u17C1\u1793!</b>`,
+    `\u23F0 \u179C\u17C1\u1793: ${shift.start}:00 \u2192 ${shift.end}:00  \u00b7  ${today}`,
+    ``,
+    `\u{1F4CA} \u179F\u1784\u17D2\u1781\u17C1\u1794:  \u{1F4B0} $${totalRev.toFixed(2)}  \u00b7  \u{1F6D2} ${shiftOrders.length} Orders  \u00b7  \u{1F35D} ${totalItems} \u1798\u17BB\u1781`,
+    ...(branchLines ? [``, `\u{1FA96} \u178F\u17B6\u1798\u179F\u17B6\u1781\u17B6:`, branchLines] : []),
+    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
+    `\u2705 <b>\u1794\u17D2\u178F\u17BC\u179C\u17C1\u1793\u179A\u17BD\u1785\u179A\u17B6\u179B!</b>`,
+  ].join("\n");
+  await tgSend(text);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CHECKOUT ENDPOINT — atomic stock deduction on server
+//  POST /api/checkout
+//  Body: { items:[{product_id,qty,product_name,price,emoji}],
+//          method, table, branchId, cashier, total, tax }
+//  Returns: { ok, order, newIngredients, logs }
+// ═══════════════════════════════════════════════════════════════════
+  // ── CHECKOUT ─────────────────────────────────────────────────────
+  if (req.method === "POST" && url === "/api/checkout") {
+    const session = requireAuth(req, res);
+    if (!session) return;
+
+    const body = await readBody(req);
+    if (!validate(res, [
+      valArray(body.items, "items"),
+      valStr(body.method,   "method", { max:20 }),
+    ])) return;
+
+    const bid = sanitizeBranchId(body.branchId || session.branch_id || "branch_1");
+    // Verify branch access
+    const isSuper = session.role === "admin" && session.branch_id === "all";
+    if (!isSuper && session.branch_id !== bid) {
+      send(res, 403, { error:"Branch access denied" }); return;
+    }
+
+    const { items, method, table, cashier, total, tax } = body;
+
+    // ── Load current branch data ──────────────────────────────────
+    const bd      = await loadBranch(bid);
+    let   ings    = bd.ingredients || [];
+    const recipes = bd.recipes     || [];
+
+    // ── Validate + deduct stock atomically ───────────────────────
+    const logEntries  = [];
+    const ts          = new Date().toLocaleString("km-KH");
+
+    for (const item of items) {
+      const pid       = Number(item.product_id);
+      const qty       = Number(item.qty) || 1;
+      const prodRecipes = recipes.filter(r => Number(r.product_id) === pid);
+
+      // Check stock sufficiency
+      for (const r of prodRecipes) {
+        const ing  = ings.find(i => Number(i.ingredient_id) === Number(r.ingredient_id));
+        if (!ing) continue;
+        const need = Number(r.quantity_required) * qty;
+        if (Number(ing.current_stock) < need) {
+          send(res, 409, { error: `${ing.ingredient_name} \u179F\u17D2\u178F\u17BB\u1780\u1798\u17B7\u1793\u1782\u17D2\u179A\u1794!`, ingredient: ing.ingredient_name });
+          return;
+        }
+      }
+
+      // Deduct + collect logs
+      ings = ings.map(ing => {
+        const r = prodRecipes.find(r => Number(r.ingredient_id) === Number(ing.ingredient_id));
+        if (!r) return ing;
+        const need = Number(r.quantity_required) * qty;
+        logEntries.push({
+          log_id: Date.now() + "_" + ing.ingredient_id + "_" + Math.random().toString(36).slice(2,6),
+          ts, product: item.product_name,
+          ingredient: ing.ingredient_name,
+          before:   String(Number(ing.current_stock).toFixed(1)),
+          deducted: String(need.toFixed(1)),
+          after:    String((Number(ing.current_stock) - need).toFixed(1)),
+          unit:     ing.unit || "",
+          branch_id: bid,
+        });
+        return { ...ing, current_stock: Number(ing.current_stock) - need };
+      });
+    }
+
+    // ── Build order record ────────────────────────────────────────
+    const order_id = Date.now();
+    const rec = {
+      order_id,
+      items,
+      table: table || null,
+      total: Number(total) || 0,
+      tax:   Number(tax)   || 0,
+      method,
+      ts,
+      cashier: cashier || session.username,
+      branch_id: bid,
+    };
+
+    // ── Stamp ingredients with timestamp ─────────────────────────
+    const stamped = ings.map(i => ({ ...i, _ts: order_id }));
+
+    // ── Persist: ingredients + orders + logs ─────────────────────
+    const prevOrders = bd.orders || [];
+    const prevLogs   = bd.logs   || [];
+    const newOrders  = [rec, ...prevOrders];
+    const newLogs    = [...logEntries, ...prevLogs];
+
+    await saveBranchKey(bid, "ingredients", stamped);
+    await saveBranchKey(bid, "orders",      newOrders);
+    await saveBranchKey(bid, "logs",        newLogs);
+
+    // ── Broadcast via socket ──────────────────────────────────────
+    broadcastBranchUpdate(bid, "ingredients", stamped);
+    broadcastBranchUpdate(bid, "orders",      newOrders);
+    broadcastBranchUpdate(bid, "logs",        newLogs);
+
+    console.log(`[CHECKOUT] ${bid} | ${items.length} items | $${rec.total} | by ${session.username}`);
+
+    // ── Telegram notification (fire-and-forget) ────────────────
+    const branches   = await loadBranches();
+    const branchInfo = branches.find(b => b.branch_id === bid);
+    const branchName = branchInfo?.branch_name || bid;
+    tgNotifyOrder(rec, branchName).catch(() => {});
+
+    send(res, 200, { ok:true, order:rec, newIngredients:stamped, logs:logEntries });
+    return;
+  }
+
+  // ── SHIFT SUMMARY (Telegram) ──────────────────────────────────────
+  if (req.method === "POST" && url === "/api/shift-summary") {
+    const session = requireAdmin(req, res);
+    if (!session) return;
+    const body = await readBody(req);
+    const { shiftId } = body;
+    if (!shiftId) { send(res, 400, { error:"shiftId required" }); return; }
+    const branches = (await loadBranches()).filter(b => b.active);
+    const allOrds  = [];
+    const branchMap = {};
+    for (const b of branches) {
+      branchMap[b.branch_id] = b.branch_name;
+      const bd = await loadBranch(b.branch_id);
+      (bd.orders||[]).forEach(o => allOrds.push({ ...o, branch_id: b.branch_id }));
+    }
+    await tgNotifyShift(shiftId, allOrds, branchMap);
+    console.log(`[SHIFT] Summary sent: ${shiftId} by ${session.username}`);
+    send(res, 200, { ok:true });
+    return;
   }
 
   send(res, 404, { error:"Not found" });
