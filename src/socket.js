@@ -1,14 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════
-//  socket.js  —  Real-time client (Frontend)
-//  FIX: dynamic import + presence tracking (user online/offline)
+//  socket.js  —  Real-time client + presence tracking
 // ═══════════════════════════════════════════════════════════════════
 
 let socket        = null;
 let _io           = null;
 let _heartbeatInt = null;
+let _currentUser  = null;   // keep latest user ref for re-announce
 const listeners   = new Map();
 
-// ── Load socket.io-client dynamically ────────────────────────────
 async function getIo() {
   if (_io) return _io;
   try {
@@ -16,14 +15,31 @@ async function getIo() {
     _io = mod.io || mod.default;
     return _io;
   } catch (e) {
-    console.error("[Socket.io] ❌ socket.io-client not installed. Run: npm i socket.io-client");
+    console.error("[Socket.io] ❌ socket.io-client not installed.");
     return null;
   }
 }
 
+function emitPresence(user) {
+  if (!socket?.connected || !user?.user_id) return;
+  socket.emit("user_online", {
+    user_id:   user.user_id,
+    username:  user.username,
+    name:      user.name || user.username,
+    branch_id: user.branch_id || null,
+  });
+}
+
 // ── Connect to server ─────────────────────────────────────────────
 export async function initSocket(serverUrl, branchId, user) {
-  if (socket && socket.connected) return socket;
+  // Update current user ref every call (currentUser may change after first connect)
+  if (user?.user_id) _currentUser = user;
+
+  // If already connected, just (re)announce presence and return
+  if (socket && socket.connected) {
+    emitPresence(_currentUser);
+    return socket;
+  }
 
   const io = await getIo();
   if (!io) {
@@ -42,15 +58,7 @@ export async function initSocket(serverUrl, branchId, user) {
   socket.on("connect", () => {
     console.log("[Socket.io] ✅ Connected:", socket.id);
     socket.emit("join_branch", branchId);
-    // Announce presence
-    if (user) {
-      socket.emit("user_online", {
-        user_id:   user.user_id,
-        username:  user.username,
-        name:      user.name || user.username,
-        branch_id: user.branch_id || null,
-      });
-    }
+    emitPresence(_currentUser);
   });
 
   socket.on("disconnect", (reason) => {
@@ -64,10 +72,7 @@ export async function initSocket(serverUrl, branchId, user) {
   socket.on("reconnect", (attempt) => {
     console.log("[Socket.io] 🔄 Reconnected after", attempt, "attempts");
     socket.emit("join_branch", branchId);
-    if (user) socket.emit("user_online", {
-      user_id: user.user_id, username: user.username,
-      name: user.name || user.username, branch_id: user.branch_id || null,
-    });
+    emitPresence(_currentUser);
   });
 
   ["db_update", "branch_update", "shared_update", "presence_update"].forEach(event => {
@@ -77,18 +82,22 @@ export async function initSocket(serverUrl, branchId, user) {
     });
   });
 
-  // Heartbeat every 30s to keep presence alive
+  // Heartbeat every 30s
   if (_heartbeatInt) clearInterval(_heartbeatInt);
   _heartbeatInt = setInterval(() => {
-    if (socket?.connected && user) {
-      socket.emit("heartbeat", { user_id: user.user_id });
+    if (socket?.connected && _currentUser) {
+      socket.emit("heartbeat", { user_id: _currentUser.user_id });
     }
   }, 30000);
 
   return socket;
 }
 
-// ── Subscribe to events ───────────────────────────────────────────
+// ── Announce presence (call after login when user becomes known) ──
+export function announcePresence(user) {
+  if (user?.user_id) { _currentUser = user; emitPresence(user); }
+}
+
 export function onDbUpdate(cb)       { return _on("db_update",       cb); }
 export function onBranchUpdate(cb)   { return _on("branch_update",   cb); }
 export function onSharedUpdate(cb)   { return _on("shared_update",   cb); }
@@ -106,5 +115,6 @@ export function getSocket()    { return socket; }
 export function disconnectSocket() {
   if (_heartbeatInt) { clearInterval(_heartbeatInt); _heartbeatInt = null; }
   if (socket) { socket.disconnect(); socket = null; }
+  _currentUser = null;
   listeners.clear();
 }
