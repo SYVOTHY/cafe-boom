@@ -7464,7 +7464,7 @@ function BackupPage({ branchList, notify, setTheme }) {
         </div>
         {backupMode==="pgdump" && (
           <div style={{ fontSize:11,color:"#5BA3E0",background:"#0A1E3A",padding:"8px 12px",borderRadius:8,marginBottom:10,lineHeight:1.7 }}>
-            💡 pg_dump dump ទាំងអស់: users, branches, shared_data, branch_data<br/>
+            💡 SQL backup ទាំងអស់: users, branches, shared_data, branch_data<br/>
             ✅ File .sql — restore បានគ្រប់ PostgreSQL instance<br/>
             ✅ Include passwords (hashed), ទំនាក់ទំនង tables ទាំងអស់
           </div>
