@@ -466,6 +466,15 @@ const io = new Server(httpServer, {
   transports: ["websocket","polling"],
 });
 
+// ── Presence tracking — user online/offline ──────────────────────
+// Map: socket.id → { user_id, username, name, branch_id, joinedAt }
+const onlineUsers = new Map();
+
+function broadcastPresence() {
+  const list = Array.from(onlineUsers.values());
+  io.emit("presence_update", list);
+}
+
 io.on("connection", (socket) => {
   console.log(`[Socket] Client connected: ${socket.id}`);
 
@@ -476,7 +485,31 @@ io.on("connection", (socket) => {
     console.log(`[Socket] ${socket.id} joined branch:${bid}`);
   });
 
+  // ── Presence: user comes online ────────────────────────────────
+  socket.on("user_online", ({ user_id, username, name, branch_id }) => {
+    onlineUsers.set(socket.id, {
+      user_id, username, name: name || username,
+      branch_id: branch_id || null,
+      socket_id: socket.id,
+      since: Date.now(),
+    });
+    broadcastPresence();
+    console.log(`[Presence] + ${username} (${socket.id})`);
+  });
+
+  // ── Presence: heartbeat keeps user alive ──────────────────────
+  socket.on("heartbeat", ({ user_id }) => {
+    const u = onlineUsers.get(socket.id);
+    if (u) { u.since = Date.now(); onlineUsers.set(socket.id, u); }
+  });
+
   socket.on("disconnect", () => {
+    const u = onlineUsers.get(socket.id);
+    if (u) {
+      console.log(`[Presence] - ${u.username} (${socket.id})`);
+      onlineUsers.delete(socket.id);
+      broadcastPresence();
+    }
     console.log(`[Socket] Client disconnected: ${socket.id}`);
   });
 });
