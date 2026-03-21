@@ -961,6 +961,88 @@ function resolveBranch(req) {
   return "branch_1";
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+//  TELEGRAM HELPER  (server-side — token never exposed to client)
+// ═══════════════════════════════════════════════════════════════════
+async function tgSend(text) {
+  if (!TG_ENABLED) {
+    logger.warn("Telegram skipped — TG_BOT_TOKEN/TG_CHAT_ID not set in Railway env vars");
+    return;
+  }
+  try {
+    const r = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: "HTML" }),
+    });
+    const result = await r.json().catch(() => ({}));
+    if (!r.ok) logger.warn("Telegram send failed", { reason: result.description });
+    else logger.info("Telegram sent ✅");
+  } catch (e) { logger.error("Telegram error", { error: e.message }); }
+}
+
+async function tgNotifyOrder(rec, branchName) {
+  const method = rec.method === "cash" ? "\u{1F4B5} \u179F\u17B6\u1785\u17CB\u1794\u17D2\u179A\u17B6\u1780"
+    : rec.method === "qr" ? "\u{1F4F1} QR Code" : "\u{1F3E6} \u178A\u1793\u17B6\u1782\u17B6\u179A";
+  const itemLines = (rec.items || [])
+    .map(i => `  \u2022 ${i.emoji || "\u2615"} ${i.product_name} \xd7${i.qty}  =  $${(i.price * i.qty).toFixed(2)}`)
+    .join("\n");
+  const text = [
+    `\u2615 <b>Cafe Bloom \u2014 \u1780\u17B6\u179A\u178F\u16B9\u178F\u17B6\u178F\u17CE\u1790\u17D2\u1798\u17B8!</b>`,
+    `\u{1FA96} <b>\u179F\u17B6\u1781\u17B6:</b> ${branchName}`,
+    ``,
+    `\u{1F550} <b>\u1798\u17D2\u17A2\u1784:</b> ${rec.ts}`,
+    rec.table ? `\u{1FA91} <b>\u178F\u17BB:</b> ${rec.table}` : `\u{1F961} Take Away`,
+    ``,
+    `\u{1F4CB} <b>\u1798\u17BB\u1781\u1798\u17D2\u17A0\u16B4\u1794:</b>`,
+    itemLines,
+    ``,
+    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
+    `\u{1F4B0} <b>\u179F\u179A\u17BB\u1794:</b>  $${Number(rec.total).toFixed(2)}`,
+    `\u{1F3DB} <b>VAT 10%:</b>  $${Number(rec.tax).toFixed(2)}`,
+    `\u2705 <b>\u179F\u179A\u17BB\u1794\u179A\u17BD\u1798:</b>  <b>$${(Number(rec.total) + Number(rec.tax)).toFixed(2)}</b>`,
+    `\u{1F4B3} <b>\u179C\u17B7\u1792\u17B9\u178F\u16B9\u178F\u17B6\u178F\u17CB:</b> ${method}`,
+  ].join("\n");
+  await tgSend(text);
+}
+
+async function tgNotifyShift(shiftId, orders, branchMap) {
+  const shifts = { morning: { label: "\u{1F305} \u1796\u17D2\u179A\u17B9\u1780", start:5, end:13 },
+                   afternoon: { label: "\u2600\uFE0F \u179A\u179F\u17B9\u1799", start:12, end:19 } };
+  const shift = shifts[shiftId] || shifts.morning;
+  const today = new Date().toISOString().slice(0,10);
+  const shiftOrders = (orders||[]).filter(o => {
+    try {
+      const d = new Date(o.order_id);
+      return d.toISOString().slice(0,10) === today && d.getHours() >= shift.start && d.getHours() < shift.end;
+    } catch { return false; }
+  });
+  const totalRev   = shiftOrders.reduce((s,o)=>s+Number(o.total||0)+Number(o.tax||0),0);
+  const totalItems = shiftOrders.reduce((s,o)=>s+(o.items||[]).reduce((ss,i)=>ss+(i.qty||1),0),0);
+  const byBranch = {};
+  shiftOrders.forEach(o => {
+    const bid = o.branch_id || "?";
+    if (!byBranch[bid]) byBranch[bid] = { rev:0, orders:0 };
+    byBranch[bid].rev    += Number(o.total||0) + Number(o.tax||0);
+    byBranch[bid].orders += 1;
+  });
+  const branchLines = Object.entries(byBranch).map(([bid, bd]) => {
+    const name = branchMap[bid] || bid;
+    return `  \u{1FA96} ${name}: <b>$${bd.rev.toFixed(2)}</b> \u00b7 ${bd.orders} Orders`;
+  }).join("\n");
+  const text = [
+    `${shift.label} <b>Cafe Bloom \u2014 \u1794\u17D2\u178F\u17BC\u179C\u17C1\u1793!</b>`,
+    `\u23F0 \u179C\u17C1\u1793: ${shift.start}:00 \u2192 ${shift.end}:00  \u00b7  ${today}`,
+    ``,
+    `\u{1F4CA} \u179F\u1784\u17D2\u1781\u17C1\u1794:  \u{1F4B0} $${totalRev.toFixed(2)}  \u00b7  \u{1F6D2} ${shiftOrders.length} Orders  \u00b7  \u{1F35D} ${totalItems} \u1798\u17BB\u1781`,
+    ...(branchLines ? [``, `\u{1FA96} \u178F\u17B6\u1798\u179F\u17B6\u1781\u17B6:`, branchLines] : []),
+    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
+    `\u2705 <b>\u1794\u17D2\u178F\u17BC\u179C\u17C1\u1793\u179A\u17BD\u1785\u179A\u17B6\u179B!</b>`,
+  ].join("\n");
+  await tgSend(text);
+}
+
 async function handler(req, res) {
   const url = req.url.split("?")[0];
   const ip  = getIP(req);
@@ -1251,6 +1333,142 @@ async function handler(req, res) {
       send(res, 200, { ok:true }); return;
     }
 
+  // ═══════════════════════════════════════════════════════════════════
+//  CHECKOUT ENDPOINT — atomic stock deduction on server
+//  POST /api/checkout
+//  Body: { items:[{product_id,qty,product_name,price,emoji}],
+//          method, table, branchId, cashier, total, tax }
+//  Returns: { ok, order, newIngredients, logs }
+// ═══════════════════════════════════════════════════════════════════
+  // ── CHECKOUT ─────────────────────────────────────────────────────
+  if (req.method === "POST" && url === "/api/checkout") {
+    const session = requireAuth(req, res);
+    if (!session) return;
+
+    const body = await readBody(req);
+    const v = parseBody(res, Schemas.checkout, body);
+    if (!v.ok) return;
+
+    const bid = sanitizeBranchId(body.branchId || session.branch_id || "branch_1");
+    const isSuper = session.role === "admin" && session.branch_id === "all";
+    if (!isSuper && session.branch_id !== bid) {
+      send(res, 403, { error:"Branch access denied" }); return;
+    }
+
+    const { items, method, table, cashier, total, tax } = body;
+
+    // ── Load current branch data ──────────────────────────────────
+    const bd      = await loadBranch(bid);
+    let   ings    = bd.ingredients || [];
+    const recipes = bd.recipes     || [];
+
+    // ── Validate + deduct stock atomically ───────────────────────
+    const logEntries  = [];
+    const ts          = new Date().toLocaleString("km-KH");
+
+    for (const item of items) {
+      const pid       = Number(item.product_id);
+      const qty       = Number(item.qty) || 1;
+      const prodRecipes = recipes.filter(r => Number(r.product_id) === pid);
+
+      // Check stock sufficiency
+      for (const r of prodRecipes) {
+        const ing  = ings.find(i => Number(i.ingredient_id) === Number(r.ingredient_id));
+        if (!ing) continue;
+        const need = Number(r.quantity_required) * qty;
+        if (Number(ing.current_stock) < need) {
+          send(res, 409, { error: `${ing.ingredient_name} \u179F\u17D2\u178F\u17BB\u1780\u1798\u17B7\u1793\u1782\u17D2\u179A\u1794!`, ingredient: ing.ingredient_name });
+          return;
+        }
+      }
+
+      // Deduct + collect logs
+      ings = ings.map(ing => {
+        const r = prodRecipes.find(r => Number(r.ingredient_id) === Number(ing.ingredient_id));
+        if (!r) return ing;
+        const need = Number(r.quantity_required) * qty;
+        logEntries.push({
+          log_id: Date.now() + "_" + ing.ingredient_id + "_" + Math.random().toString(36).slice(2,6),
+          ts, product: item.product_name,
+          ingredient: ing.ingredient_name,
+          before:   String(Number(ing.current_stock).toFixed(1)),
+          deducted: String(need.toFixed(1)),
+          after:    String((Number(ing.current_stock) - need).toFixed(1)),
+          unit:     ing.unit || "",
+          branch_id: bid,
+        });
+        return { ...ing, current_stock: Number(ing.current_stock) - need };
+      });
+    }
+
+    // ── Build order record ────────────────────────────────────────
+    const order_id = Date.now();
+    const rec = {
+      order_id,
+      items,
+      table: table || null,
+      total: Number(total) || 0,
+      tax:   Number(tax)   || 0,
+      method,
+      ts,
+      cashier: cashier || session.username,
+      branch_id: bid,
+    };
+
+    // ── Stamp ingredients with timestamp ─────────────────────────
+    const stamped = ings.map(i => ({ ...i, _ts: order_id }));
+
+    // ── Persist: ingredients + orders + logs ─────────────────────
+    const prevOrders = bd.orders || [];
+    const prevLogs   = bd.logs   || [];
+    const newOrders  = [rec, ...prevOrders];
+    const newLogs    = [...logEntries, ...prevLogs];
+
+    await saveBranchKey(bid, "ingredients", stamped);
+    await saveBranchKey(bid, "orders",      newOrders);
+    await saveBranchKey(bid, "logs",        newLogs);
+
+    // ── Broadcast via socket ──────────────────────────────────────
+    broadcastBranchUpdate(bid, "ingredients", stamped);
+    broadcastBranchUpdate(bid, "orders",      newOrders);
+    broadcastBranchUpdate(bid, "logs",        newLogs);
+
+    logger.info('Checkout', { branch: bid, items: items.length, total: rec.total, user: session.username });
+
+    // ── Telegram notification (fire-and-forget) ────────────────
+    const branches   = await loadBranches();
+    const branchInfo = branches.find(b => b.branch_id === bid);
+    const branchName = branchInfo?.branch_name || bid;
+    tgNotifyOrder(rec, branchName).catch(() => {});
+
+    send(res, 200, { ok:true, order:rec, newIngredients:stamped, logs:logEntries });
+    return;
+  }
+
+  // ── SHIFT SUMMARY (Telegram) ──────────────────────────────────────
+  if (req.method === "POST" && url === "/api/shift-summary") {
+    const session = requireAdmin(req, res);
+    if (!session) return;
+    const body = await readBody(req);
+    const v = parseBody(res, Schemas.shiftSummary, body);
+    if (!v.ok) return;
+    const { shiftId } = v.data;
+    const branches = (await loadBranches()).filter(b => b.active);
+    const allOrds  = [];
+    const branchMap = {};
+    for (const b of branches) {
+      branchMap[b.branch_id] = b.branch_name;
+      const bd = await loadBranch(b.branch_id);
+      (bd.orders||[]).forEach(o => allOrds.push({ ...o, branch_id: b.branch_id }));
+    }
+    await tgNotifyShift(shiftId, allOrds, branchMap);
+    logger.info('Shift summary sent', { shiftId, by: session.username });
+    send(res, 200, { ok:true });
+    return;
+  }
+
+
+
     send(res, 404, { error:"Table not found: " + table }); return;
   }
 
@@ -1414,224 +1632,9 @@ async function handler(req, res) {
   }
 
 
-// ═══════════════════════════════════════════════════════════════════
-//  TELEGRAM HELPER  (server-side — token never exposed to client)
-// ═══════════════════════════════════════════════════════════════════
-async function tgSend(text) {
-  if (!TG_ENABLED) {
-    logger.warn("Telegram skipped — TG_BOT_TOKEN/TG_CHAT_ID not set in Railway env vars");
-    return;
-  }
-  try {
-    const r = await fetch(`https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: TG_CHAT_ID, text, parse_mode: "HTML" }),
-    });
-    const result = await r.json().catch(() => ({}));
-    if (!r.ok) logger.warn("Telegram send failed", { reason: result.description });
-    else logger.info("Telegram sent ✅");
-  } catch (e) { logger.error("Telegram error", { error: e.message }); }
-}
-}
-
-async function tgNotifyOrder(rec, branchName) {
-  const method = rec.method === "cash" ? "\u{1F4B5} \u179F\u17B6\u1785\u17CB\u1794\u17D2\u179A\u17B6\u1780"
-    : rec.method === "qr" ? "\u{1F4F1} QR Code" : "\u{1F3E6} \u178A\u1793\u17B6\u1782\u17B6\u179A";
-  const itemLines = (rec.items || [])
-    .map(i => `  \u2022 ${i.emoji || "\u2615"} ${i.product_name} \xd7${i.qty}  =  $${(i.price * i.qty).toFixed(2)}`)
-    .join("\n");
-  const text = [
-    `\u2615 <b>Cafe Bloom \u2014 \u1780\u17B6\u179A\u178F\u16B9\u178F\u17B6\u178F\u17CE\u1790\u17D2\u1798\u17B8!</b>`,
-    `\u{1FA96} <b>\u179F\u17B6\u1781\u17B6:</b> ${branchName}`,
-    ``,
-    `\u{1F550} <b>\u1798\u17D2\u17A2\u1784:</b> ${rec.ts}`,
-    rec.table ? `\u{1FA91} <b>\u178F\u17BB:</b> ${rec.table}` : `\u{1F961} Take Away`,
-    ``,
-    `\u{1F4CB} <b>\u1798\u17BB\u1781\u1798\u17D2\u17A0\u16B4\u1794:</b>`,
-    itemLines,
-    ``,
-    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-    `\u{1F4B0} <b>\u179F\u179A\u17BB\u1794:</b>  $${Number(rec.total).toFixed(2)}`,
-    `\u{1F3DB} <b>VAT 10%:</b>  $${Number(rec.tax).toFixed(2)}`,
-    `\u2705 <b>\u179F\u179A\u17BB\u1794\u179A\u17BD\u1798:</b>  <b>$${(Number(rec.total) + Number(rec.tax)).toFixed(2)}</b>`,
-    `\u{1F4B3} <b>\u179C\u17B7\u1792\u17B9\u178F\u16B9\u178F\u17B6\u178F\u17CB:</b> ${method}`,
-  ].join("\n");
-  await tgSend(text);
-}
-
-async function tgNotifyShift(shiftId, orders, branchMap) {
-  const shifts = { morning: { label: "\u{1F305} \u1796\u17D2\u179A\u17B9\u1780", start:5, end:13 },
-                   afternoon: { label: "\u2600\uFE0F \u179A\u179F\u17B9\u1799", start:12, end:19 } };
-  const shift = shifts[shiftId] || shifts.morning;
-  const today = new Date().toISOString().slice(0,10);
-  const shiftOrders = (orders||[]).filter(o => {
-    try {
-      const d = new Date(o.order_id);
-      return d.toISOString().slice(0,10) === today && d.getHours() >= shift.start && d.getHours() < shift.end;
-    } catch { return false; }
-  });
-  const totalRev   = shiftOrders.reduce((s,o)=>s+Number(o.total||0)+Number(o.tax||0),0);
-  const totalItems = shiftOrders.reduce((s,o)=>s+(o.items||[]).reduce((ss,i)=>ss+(i.qty||1),0),0);
-  const byBranch = {};
-  shiftOrders.forEach(o => {
-    const bid = o.branch_id || "?";
-    if (!byBranch[bid]) byBranch[bid] = { rev:0, orders:0 };
-    byBranch[bid].rev    += Number(o.total||0) + Number(o.tax||0);
-    byBranch[bid].orders += 1;
-  });
-  const branchLines = Object.entries(byBranch).map(([bid, bd]) => {
-    const name = branchMap[bid] || bid;
-    return `  \u{1FA96} ${name}: <b>$${bd.rev.toFixed(2)}</b> \u00b7 ${bd.orders} Orders`;
-  }).join("\n");
-  const text = [
-    `${shift.label} <b>Cafe Bloom \u2014 \u1794\u17D2\u178F\u17BC\u179C\u17C1\u1793!</b>`,
-    `\u23F0 \u179C\u17C1\u1793: ${shift.start}:00 \u2192 ${shift.end}:00  \u00b7  ${today}`,
-    ``,
-    `\u{1F4CA} \u179F\u1784\u17D2\u1781\u17C1\u1794:  \u{1F4B0} $${totalRev.toFixed(2)}  \u00b7  \u{1F6D2} ${shiftOrders.length} Orders  \u00b7  \u{1F35D} ${totalItems} \u1798\u17BB\u1781`,
-    ...(branchLines ? [``, `\u{1FA96} \u178F\u17B6\u1798\u179F\u17B6\u1781\u17B6:`, branchLines] : []),
-    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-    `\u2705 <b>\u1794\u17D2\u178F\u17BC\u179C\u17C1\u1793\u179A\u17BD\u1785\u179A\u17B6\u179B!</b>`,
-  ].join("\n");
-  await tgSend(text);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  CHECKOUT ENDPOINT — atomic stock deduction on server
-//  POST /api/checkout
-//  Body: { items:[{product_id,qty,product_name,price,emoji}],
-//          method, table, branchId, cashier, total, tax }
-//  Returns: { ok, order, newIngredients, logs }
-// ═══════════════════════════════════════════════════════════════════
-  // ── CHECKOUT ─────────────────────────────────────────────────────
-  if (req.method === "POST" && url === "/api/checkout") {
-    const session = requireAuth(req, res);
-    if (!session) return;
-
-    const body = await readBody(req);
-    const v = parseBody(res, Schemas.checkout, body);
-    if (!v.ok) return;
-
-    const bid = sanitizeBranchId(body.branchId || session.branch_id || "branch_1");
-    const isSuper = session.role === "admin" && session.branch_id === "all";
-    if (!isSuper && session.branch_id !== bid) {
-      send(res, 403, { error:"Branch access denied" }); return;
-    }
-
-    const { items, method, table, cashier, total, tax } = body;
-
-    // ── Load current branch data ──────────────────────────────────
-    const bd      = await loadBranch(bid);
-    let   ings    = bd.ingredients || [];
-    const recipes = bd.recipes     || [];
-
-    // ── Validate + deduct stock atomically ───────────────────────
-    const logEntries  = [];
-    const ts          = new Date().toLocaleString("km-KH");
-
-    for (const item of items) {
-      const pid       = Number(item.product_id);
-      const qty       = Number(item.qty) || 1;
-      const prodRecipes = recipes.filter(r => Number(r.product_id) === pid);
-
-      // Check stock sufficiency
-      for (const r of prodRecipes) {
-        const ing  = ings.find(i => Number(i.ingredient_id) === Number(r.ingredient_id));
-        if (!ing) continue;
-        const need = Number(r.quantity_required) * qty;
-        if (Number(ing.current_stock) < need) {
-          send(res, 409, { error: `${ing.ingredient_name} \u179F\u17D2\u178F\u17BB\u1780\u1798\u17B7\u1793\u1782\u17D2\u179A\u1794!`, ingredient: ing.ingredient_name });
-          return;
-        }
-      }
-
-      // Deduct + collect logs
-      ings = ings.map(ing => {
-        const r = prodRecipes.find(r => Number(r.ingredient_id) === Number(ing.ingredient_id));
-        if (!r) return ing;
-        const need = Number(r.quantity_required) * qty;
-        logEntries.push({
-          log_id: Date.now() + "_" + ing.ingredient_id + "_" + Math.random().toString(36).slice(2,6),
-          ts, product: item.product_name,
-          ingredient: ing.ingredient_name,
-          before:   String(Number(ing.current_stock).toFixed(1)),
-          deducted: String(need.toFixed(1)),
-          after:    String((Number(ing.current_stock) - need).toFixed(1)),
-          unit:     ing.unit || "",
-          branch_id: bid,
-        });
-        return { ...ing, current_stock: Number(ing.current_stock) - need };
-      });
-    }
-
-    // ── Build order record ────────────────────────────────────────
-    const order_id = Date.now();
-    const rec = {
-      order_id,
-      items,
-      table: table || null,
-      total: Number(total) || 0,
-      tax:   Number(tax)   || 0,
-      method,
-      ts,
-      cashier: cashier || session.username,
-      branch_id: bid,
-    };
-
-    // ── Stamp ingredients with timestamp ─────────────────────────
-    const stamped = ings.map(i => ({ ...i, _ts: order_id }));
-
-    // ── Persist: ingredients + orders + logs ─────────────────────
-    const prevOrders = bd.orders || [];
-    const prevLogs   = bd.logs   || [];
-    const newOrders  = [rec, ...prevOrders];
-    const newLogs    = [...logEntries, ...prevLogs];
-
-    await saveBranchKey(bid, "ingredients", stamped);
-    await saveBranchKey(bid, "orders",      newOrders);
-    await saveBranchKey(bid, "logs",        newLogs);
-
-    // ── Broadcast via socket ──────────────────────────────────────
-    broadcastBranchUpdate(bid, "ingredients", stamped);
-    broadcastBranchUpdate(bid, "orders",      newOrders);
-    broadcastBranchUpdate(bid, "logs",        newLogs);
-
-    logger.info('Checkout', { branch: bid, items: items.length, total: rec.total, user: session.username });
-
-    // ── Telegram notification (fire-and-forget) ────────────────
-    const branches   = await loadBranches();
-    const branchInfo = branches.find(b => b.branch_id === bid);
-    const branchName = branchInfo?.branch_name || bid;
-    tgNotifyOrder(rec, branchName).catch(() => {});
-
-    send(res, 200, { ok:true, order:rec, newIngredients:stamped, logs:logEntries });
-    return;
-  }
-
-  // ── SHIFT SUMMARY (Telegram) ──────────────────────────────────────
-  if (req.method === "POST" && url === "/api/shift-summary") {
-    const session = requireAdmin(req, res);
-    if (!session) return;
-    const body = await readBody(req);
-    const v = parseBody(res, Schemas.shiftSummary, body);
-    if (!v.ok) return;
-    const { shiftId } = v.data;
-    const branches = (await loadBranches()).filter(b => b.active);
-    const allOrds  = [];
-    const branchMap = {};
-    for (const b of branches) {
-      branchMap[b.branch_id] = b.branch_name;
-      const bd = await loadBranch(b.branch_id);
-      (bd.orders||[]).forEach(o => allOrds.push({ ...o, branch_id: b.branch_id }));
-    }
-    await tgNotifyShift(shiftId, allOrds, branchMap);
-    logger.info('Shift summary sent', { shiftId, by: session.username });
-    send(res, 200, { ok:true });
-    return;
-  }
 
   send(res, 404, { error:"Not found" });
-
+}
 
 // ═══════════════════════════════════════════════════════════════════
 //  START
