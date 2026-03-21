@@ -552,6 +552,155 @@ function send(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  AUTH MIDDLEWARE
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Rate limiting — simple in-memory per IP ──────────────────────
+const _rateLimits = new Map(); // ip → { count, resetAt }
+const RATE_WINDOW_MS  = 60 * 1000;  // 1 minute window
+const RATE_MAX_LOGIN  = 10;          // max login attempts per window
+const RATE_MAX_API    = 300;         // max general API calls per window
+
+function rateCheck(ip, bucket, max) {
+  const key = `${ip}:${bucket}`;
+  const now = Date.now();
+  let r = _rateLimits.get(key);
+  if (!r || now > r.resetAt) {
+    r = { count: 0, resetAt: now + RATE_WINDOW_MS };
+    _rateLimits.set(key, r);
+  }
+  r.count++;
+  if (r.count > max) return false; // blocked
+  return true;
+}
+
+// Clean rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of _rateLimits) { if (now > v.resetAt) _rateLimits.delete(k); }
+}, 5 * 60 * 1000);
+
+// ── Auth: require valid session ───────────────────────────────────
+function requireAuth(req, res) {
+  const session = getSession(req);
+  if (!session) {
+    send(res, 401, { error:"Authentication required — please log in again" });
+    return null;
+  }
+  return session;
+}
+
+// ── Auth: require admin role ──────────────────────────────────────
+function requireAdmin(req, res) {
+  const session = getSession(req);
+  if (!session)                     { send(res, 401, { error:"Authentication required" }); return null; }
+  if (session.role !== "admin")     { send(res, 403, { error:"Admin access required" });   return null; }
+  return session;
+}
+
+// ── Auth: require global (super) admin ───────────────────────────
+function requireSuperAdmin(req, res) {
+  const session = getSession(req);
+  if (!session)                         { send(res, 401, { error:"Authentication required" }); return null; }
+  if (session.role !== "admin")         { send(res, 403, { error:"Admin access required" });   return null; }
+  if (session.branch_id !== "all")      { send(res, 403, { error:"Super Admin access required" }); return null; }
+  return session;
+}
+
+// ── Auth: require access to a specific branch ─────────────────────
+// Super admin → always allowed
+// Branch admin/staff → only own branch
+function requireBranchAccess(req, res, bid) {
+  const session = getSession(req);
+  if (!session) { send(res, 401, { error:"Authentication required" }); return null; }
+  const isSuper = session.role === "admin" && session.branch_id === "all";
+  if (!isSuper && session.branch_id !== bid) {
+    send(res, 403, { error:`Access to branch '${bid}' denied` }); return null;
+  }
+  return session;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  VALIDATION HELPERS
+// ═══════════════════════════════════════════════════════════════════
+
+// Validate string field: non-empty, optional max length
+function valStr(val, name, { min=1, max=500, required=true } = {}) {
+  if (required && (val === undefined || val === null || String(val).trim() === "")) {
+    return `'${name}' is required`;
+  }
+  if (val !== undefined && val !== null) {
+    const s = String(val).trim();
+    if (s.length < min) return `'${name}' must be at least ${min} character(s)`;
+    if (s.length > max) return `'${name}' must be at most ${max} character(s)`;
+  }
+  return null;
+}
+
+// Validate number: must be a finite number, optional range
+function valNum(val, name, { min=-Infinity, max=Infinity, required=true } = {}) {
+  if (required && (val === undefined || val === null)) return `'${name}' is required`;
+  const n = Number(val);
+  if (isNaN(n) || !isFinite(n)) return `'${name}' must be a valid number`;
+  if (n < min) return `'${name}' must be ≥ ${min}`;
+  if (n > max) return `'${name}' must be ≤ ${max}`;
+  return null;
+}
+
+// Validate array is actually an array
+function valArray(val, name) {
+  if (!Array.isArray(val)) return `'${name}' must be an array`;
+  return null;
+}
+
+// Collect errors and send 400 if any
+function validate(res, checks) {
+  const errors = checks.filter(Boolean);
+  if (errors.length > 0) {
+    send(res, 400, { error: errors[0], errors });
+    return false;
+  }
+  return true;
+}
+
+// Sanitize branch_id: alphanumeric, underscores, dashes only
+function sanitizeBranchId(bid) {
+  if (!bid) return null;
+  return String(bid).replace(/[^a-zA-Z0-9_\-]/g, "").slice(0, 50);
+}
+
+// Sanitize username: alphanumeric, underscores only
+function sanitizeUsername(u) {
+  if (!u) return "";
+  return String(u).replace(/[^a-zA-Z0-9_\-\.@]/g, "").slice(0, 50).trim();
+}
+
+// Detect SQL injection / script injection patterns
+const INJECT_PATTERN = /(<script|<\/script|javascript:|on\w+\s*=|';\s*--|;\s*DROP\s+TABLE|UNION\s+SELECT)/i;
+function hasSQLInjection(str) {
+  return typeof str === "string" && INJECT_PATTERN.test(str);
+}
+
+// Deep scan object for injection attempts (skip large data arrays for performance)
+function scanForInjection(obj, depth = 0) {
+  if (depth > 4) return false;
+  if (typeof obj === "string") return hasSQLInjection(obj);
+  if (Array.isArray(obj)) {
+    // Only scan first 5 items for performance
+    return obj.slice(0, 5).some(v => scanForInjection(v, depth + 1));
+  }
+  if (obj && typeof obj === "object") {
+    return Object.values(obj).some(v => scanForInjection(v, depth + 1));
+  }
+  return false;
+}
+
+// IP extraction
+function getIP(req) {
+  return (req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+}
+
 function getBranch(req) {
   try { return new URL("http://x" + req.url).searchParams.get("branch") || null; }
   catch { return null; }
@@ -568,8 +717,15 @@ function resolveBranch(req) {
 
 async function handler(req, res) {
   const url = req.url.split("?")[0];
+  const ip  = getIP(req);
 
   if (req.method === "OPTIONS") { send(res, 200, {}); return; }
+
+  // ── Global rate limit ──────────────────────────────────────────
+  if (!rateCheck(ip, "api", RATE_MAX_API)) {
+    console.warn(`[RateLimit] ${ip} exceeded API limit`);
+    send(res, 429, { error:"Too many requests — please slow down" }); return;
+  }
 
   // ── Health ──────────────────────────────────────────────────────
   if (req.method === "GET" && url === "/api/ping") {
@@ -580,29 +736,31 @@ async function handler(req, res) {
 
   // ── Full DB for branch ──────────────────────────────────────────
   if (req.method === "GET" && url === "/api/db") {
-    const bid    = resolveBranch(req);   // uses session branch if no ?branch= param
+    const session = requireAuth(req, res);
+    if (!session) return;
+    const bid     = sanitizeBranchId(resolveBranch(req)) || "branch_1";
+    const isSuper = session.role === "admin" && session.branch_id === "all";
+    if (!isSuper && session.branch_id !== bid) { send(res, 403, { error:"Branch access denied" }); return; }
     const shared = await loadShared();
     const branch = await loadBranch(bid);
-    const safeShared = {
-      ...shared,
-      users: (shared.users||[]).map(({ password:_, ...u }) => u),
-    };
+    const safeShared = { ...shared, users: (shared.users||[]).map(({ password:_, ...u }) => u) };
     send(res, 200, { ...safeShared, ...branch, branch_id:bid });
     return;
   }
 
   // ── Branch list ─────────────────────────────────────────────────
   if (req.method === "GET" && url === "/api/branches") {
+    const session = requireAuth(req, res);
+    if (!session) return;
     send(res, 200, await loadBranches());
     return;
   }
 
   if (req.method === "POST" && url === "/api/branches") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin" || session.branch_id !== "all") {
-      send(res, 403, { error:"Super Admin only" }); return;
-    }
+    const session = requireSuperAdmin(req, res);
+    if (!session) return;
     const body = await readBody(req);
+    if (!validate(res, [valArray(body, "branches")])) return;
     await saveBranchList(body);
     io.emit("shared_update", { table:"branches", data:body });
     send(res, 200, { ok:true });
@@ -611,61 +769,59 @@ async function handler(req, res) {
 
   // ── ADD single branch (super admin) ──────────────────────────────
   if (req.method === "POST" && url === "/api/branch/add") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin" || session.branch_id !== "all") {
-      send(res, 403, { error:"Super Admin only" }); return;
-    }
-    const { branch_id, branch_name, address } = await readBody(req);
-    if (!branch_id || !branch_name) { send(res, 400, { error:"Missing branch_id or branch_name" }); return; }
-    // Check duplicate
+    const session = requireSuperAdmin(req, res);
+    if (!session) return;
+    const body = await readBody(req);
+    if (scanForInjection(body)) { send(res, 400, { error:"Invalid input" }); return; }
+    const { branch_id, branch_name, address } = body;
+    if (!validate(res, [
+      valStr(branch_id,   "branch_id",   { max:50 }),
+      valStr(branch_name, "branch_name", { max:100 }),
+    ])) return;
+    const cleanBid = sanitizeBranchId(branch_id);
+    if (!cleanBid) { send(res, 400, { error:"branch_id contains invalid characters" }); return; }
     const existing = await loadBranches();
-    if (existing.find(b => b.branch_id === branch_id)) {
-      send(res, 409, { error:"Branch ID already exists: " + branch_id }); return;
+    if (existing.find(b => b.branch_id === cleanBid)) {
+      send(res, 409, { error:"Branch ID already exists: " + cleanBid }); return;
     }
     await pool.query(
       "INSERT INTO branches(branch_id,branch_name,address,active) VALUES($1,$2,$3,true)",
-      [branch_id, branch_name, address||""]
+      [cleanBid, String(branch_name).trim().slice(0,100), String(address||"").slice(0,200)]
     );
-    // Initialize branch data (orders, tables, ingredients)
-    await loadBranch(branch_id); // this seeds defaults
+    await loadBranch(cleanBid);
     const updated = await loadBranches();
     io.emit("shared_update", { table:"branches", data:updated });
-    console.log(`[Branch] Added: ${branch_id} — ${branch_name}`);
+    console.log(`[Branch] Added: ${cleanBid} by ${session.username}`);
     send(res, 200, { ok:true, branches:updated });
     return;
   }
 
-  // ── DELETE branch (super admin, must be empty) ────────────────────
+  // ── DELETE branch (super admin) ───────────────────────────────────
   if (req.method === "POST" && url === "/api/branch/delete") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin" || session.branch_id !== "all") {
-      send(res, 403, { error:"Super Admin only" }); return;
-    }
+    const session = requireSuperAdmin(req, res);
+    if (!session) return;
     const { branch_id } = await readBody(req);
-    if (!branch_id || branch_id === "branch_1") {
+    const cleanBid = sanitizeBranchId(branch_id);
+    if (!cleanBid || cleanBid === "branch_1") {
       send(res, 400, { error:"Cannot delete branch_1 (default)" }); return;
     }
-    // Check if branch has orders
-    const bd = await loadBranch(branch_id);
+    const bd = await loadBranch(cleanBid);
     if ((bd.orders||[]).length > 0) {
       send(res, 409, { error:"Branch has orders — clear data first" }); return;
     }
-    await pool.query("DELETE FROM branches WHERE branch_id=$1", [branch_id]);
-    await pool.query("DELETE FROM branch_data WHERE branch_id=$1", [branch_id]);
+    await pool.query("DELETE FROM branches WHERE branch_id=$1",    [cleanBid]);
+    await pool.query("DELETE FROM branch_data WHERE branch_id=$1", [cleanBid]);
     const updated = await loadBranches();
     io.emit("shared_update", { table:"branches", data:updated });
-    console.log(`[Branch] Deleted: ${branch_id}`);
+    console.log(`[Branch] Deleted: ${cleanBid} by ${session.username}`);
     send(res, 200, { ok:true, branches:updated });
     return;
   }
 
-  // ── All orders (admin multi-branch report) — ADMIN ONLY ─────────
+  // ── All orders (admin) ───────────────────────────────────────────
   if (req.method === "GET" && url === "/api/all-orders") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin") {
-      send(res, 403, { error: "Admin only" });
-      return;
-    }
+    const session = requireAdmin(req, res);
+    if (!session) return;
     const branches = (await loadBranches()).filter(b => b.active);
     const all = [];
     for (const b of branches) {
@@ -679,29 +835,37 @@ async function handler(req, res) {
 
   // ── LOGIN ───────────────────────────────────────────────────────
   if (req.method === "POST" && url === "/api/login") {
-    const { username, password } = await readBody(req);
-    if (!username || !password) { send(res, 400, { error:"Missing credentials" }); return; }
-
+    // Strict rate limit on login (brute force protection)
+    if (!rateCheck(ip, "login", RATE_MAX_LOGIN)) {
+      console.warn(`[RateLimit] ${ip} exceeded login limit`);
+      send(res, 429, { error:"Too many login attempts — wait 1 minute" }); return;
+    }
+    const body = await readBody(req);
+    const { username, password } = body;
+    if (!validate(res, [
+      valStr(username, "username", { max:100 }),
+      valStr(password, "password", { max:200 }),
+    ])) return;
+    const cleanUser = sanitizeUsername(username);
     const shared = await loadShared();
-    const user   = (shared.users||[]).find(u => u.username === username.trim() && u.active);
-    if (!user)                         { send(res, 401, { error:"Invalid username or password" }); return; }
-    if (!verifyPassword(password, user.password)) { send(res, 401, { error:"Invalid username or password" }); return; }
-
+    const user   = (shared.users||[]).find(u => u.username === cleanUser && u.active);
+    if (!user || !verifyPassword(password, user.password)) {
+      console.warn(`[LOGIN FAIL] ${cleanUser} from ${ip}`);
+      send(res, 401, { error:"Invalid username or password" }); return;
+    }
     // Auto-migrate plain-text password
     if (!user.password.startsWith("pbkdf2:")) {
       user.password = hashPassword(password);
       shared.users  = shared.users.map(u => u.user_id === user.user_id ? user : u);
       await saveSharedKey("users", shared.users);
-      console.log("[SECURITY] Migrated plain-text password:", username);
     }
-
     const token   = createSession(user);
     const safeUser = {
       user_id:user.user_id, username:user.username, role:user.role,
       name:user.name, branch_id:user.branch_id, active:user.active,
-      permissions:user.permissions||{}
+      permissions:user.permissions||{}, avatar:user.avatar||""
     };
-    console.log(`[LOGIN] ${username} (${user.role})`);
+    console.log(`[LOGIN] ${cleanUser} (${user.role}) from ${ip}`);
     send(res, 200, { ok:true, token, user:safeUser });
     return;
   }
@@ -716,90 +880,93 @@ async function handler(req, res) {
 
   // ── CHANGE PASSWORD ─────────────────────────────────────────────
   if (req.method === "POST" && url === "/api/change-password") {
-    const session = getSession(req);
-    if (!session) { send(res, 401, { error:"Not authenticated" }); return; }
-
+    const session = requireAuth(req, res);
+    if (!session) return;
     const { oldPassword, newPassword } = await readBody(req);
-    if (!oldPassword || !newPassword)  { send(res, 400, { error:"Missing fields" }); return; }
-    if (newPassword.length < 6)        { send(res, 400, { error:"Password too short (min 6)" }); return; }
-
+    if (!validate(res, [
+      valStr(oldPassword, "oldPassword", { max:200 }),
+      valStr(newPassword, "newPassword", { min:6, max:200 }),
+    ])) return;
     const shared = await loadShared();
     const user   = (shared.users||[]).find(u => u.user_id === session.user_id);
-    if (!user)                                 { send(res, 404, { error:"User not found" }); return; }
+    if (!user)                                       { send(res, 404, { error:"User not found" }); return; }
     if (!verifyPassword(oldPassword, user.password)) { send(res, 401, { error:"Current password is incorrect" }); return; }
-
     user.password  = hashPassword(newPassword);
     shared.users   = shared.users.map(u => u.user_id === user.user_id ? user : u);
     await saveSharedKey("users", shared.users);
-    console.log(`[PASSWORD] Changed for: ${user.username}`);
+    console.log(`[PASSWORD] Changed: ${user.username} from ${ip}`);
     send(res, 200, { ok:true });
     return;
   }
 
-  // ── ME (verify token) ───────────────────────────────────────────
+  // ── ME ───────────────────────────────────────────────────────────
   if (req.method === "GET" && url === "/api/me") {
-    const session = getSession(req);
-    if (!session) { send(res, 401, { error:"Not authenticated" }); return; }
+    const session = requireAuth(req, res);
+    if (!session) return;
     const shared  = await loadShared();
     const meUser  = (shared.users||[]).find(u => u.user_id === session.user_id);
+    if (!meUser || !meUser.active) { send(res, 401, { error:"Account not found or inactive" }); return; }
     send(res, 200, {
       user_id:session.user_id, username:session.username,
       role:session.role, name:session.name, branch_id:session.branch_id,
-      permissions:(meUser && meUser.permissions)||{}
+      avatar:meUser.avatar||"",
+      permissions:(meUser.permissions)||{}
     });
     return;
   }
 
   // ── SAVE TABLE ──────────────────────────────────────────────────
   if (req.method === "POST" && url.startsWith("/api/db/")) {
-    const table = url.replace("/api/db/", "");
-    const bid   = resolveBranch(req);   // uses session branch if no ?branch= param
+    const session = requireAuth(req, res);
+    if (!session) return;
+
+    const table = url.replace("/api/db/", "").split("?")[0];
+    const bid   = sanitizeBranchId(resolveBranch(req)) || "branch_1";
     const body  = await readBody(req);
 
+    if (body === null || body === undefined) {
+      send(res, 400, { error:"Request body required" }); return;
+    }
+    // Injection scan
+    if (typeof body === "object" && scanForInjection(body)) {
+      console.warn(`[SECURITY] Injection attempt on ${table} by ${session.username} from ${ip}`);
+      send(res, 400, { error:"Invalid input detected" }); return;
+    }
+
     if (SHARED_TABLES.has(table)) {
-      // Special handling for users: restore passwords (client doesn't have them)
+      if (session.role !== "admin") {
+        send(res, 403, { error:"Admin required to modify shared data" }); return;
+      }
       if (table === "users" && Array.isArray(body)) {
         const existing = await loadShared();
         const existingUsers = existing.users || [];
         const merged = body.map(u => {
           const old = existingUsers.find(e => e.user_id === u.user_id);
-          if (!old) return u; // new user - keep as-is
-          // Restore password from existing record if client didn't send one
+          if (!old) return u;
           const pw = u.password;
-          if (!pw || pw === "") {
-            return { ...u, password: old.password };
-          }
-          // If plain text (not hashed), hash it
-          if (typeof pw === "string" && !pw.startsWith("pbkdf2:")) {
-            return { ...u, password: hashPassword(pw) };
-          }
-          return u; // already hashed
+          if (!pw || pw === "") return { ...u, password: old.password };
+          if (typeof pw === "string" && !pw.startsWith("pbkdf2:")) return { ...u, password: hashPassword(pw) };
+          return u;
         });
         await saveSharedKey("users", merged);
-        // Broadcast without passwords
         const safeMerged = merged.map(({ password:_, ...u }) => u);
         broadcastSharedUpdate("users", safeMerged);
-        console.log(`[SHARED] Saved: users (${merged.length} rows, passwords preserved)`);
-        send(res, 200, { ok:true });
-        return;
+        console.log(`[SHARED] Saved: users (${merged.length} rows) by ${session.username}`);
+        send(res, 200, { ok:true }); return;
       }
       await saveSharedKey(table, body);
       broadcastSharedUpdate(table, body);
-      console.log(`[SHARED] Saved: ${table}`);
-      send(res, 200, { ok:true });
-      return;
+      console.log(`[SHARED] Saved: ${table} by ${session.username}`);
+      send(res, 200, { ok:true }); return;
     }
 
     if (BRANCH_TABLES.has(table)) {
-      // For ingredients: use timestamp-based conflict resolution
-      // Only overwrite if incoming data is newer than stored (prevents stale socket overwrite)
+      // Verify session has access to this branch
+      const isSuper = session.role === "admin" && session.branch_id === "all";
+      if (!isSuper && session.branch_id !== bid) {
+        send(res, 403, { error:`Access to branch '${bid}' denied` }); return;
+      }
       if (table === "ingredients" && Array.isArray(body)) {
-        // Load current DB state
-        const current = await loadBranch(bid);
-        const currentIngs = current.ingredients || [];
-        // Merge: for each ingredient in body, update only if body has lower or equal stock
-        // (stock can only go down during checkout, or up during restock)
-        // Just save as-is but add write timestamp
         const stamped = body.map(i => ({ ...i, _ts: Date.now() }));
         await saveBranchKey(bid, table, stamped);
         broadcastBranchUpdate(bid, table, stamped);
@@ -807,47 +974,34 @@ async function handler(req, res) {
         await saveBranchKey(bid, table, body);
         broadcastBranchUpdate(bid, table, body);
       }
-      console.log(`[${bid}] Saved: ${table} ${Array.isArray(body) ? body.length + " rows" : ""}`);
-      send(res, 200, { ok:true });
-      return;
+      console.log(`[${bid}] Saved: ${table} ${Array.isArray(body)?body.length+" rows":""} by ${session.username}`);
+      send(res, 200, { ok:true }); return;
     }
 
-    send(res, 404, { error:"Table not found: " + table });
-    return;
+    send(res, 404, { error:"Table not found: " + table }); return;
   }
 
-  // ── ALL STOCK (admin only) — ingredients per branch ─────────────
+  // ── ALL STOCK ─────────────────────────────────────────────────────
   if (req.method === "GET" && url === "/api/all-stock") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin") {
-      send(res, 403, { error:"Admin only" }); return;
-    }
+    const session = requireAdmin(req, res);
+    if (!session) return;
     const branches = (await loadBranches()).filter(b => b.active);
     const result = {};
     for (const b of branches) {
       const bd = await loadBranch(b.branch_id);
-      result[b.branch_id] = {
-        branch_name: b.branch_name,
-        ingredients: bd.ingredients || [],
-      };
+      result[b.branch_id] = { branch_name:b.branch_name, ingredients:bd.ingredients||[] };
     }
     send(res, 200, result);
     return;
   }
 
-  // ── MIGRATE RECIPES — fix orphan recipe→ingredient mappings ───────
-  // Removes recipe rows whose ingredient_id no longer exists in that branch's
-  // ingredients list, and re-sequences ingredient_id + recipe_id integers so
-  // they never collide with timestamp-based IDs.
+  // ── MIGRATE RECIPES ───────────────────────────────────────────────
   if (req.method === "POST" && url === "/api/migrate-recipes") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin") {
-      send(res, 403, { error:"Admin only" }); return;
-    }
+    const session = requireAdmin(req, res);
+    if (!session) return;
     try {
       const branches = (await loadBranches()).filter(b => b.active);
       const results  = [];
-      // Shared recipes (if any) — skip (branch recipes only)
       for (const b of branches) {
         const bd = await loadBranch(b.branch_id);
         const ings    = bd.ingredients || [];
@@ -882,22 +1036,24 @@ async function handler(req, res) {
 
   // ── RESET DAILY ─────────────────────────────────────────────────
   if (req.method === "POST" && url.startsWith("/api/reset-daily")) {
-    const bid = resolveBranch(req);
+    const session = requireAuth(req, res);
+    if (!session) return;
+    const bid = sanitizeBranchId(resolveBranch(req)) || "branch_1";
+    const isSuper = session.role === "admin" && session.branch_id === "all";
+    if (!isSuper && session.branch_id !== bid) { send(res, 403, { error:"Branch access denied" }); return; }
     await saveBranchKey(bid, "orders", []);
     await saveBranchKey(bid, "logs",   []);
     broadcastBranchUpdate(bid, "orders", []);
     broadcastBranchUpdate(bid, "logs",   []);
-    console.log(`[${bid}] Reset daily`);
+    console.log(`[${bid}] Reset daily by ${session.username}`);
     send(res, 200, { ok:true });
     return;
   }
 
   // ── CLEAR ALL ORDERS (admin only) ────────────────────────────────
   if (req.method === "POST" && url === "/api/clear-all-orders") {
-    const session = getSession(req);
-    if (!session || session.role !== "admin") {
-      send(res, 403, { error:"Admin only" }); return;
-    }
+    const session = requireAdmin(req, res);
+    if (!session) return;
     const scope = (new URL("http://x"+req.url).searchParams.get("scope")) || "all";
     const branches = (await loadBranches()).filter(b => b.active);
     const cleared = [];
@@ -909,7 +1065,7 @@ async function handler(req, res) {
       broadcastBranchUpdate(b.branch_id, "logs",   []);
       cleared.push(b.branch_id);
     }
-    console.log(`[ADMIN] Cleared orders for: ${cleared.join(", ")}`);
+    console.log(`[ADMIN] Cleared orders for: ${cleared.join(", ")} by ${session.username}`);
     send(res, 200, { ok:true, cleared });
     return;
   }
