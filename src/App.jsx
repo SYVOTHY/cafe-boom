@@ -1535,7 +1535,7 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
   return (
     <div className="pos-layout" style={{ flex: 1, minHeight: 0, height: "100%", overflow: "hidden" }}>
       {/* ── RECEIPT MODAL ── */}
-      {receipt && <ReceiptModal receipt={receipt} onClose={() => setReceipt(null)} />}
+      {receipt && <ReceiptModal receipt={receipt} branchList={branchList} onClose={() => setReceipt(null)} />}
 
       {/* ── CUSTOMER DISPLAY ── */}
       {customerDisplay && (
@@ -6913,10 +6913,18 @@ function CustomerDisplay({ cart, cartTotal, cartTax, payMethod, selTable, onClos
 }
 
 
-function ReceiptModal({ receipt, onClose }) {
+function ReceiptModal({ receipt, branchList, onClose }) {
   const [printing, setPrinting] = useState(false);
-  const [printMsg, setPrintMsg] = useState("");   // success/error feedback
+  const [printMsg, setPrintMsg] = useState("");
   const [autoPrint, setAutoPrint] = useState(() => localStorage.getItem("cb_autoprint") === "1");
+
+  // Resolve branch name from receipt.branch_id
+  const branchName = (() => {
+    const bid = receipt?.branch_id;
+    if (!bid) return "";
+    const found = (branchList||[]).find(b => b.branch_id === bid);
+    return found?.branch_name || localStorage.getItem("cb_bn_" + bid) || localStorage.getItem("cb_current_branch_name") || "";
+  })();
 
   // Auto-print on mount if enabled
   useEffect(() => {
@@ -6956,7 +6964,8 @@ function ReceiptModal({ receipt, onClose }) {
         {/* Header */}
         <div style={{ textAlign: "center", marginBottom: 16 }}>
           <div style={{ fontSize: 22, fontWeight: 700 }}>☕ Café Bloom</div>
-          <div style={{ fontSize: 11, color: "#777" }}>ភ្នំពេញ · {receipt.ts}</div>
+          {branchName && <div style={{ fontSize: 12, color: "#555", fontWeight: 600, marginTop: 2 }}>🏪 {branchName}</div>}
+          <div style={{ fontSize: 11, color: "#777", marginTop: 2 }}>{receipt.ts}</div>
           {receipt.table && <div style={{ fontSize: 11, color: "#777" }}>តុ {receipt.table}</div>}
           <div style={{ borderTop: "1px dashed #ccc", marginTop: 10 }} />
         </div>
