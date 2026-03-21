@@ -1333,7 +1333,8 @@ async function handler(req, res) {
       send(res, 200, { ok:true }); return;
     }
 
-  // ═══════════════════════════════════════════════════════════════════
+    send(res, 404, { error:"Table not found: " + table }); return;
+  }
 //  CHECKOUT ENDPOINT — atomic stock deduction on server
 //  POST /api/checkout
 //  Body: { items:[{product_id,qty,product_name,price,emoji}],
@@ -1465,11 +1466,6 @@ async function handler(req, res) {
     logger.info('Shift summary sent', { shiftId, by: session.username });
     send(res, 200, { ok:true });
     return;
-  }
-
-
-
-    send(res, 404, { error:"Table not found: " + table }); return;
   }
 
   // ── ALL STOCK ─────────────────────────────────────────────────────
