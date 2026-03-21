@@ -4469,20 +4469,24 @@ function FinancePage({ orders, expenses, setExpenses, notify, isAdmin, isGlobalA
     return allOrders.filter(o => o.branch_id === selBranch);
   })();
 
-  // Load expense_cats — try multiple sources so all users see the same categories:
-  // 1) _meta in current branch's expenses array
-  // 2) theme.expenseCats (synced across all devices via shared DB)
-  // 3) DEFAULT_EXPENSE_CATS fallback
+  // Load expense_cats — merge saved custom cats with defaults so nothing is ever missing.
+  // Priority: saved _cats (may have custom ones) + any DEFAULT cats that are absent.
   const expCats = (() => {
+    let saved = null;
+    // 1) Check branch expenses _meta
     if (Array.isArray(expenses)) {
       const meta = expenses.find(e => e && e._meta);
-      if (meta && meta._cats && meta._cats.length > 0) return meta._cats;
+      if (meta && meta._cats && meta._cats.length > 0) saved = meta._cats;
     }
-    // Fallback to theme (shared across all branches)
-    if (Array.isArray(shared?.theme?.expenseCats) && shared?.theme?.expenseCats.length > 0) {
-      return shared.theme.expenseCats;
+    // 2) Fallback to theme.expenseCats (shared)
+    if (!saved && Array.isArray(shared?.expenseCats) && shared.expenseCats.length > 0) {
+      saved = shared.expenseCats;
     }
-    return DEFAULT_EXPENSE_CATS;
+    if (!saved) return DEFAULT_EXPENSE_CATS;
+    // Merge: keep all saved cats, then append any DEFAULT cats whose id is not present
+    const savedIds = new Set(saved.map(c => c.id));
+    const missing  = DEFAULT_EXPENSE_CATS.filter(c => !savedIds.has(c.id));
+    return [...saved, ...missing];
   })();
 
   const monthOrders = sourceOrders.filter(o => {
