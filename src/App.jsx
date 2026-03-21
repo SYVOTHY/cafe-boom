@@ -7204,223 +7204,332 @@ function RecForm({ data, prods, ings, onSave, onCancel }) {
 //  BACKUP PAGE
 // ═══════════════════════════════════════════════════════════════════
 function BackupPage({ branchList, notify, setTheme }) {
-  const [loading,setLoading]=useState(false);
-  const [restoring,setRestoring]=useState(false);
-  const [lastBackup,setLastBackup]=useState(()=>localStorage.getItem("cb_last_backup")||null);
-  const [progress,setProgress]=useState([]);
-  const [restoreLog,setRestoreLog]=useState([]);
-  const [showRestore,setShowRestore]=useState(false);
-  const [confirmFile,setConfirmFile]=useState(null); // ⚠️ fix: confirm before overwrite
-  const fileRef=useRef(null);
+  const [loading,    setLoading]    = useState(false);
+  const [restoring,  setRestoring]  = useState(false);
+  const [lastBackup, setLastBackup] = useState(() => localStorage.getItem("cb_last_backup") || null);
+  const [progress,   setProgress]   = useState([]);
+  const [restoreLog, setRestoreLog] = useState([]);
+  const [showRestore,setShowRestore]= useState(false);
+  const [confirmFile,setConfirmFile]= useState(null);
+  const [backupMode, setBackupMode] = useState("pgdump"); // "pgdump" | "json"
+  const fileRef = useRef(null);
 
-  const doBackup=async()=>{
-    setLoading(true);setProgress([]);
-    const token=localStorage.getItem("pos_token");
-    const hdr={"Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{})};
-    const snap={_created:new Date().toISOString(),_version:"1.1",branches:{}};
-    try{
-      setProgress(p=>[...p,"⏳ Loading shared data..."]);
-      const sr=await fetch(`${CLOUD_URL}/api/db?branch=branch_1`,{headers:hdr});
-      const sd=await sr.json();
-      // ⚠️ fix: DO backup users (with passwords stripped) so restore can re-create them
-      snap.shared={
-        categories:sd.categories||[],
-        products:sd.products||[],
-        options:sd.options||[],
-        users:(sd.users||[]).map(({password:_,...u})=>u), // passwords stripped for security
-        theme:sd.theme||{},
-        branches:sd.branches||[],
-      };
-      setProgress(p=>[...p.slice(0,-1),"✅ Shared data loaded"]);
-
-      // ⚠️ fix: always fetch branches from server if branchList is empty
-      let activeBranches=(branchList||[]).filter(b=>b.active!==false);
-      if(activeBranches.length===0){
-        setProgress(p=>[...p,"⏳ Fetching branch list..."]);
-        try{
-          const br=await fetch(`${CLOUD_URL}/api/branches`,{headers:hdr});
-          const bd=await br.json();
-          activeBranches=(Array.isArray(bd)?bd:[]).filter(b=>b.active!==false);
-          setProgress(p=>[...p.slice(0,-1),`✅ Found ${activeBranches.length} branches`]);
-        }catch(e){setProgress(p=>[...p.slice(0,-1),"⚠️ Could not fetch branches — using branchList prop"]);}
+  // ── pg_dump backup (full PostgreSQL) ─────────────────────────────
+  const doPgDumpBackup = async () => {
+    setLoading(true); setProgress(["⏳ កំពុងស្នើ pg_dump ពី server..."]);
+    try {
+      const token = localStorage.getItem("pos_token");
+      const r = await fetch(`${CLOUD_URL}/api/db-backup`, {
+        headers: {
+          "ngrok-skip-browser-warning": "true",
+          ...(token ? { Authorization: "Bearer " + token } : {}),
+        },
+      });
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        setProgress(p => [...p, `❌ ${d.error || "Backup failed (HTTP " + r.status + ")"}`]);
+        notify("❌ Backup failed", "error");
+        return;
       }
-
-      if(activeBranches.length===0){
-        setProgress(p=>[...p,"⚠️ No branches found — only shared data will be backed up"]);
-      }
-
-      for(const b of activeBranches){
-        setProgress(p=>[...p,`⏳ Loading ${b.branch_name||b.branch_id}...`]);
-        try{
-          const r=await fetch(`${CLOUD_URL}/api/db?branch=${b.branch_id}`,{headers:hdr});
-          const d=await r.json();
-          snap.branches[b.branch_id]={
-            branch_name:b.branch_name,
-            // Stamp branch_id into every order/log so restore is idempotent
-            orders:(d.orders||[]).map(o=>o?{...o,branch_id:b.branch_id}:o),
-            logs:(d.logs||[]).map(l=>l?{...l,branch_id:b.branch_id}:l),
-            tables:d.tables||[],
-            ingredients:d.ingredients||[],
-            expenses:d.expenses||[],
-            recipes:d.recipes||[],
-          };
-          setProgress(p=>[...p.slice(0,-1),`✅ ${b.branch_name||b.branch_id} (${(d.orders||[]).length} orders, ${(d.recipes||[]).length} recipes)`]);
-        }catch(e){setProgress(p=>[...p.slice(0,-1),`❌ ${b.branch_id}: ${e.message}`]);}
-      }
-      const json=JSON.stringify(snap,null,2);
-      const blob=new Blob([json],{type:"application/json"});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement("a");
-      a.href=url;a.download=`cafe-boom-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();
+      // Stream blob → download
+      const blob = await r.blob();
+      const ts   = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      const filename = `cafe-boom-${ts}.sql`;
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href = url; a.download = filename; a.click();
       URL.revokeObjectURL(url);
-      const now=new Date().toLocaleString("km-KH");
-      setLastBackup(now);localStorage.setItem("cb_last_backup",now);
-      const totalOrders=Object.values(snap.branches).reduce((s,b)=>s+(b.orders||[]).length,0);
-      setProgress(p=>[...p,`✅ Backup saved! ${activeBranches.length} branches · ${totalOrders} orders · ${(json.length/1024).toFixed(1)} KB`]);
-      notify("✅ Backup រួចហើយ!");
-    }catch(e){setProgress(p=>[...p,`❌ Error: ${e.message}`]);notify("❌ Backup failed");}
+      const now = new Date().toLocaleString("km-KH");
+      setLastBackup(now); localStorage.setItem("cb_last_backup", now);
+      const kb  = (blob.size / 1024).toFixed(1);
+      setProgress(p => [...p.slice(0,-1),
+        `✅ pg_dump រួចហើយ! ${filename}  (${kb} KB)`,
+        `💡 File ជា SQL — restore បានគ្រប់ PostgreSQL database`,
+      ]);
+      notify("✅ pg_dump Backup រួចហើយ!");
+    } catch (e) {
+      setProgress(p => [...p, `❌ ${e.message}`]);
+      notify("❌ Backup failed: " + e.message, "error");
+    } finally { setLoading(false); }
+  };
+
+  // ── JSON backup (fallback) ────────────────────────────────────────
+  const doJsonBackup = async () => {
+    setLoading(true); setProgress([]);
+    const token = localStorage.getItem("pos_token");
+    const hdr   = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
+    const snap  = { _created: new Date().toISOString(), _version:"1.1", _type:"json", branches:{} };
+    try {
+      setProgress(p => [...p, "⏳ Loading shared data..."]);
+      const sr = await fetch(`${CLOUD_URL}/api/db?branch=branch_1`, { headers:hdr });
+      const sd = await sr.json();
+      snap.shared = {
+        categories: sd.categories||[], products: sd.products||[],
+        options: sd.options||[], users: (sd.users||[]).map(({password:_,...u})=>u),
+        theme: sd.theme||{}, branches: sd.branches||[],
+      };
+      setProgress(p => [...p.slice(0,-1), "✅ Shared data loaded"]);
+
+      let activeBranches = (branchList||[]).filter(b => b.active !== false);
+      if (activeBranches.length === 0) {
+        const br = await fetch(`${CLOUD_URL}/api/branches`, { headers:hdr });
+        activeBranches = (await br.json()).filter(b => b.active !== false);
+      }
+      for (const b of activeBranches) {
+        setProgress(p => [...p, `⏳ Loading ${b.branch_name||b.branch_id}...`]);
+        try {
+          const r = await fetch(`${CLOUD_URL}/api/db?branch=${b.branch_id}`, { headers:hdr });
+          const d = await r.json();
+          snap.branches[b.branch_id] = {
+            branch_name: b.branch_name,
+            orders:      (d.orders||[]).map(o=>o?{...o,branch_id:b.branch_id}:o),
+            logs:        (d.logs||[]).map(l=>l?{...l,branch_id:b.branch_id}:l),
+            tables:      d.tables||[], ingredients:d.ingredients||[],
+            expenses:    d.expenses||[], recipes:d.recipes||[],
+          };
+          setProgress(p => [...p.slice(0,-1), `✅ ${b.branch_name||b.branch_id} (${(d.orders||[]).length} orders)`]);
+        } catch(e) { setProgress(p => [...p.slice(0,-1), `❌ ${b.branch_id}: ${e.message}`]); }
+      }
+      const json = JSON.stringify(snap, null, 2);
+      const blob = new Blob([json], { type:"application/json" });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href=url; a.download=`cafe-boom-backup-${new Date().toISOString().slice(0,10)}.json`; a.click();
+      URL.revokeObjectURL(url);
+      const now = new Date().toLocaleString("km-KH");
+      setLastBackup(now); localStorage.setItem("cb_last_backup", now);
+      const totalOrders = Object.values(snap.branches).reduce((s,b)=>s+(b.orders||[]).length,0);
+      setProgress(p => [...p, `✅ JSON Backup! ${activeBranches.length} branches · ${totalOrders} orders · ${(json.length/1024).toFixed(1)} KB`]);
+      notify("✅ JSON Backup រួចហើយ!");
+    } catch(e) { setProgress(p => [...p, `❌ ${e.message}`]); notify("❌ Backup failed"); }
     setLoading(false);
   };
 
-  // ⚠️ fix: show confirm dialog before restore
-  const handleFileSelect=(file)=>{
-    if(!file)return;
-    setConfirmFile(file);
-  };
+  const doBackup = () => backupMode === "pgdump" ? doPgDumpBackup() : doJsonBackup();
 
-  const doRestore=async(file)=>{
-    if(!file)return;
-    setConfirmFile(null);
-    setRestoring(true);setRestoreLog([]);
-    const token=localStorage.getItem("pos_token");
-    const hdr={"Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{})};
-    try{
-      const text=await file.text();
-      const snap=JSON.parse(text);
-      setRestoreLog(p=>[...p,`📂 ${file.name}  |  📅 ${snap._created||"unknown"}  |  v${snap._version||"1.0"}`]);
-      if(snap.shared){
-        for(const t of["categories","products","options","theme"]){
-          if(snap.shared[t]){
-            try{await fetch(`${CLOUD_URL}/api/db/${t}`,{method:"POST",headers:hdr,body:JSON.stringify(snap.shared[t])});setRestoreLog(p=>[...p,`✅ shared/${t} (${Array.isArray(snap.shared[t])?snap.shared[t].length+" rows":"ok"})`]);}
-            catch(e){setRestoreLog(p=>[...p,`❌ shared/${t}: ${e.message}`]);}
-          }
-        }
-        if(snap.shared.theme&&setTheme)setTheme(snap.shared.theme);
-        // ⚠️ fix: restore users (without passwords — they keep existing hash or get empty)
-        if(snap.shared.users&&snap.shared.users.length>0){
-          try{
-            await fetch(`${CLOUD_URL}/api/db/users`,{method:"POST",headers:hdr,body:JSON.stringify(snap.shared.users)});
-            setRestoreLog(p=>[...p,`✅ shared/users (${snap.shared.users.length} users — passwords preserved from DB)`]);
-          }catch(e){setRestoreLog(p=>[...p,`❌ shared/users: ${e.message}`]);}
-        }
+  // ── pg_dump restore ───────────────────────────────────────────────
+  const doPgRestore = async (file) => {
+    setConfirmFile(null); setRestoring(true); setRestoreLog([]);
+    setRestoreLog(p => [...p, `📂 ${file.name}  (${(file.size/1024).toFixed(1)} KB)`]);
+    setRestoreLog(p => [...p, `⏳ Uploading to server for psql restore...`]);
+    try {
+      const token = localStorage.getItem("pos_token");
+      const r = await fetch(`${CLOUD_URL}/api/db-restore`, {
+        method: "POST",
+        headers: {
+          "Content-Type":              "application/sql",
+          "ngrok-skip-browser-warning":"true",
+          ...(token ? { Authorization: "Bearer " + token } : {}),
+        },
+        body: file,
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setRestoreLog(p => [...p, `❌ ${d.error || "Restore failed"}`, d.detail ? `   ${d.detail}` : ""].filter(Boolean));
+        notify("❌ Restore failed", "error");
+      } else {
+        setRestoreLog(p => [...p, `✅ ${d.message || "Restore complete!"}`]);
+        notify("✅ Restore រួចហើយ! Reload page");
       }
-      for(const[bid,bd]of Object.entries(snap.branches||{})){
-        setRestoreLog(p=>[...p,`⏳ Restoring ${bd.branch_name||bid}...`]);
-        let ok=0,fail=0;
-
-        // Build patched branch data — always stamp branch_id into orders & logs
-        // so allOrders filter (o.branch_id === bid) works correctly after restore
-        const patchedBd = { ...bd };
-        if(Array.isArray(bd.orders)){
-          patchedBd.orders = bd.orders.map(o => o ? { ...o, branch_id: bid } : o);
-        }
-        if(Array.isArray(bd.logs)){
-          patchedBd.logs = bd.logs.map(l => l ? { ...l, branch_id: bid } : l);
-        }
-
-        for(const t of["orders","logs","tables","ingredients","expenses","recipes"]){
-          if(patchedBd[t]){
-            try{
-              await fetch(`${CLOUD_URL}/api/db/${t}?branch=${bid}`,{method:"POST",headers:hdr,body:JSON.stringify(patchedBd[t])});
-              ok++;
-              setRestoreLog(p=>[...p, `  ✅ ${t} (${Array.isArray(patchedBd[t])?patchedBd[t].length+" rows":"ok"})`]);
-            }catch(e){
-              setRestoreLog(p=>[...p,`  ❌ ${bid}/${t}: ${e.message}`]);
-              fail++;
-            }
-          }
-        }
-        setRestoreLog(p=>[...p,`${fail>0?"⚠️":"✅"} ${bd.branch_name||bid}: ${ok}/6 tables${fail>0?` (${fail} failed)`:""}`]);
-      }
-      setRestoreLog(p=>[...p,"✅ Restore complete! Reload page to see changes."]);
-      notify("✅ Restore រួចហើយ! សូម reload page");
-    }catch(e){setRestoreLog(p=>[...p,`❌ ${e.message}`]);notify("❌ Restore failed: "+e.message);}
+    } catch(e) {
+      setRestoreLog(p => [...p, `❌ ${e.message}`]);
+      notify("❌ Restore failed: " + e.message, "error");
+    }
     setRestoring(false);
   };
 
-  return(
-    <div style={{padding:"20px 16px 40px",maxWidth:600,margin:"0 auto"}}>
+  // ── JSON restore (fallback) ───────────────────────────────────────
+  const doJsonRestore = async (file) => {
+    setConfirmFile(null); setRestoring(true); setRestoreLog([]);
+    const token = localStorage.getItem("pos_token");
+    const hdr   = { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) };
+    try {
+      const text = await file.text();
+      const snap = JSON.parse(text);
+      setRestoreLog(p => [...p, `📂 ${file.name}  |  📅 ${snap._created||"unknown"}  |  v${snap._version||"1.0"}`]);
+      if (snap.shared) {
+        for (const t of ["categories","products","options","theme"]) {
+          if (snap.shared[t]) {
+            try { await fetch(`${CLOUD_URL}/api/db/${t}`,{method:"POST",headers:hdr,body:JSON.stringify(snap.shared[t])}); setRestoreLog(p=>[...p,`✅ shared/${t}`]); }
+            catch(e) { setRestoreLog(p=>[...p,`❌ shared/${t}: ${e.message}`]); }
+          }
+        }
+        if (snap.shared.theme && setTheme) setTheme(snap.shared.theme);
+        if (snap.shared.users?.length > 0) {
+          try { await fetch(`${CLOUD_URL}/api/db/users`,{method:"POST",headers:hdr,body:JSON.stringify(snap.shared.users)}); setRestoreLog(p=>[...p,`✅ shared/users (${snap.shared.users.length})`]); }
+          catch(e) { setRestoreLog(p=>[...p,`❌ shared/users: ${e.message}`]); }
+        }
+      }
+      for (const [bid, bd] of Object.entries(snap.branches||{})) {
+        setRestoreLog(p=>[...p,`⏳ Restoring ${bd.branch_name||bid}...`]);
+        let ok=0, fail=0;
+        const pBd = { ...bd,
+          orders: (bd.orders||[]).map(o=>o?{...o,branch_id:bid}:o),
+          logs:   (bd.logs||[]).map(l=>l?{...l,branch_id:bid}:l),
+        };
+        for (const t of ["orders","logs","tables","ingredients","expenses","recipes"]) {
+          if (pBd[t]) {
+            try { await fetch(`${CLOUD_URL}/api/db/${t}?branch=${bid}`,{method:"POST",headers:hdr,body:JSON.stringify(pBd[t])}); ok++; }
+            catch(e) { setRestoreLog(p=>[...p,`  ❌ ${bid}/${t}: ${e.message}`]); fail++; }
+          }
+        }
+        setRestoreLog(p=>[...p,`${fail>0?"⚠️":"✅"} ${bd.branch_name||bid}: ${ok}/6 tables`]);
+      }
+      setRestoreLog(p=>[...p,"✅ Restore complete! Reload page to see changes."]);
+      notify("✅ Restore រួចហើយ! Reload page");
+    } catch(e) { setRestoreLog(p=>[...p,`❌ ${e.message}`]); notify("❌ Restore failed: "+e.message,"error"); }
+    setRestoring(false);
+  };
 
-      {/* ── Confirm Restore Modal ── */}
-      {confirmFile&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-          <div style={{background:"var(--bg-card)",border:"2px solid #E74C3C55",borderRadius:16,padding:24,maxWidth:400,width:"100%"}}>
-            <div style={{fontSize:36,textAlign:"center",marginBottom:12}}>⚠️</div>
-            <div style={{fontWeight:700,fontSize:16,color:"#E74C3C",textAlign:"center",marginBottom:8}}>បញ្ជាក់ Restore</div>
-            <div style={{fontSize:13,color:"var(--text-dim)",textAlign:"center",marginBottom:6}}>File: <b style={{color:"var(--text-main)"}}>{confirmFile.name}</b></div>
-            <div style={{fontSize:12,color:"#E74C3C",textAlign:"center",marginBottom:20,padding:"8px 12px",background:"#E74C3C11",borderRadius:8}}>
-              ⚠️ ទិន្នន័យបច្ចុប្បន្នទាំងអស់នឹង <b>overwrite</b> — មិនអាចត្រឡប់វិញបានទេ!
+  const doRestore = (file) => {
+    const isPgDump = file.name.endsWith(".sql") || backupMode === "pgdump";
+    return isPgDump ? doPgRestore(file) : doJsonRestore(file);
+  };
+
+  const handleFileSelect = (file) => { if (!file) return; setConfirmFile(file); };
+
+  const isPgFile = confirmFile?.name?.endsWith(".sql");
+
+  return (
+    <div style={{ padding:"20px 16px 40px", maxWidth:600, margin:"0 auto" }}>
+
+      {/* ── Confirm Modal ── */}
+      {confirmFile && (
+        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
+          <div style={{ background:"var(--bg-card)",border:"2px solid #E74C3C55",borderRadius:16,padding:24,maxWidth:400,width:"100%" }}>
+            <div style={{ fontSize:36,textAlign:"center",marginBottom:12 }}>{isPgFile?"🗄️":"📦"}</div>
+            <div style={{ fontWeight:700,fontSize:16,color:"#E74C3C",textAlign:"center",marginBottom:8 }}>បញ្ជាក់ Restore</div>
+            <div style={{ fontSize:13,color:"var(--text-dim)",textAlign:"center",marginBottom:6 }}>
+              File: <b style={{color:"var(--text-main)"}}>{confirmFile.name}</b>
+              <span style={{marginLeft:8,fontSize:11,background:isPgFile?"#1A2A3A":"#1A2A1A",color:isPgFile?"#5BA3E0":"#27AE60",padding:"2px 8px",borderRadius:8}}>
+                {isPgFile?"pg_dump SQL":"JSON"}
+              </span>
             </div>
-            <div style={{display:"flex",gap:10}}>
-              <button onClick={()=>setConfirmFile(null)} style={{flex:1,padding:12,borderRadius:10,border:"1px solid var(--border-col)",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,color:"var(--text-dim)"}}>❌ បោះបង់</button>
-              <button onClick={()=>doRestore(confirmFile)} style={{flex:1,padding:12,borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:"linear-gradient(135deg,#7A1A1A,#E74C3C)",color:"#fff"}}>✅ យល់ព្រម Restore</button>
+            <div style={{ fontSize:12,color:"#E74C3C",textAlign:"center",marginBottom:20,padding:"8px 12px",background:"#E74C3C11",borderRadius:8 }}>
+              ⚠️ ទិន្នន័យបច្ចុប្បន្ន{isPgFile?" (Database ទាំងអស់)":""} នឹង <b>overwrite</b> — backup ជាមុន!
+            </div>
+            <div style={{ display:"flex",gap:10 }}>
+              <button onClick={()=>setConfirmFile(null)} style={{ flex:1,padding:12,borderRadius:10,border:"1px solid var(--border-col)",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,color:"var(--text-dim)" }}>❌ បោះបង់</button>
+              <button onClick={()=>doRestore(confirmFile)} style={{ flex:1,padding:12,borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:"linear-gradient(135deg,#7A1A1A,#E74C3C)",color:"#fff" }}>✅ យល់ព្រម Restore</button>
             </div>
           </div>
         </div>
       )}
 
-      <div style={{fontWeight:700,fontSize:20,color:"var(--accent)",marginBottom:6}}>💾 Backup & Restore</div>
-      <div style={{fontSize:13,color:"var(--text-dim)",marginBottom:20}}>Download/Upload ទិន្នន័យទាំងអស់ — orders, ingredients, recipes, expenses, users</div>
+      <div style={{ fontWeight:700,fontSize:20,color:"var(--accent)",marginBottom:6 }}>💾 Backup & Restore</div>
+      <div style={{ fontSize:13,color:"var(--text-dim)",marginBottom:16 }}>backup ទិន្នន័យ PostgreSQL ទាំងអស់ — users, orders, ingredients, branches</div>
 
-      {/* Status bar */}
-      <div style={{background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:12,padding:14,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div><div style={{fontSize:11,color:"var(--text-dim)"}}>⏰ Backup ចុងក្រោយ</div><div style={{fontSize:14,fontWeight:700,color:lastBackup?"#27AE60":"#E74C3C",marginTop:2}}>{lastBackup||"មិនទាន់ backup ទេ"}</div></div>
-        <div style={{fontSize:11,color:"var(--text-dim)"}}>{(branchList||[]).filter(b=>b.active!==false).length} branches</div>
+      {/* Status */}
+      <div style={{ background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:12,padding:14,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+        <div>
+          <div style={{ fontSize:11,color:"var(--text-dim)" }}>⏰ Backup ចុងក្រោយ</div>
+          <div style={{ fontSize:14,fontWeight:700,color:lastBackup?"#27AE60":"#E74C3C",marginTop:2 }}>{lastBackup||"មិនទាន់ backup ទេ"}</div>
+        </div>
+        <div style={{ fontSize:11,color:"var(--text-dim)",textAlign:"right" }}>
+          <div>{(branchList||[]).filter(b=>b.active!==false).length} branches</div>
+          <div style={{ marginTop:2,color:"#5BA3E0" }}>pg_dump ready</div>
+        </div>
       </div>
 
-      {/* Backup */}
-      <div style={{background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:14,padding:16,marginBottom:14}}>
-        <div style={{fontWeight:700,fontSize:14,color:"var(--accent)",marginBottom:10}}>📤 Backup ទាំងអស់</div>
-        <button onClick={doBackup} disabled={loading} style={{width:"100%",padding:14,borderRadius:12,border:"none",cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",fontSize:15,fontWeight:700,background:loading?"var(--bg-main)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",color:loading?"var(--text-dim)":"#fff",marginBottom:progress.length?12:0,opacity:loading?0.7:1}}>
-          {loading?"⏳ កំពុង backup...":"💾 Backup ឥឡូវ"}
+      {/* Backup Mode Toggle */}
+      <div style={{ background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:12,padding:12,marginBottom:14 }}>
+        <div style={{ fontSize:12,color:"var(--text-dim)",marginBottom:8,fontWeight:600 }}>🔧 ប្រភេទ Backup:</div>
+        <div style={{ display:"flex",gap:8 }}>
+          {[["pgdump","🗄️ pg_dump (SQL)","PostgreSQL full backup — recommended","#5BA3E0"],["json","📦 JSON (Legacy)","Data only, no passwords","#27AE60"]].map(([m,lbl,desc,col])=>(
+            <button key={m} onClick={()=>setBackupMode(m)} style={{
+              flex:1,padding:"10px 8px",borderRadius:10,border:`1px solid ${backupMode===m?col+"55":"var(--border-col)"}`,
+              background:backupMode===m?col+"11":"transparent",cursor:"pointer",fontFamily:"inherit",textAlign:"left"
+            }}>
+              <div style={{ fontSize:12,fontWeight:700,color:backupMode===m?col:"var(--text-dim)" }}>{lbl}</div>
+              <div style={{ fontSize:10,color:"#666",marginTop:2 }}>{desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Backup Button */}
+      <div style={{ background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:14,padding:16,marginBottom:14 }}>
+        <div style={{ fontWeight:700,fontSize:14,color:"var(--accent)",marginBottom:10 }}>
+          {backupMode==="pgdump"?"🗄️ pg_dump Backup (PostgreSQL)":"📦 JSON Backup"}
+        </div>
+        {backupMode==="pgdump" && (
+          <div style={{ fontSize:11,color:"#5BA3E0",background:"#0A1E3A",padding:"8px 12px",borderRadius:8,marginBottom:10,lineHeight:1.7 }}>
+            💡 pg_dump dump ទាំងអស់: users, branches, shared_data, branch_data<br/>
+            ✅ File .sql — restore បានគ្រប់ PostgreSQL instance<br/>
+            ✅ Include passwords (hashed), ទំនាក់ទំនង tables ទាំងអស់
+          </div>
+        )}
+        <button onClick={doBackup} disabled={loading} style={{
+          width:"100%",padding:14,borderRadius:12,border:"none",
+          cursor:loading?"not-allowed":"pointer",fontFamily:"inherit",fontSize:15,fontWeight:700,
+          background:loading?"var(--bg-main)":"linear-gradient(135deg,var(--accent-dk),var(--accent))",
+          color:loading?"var(--text-dim)":"#fff",opacity:loading?0.7:1,marginBottom:progress.length?12:0
+        }}>
+          {loading?"⏳ កំពុង backup...":backupMode==="pgdump"?"🗄️ pg_dump ឥឡូវ":"💾 JSON Backup"}
         </button>
-        {progress.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3}}>{progress.map((m,i)=><div key={i} style={{fontSize:12,color:m.startsWith("✅")?"#27AE60":m.startsWith("❌")?"#E74C3C":m.startsWith("⚠️")?"#F39C12":"var(--text-dim)"}}>{m}</div>)}</div>}
+        {progress.length > 0 && (
+          <div style={{ display:"flex",flexDirection:"column",gap:4 }}>
+            {progress.map((m,i) => (
+              <div key={i} style={{ fontSize:12,color:m.startsWith("✅")?"#27AE60":m.startsWith("❌")?"#E74C3C":m.startsWith("💡")?"#5BA3E0":"var(--text-dim)" }}>{m}</div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Restore */}
-      <div style={{background:"var(--bg-card)",border:"1px solid #E74C3C33",borderRadius:14,padding:16,marginBottom:14}}>
-        <div style={{fontWeight:700,fontSize:14,color:"#E74C3C",marginBottom:6}}>📥 Restore</div>
-        <div style={{fontSize:12,color:"var(--text-dim)",marginBottom:12,padding:"8px 12px",background:"#E74C3C11",borderRadius:8}}>⚠️ Restore នឹង <b style={{color:"#E74C3C"}}>overwrite</b> ទិន្នន័យបច្ចុប្បន្ន — backup ជាមុន!</div>
-        {!showRestore?(
-          <button onClick={()=>setShowRestore(true)} style={{width:"100%",padding:12,borderRadius:10,border:"1px solid #E74C3C44",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,color:"#E74C3C"}}>📥 Restore ពី Backup File</button>
-        ):(
+      <div style={{ background:"var(--bg-card)",border:"1px solid #E74C3C33",borderRadius:14,padding:16,marginBottom:14 }}>
+        <div style={{ fontWeight:700,fontSize:14,color:"#E74C3C",marginBottom:6 }}>📥 Restore</div>
+        <div style={{ fontSize:12,color:"var(--text-dim)",marginBottom:12,padding:"8px 12px",background:"#E74C3C11",borderRadius:8 }}>
+          ⚠️ ត្រូវ backup ជាមុន! · ជ្រើស <b>.sql</b> (pg_dump) ឬ <b>.json</b> (legacy)
+        </div>
+        {!showRestore ? (
+          <button onClick={()=>setShowRestore(true)} style={{ width:"100%",padding:12,borderRadius:10,border:"1px solid #E74C3C44",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,color:"#E74C3C" }}>
+            📥 Restore ពី File (.sql / .json)
+          </button>
+        ) : (
           <div>
-            {/* ⚠️ fix: onChange now calls handleFileSelect → shows confirm first */}
-            <input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={e=>{if(e.target.files[0])handleFileSelect(e.target.files[0]);e.target.value="";}}/>
-            <div style={{display:"flex",gap:8,marginBottom:10}}>
-              <button onClick={()=>fileRef.current?.click()} disabled={restoring} style={{flex:1,padding:12,borderRadius:10,border:"1px solid #E74C3C44",background:restoring?"var(--bg-main)":"#E74C3C11",cursor:restoring?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,color:"#E74C3C",opacity:restoring?0.6:1}}>{restoring?"⏳ កំពុង restore...":"📂 ជ្រើស .json file"}</button>
-              <button onClick={()=>{setShowRestore(false);setRestoreLog([]);}} style={{padding:"12px 16px",borderRadius:10,border:"1px solid var(--border-col)",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,color:"var(--text-dim)"}}>បោះបង់</button>
+            <input ref={fileRef} type="file" accept=".sql,.json" style={{ display:"none" }}
+              onChange={e => { if(e.target.files[0]) handleFileSelect(e.target.files[0]); e.target.value=""; }} />
+            <div style={{ display:"flex",gap:8,marginBottom:10 }}>
+              <button onClick={()=>fileRef.current?.click()} disabled={restoring} style={{
+                flex:1,padding:12,borderRadius:10,border:"1px solid #E74C3C44",
+                background:restoring?"var(--bg-main)":"#E74C3C11",cursor:restoring?"not-allowed":"pointer",
+                fontFamily:"inherit",fontSize:13,fontWeight:700,color:"#E74C3C",opacity:restoring?0.6:1
+              }}>{restoring?"⏳ កំពុង restore...":"📂 ជ្រើស .sql / .json file"}</button>
+              <button onClick={()=>{setShowRestore(false);setRestoreLog([]);}} style={{
+                padding:"12px 16px",borderRadius:10,border:"1px solid var(--border-col)",
+                background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,color:"var(--text-dim)"
+              }}>បោះបង់</button>
             </div>
-            {restoreLog.length>0&&<div style={{display:"flex",flexDirection:"column",gap:3,maxHeight:220,overflowY:"auto"}}>{restoreLog.map((m,i)=><div key={i} style={{fontSize:12,color:m.startsWith("✅")?"#27AE60":m.startsWith("❌")?"#E74C3C":m.startsWith("⚠️")?"#F39C12":"var(--text-dim)"}}>{m}</div>)}</div>}
+            {restoreLog.length > 0 && (
+              <div style={{ display:"flex",flexDirection:"column",gap:3,maxHeight:220,overflowY:"auto" }}>
+                {restoreLog.map((m,i)=>(
+                  <div key={i} style={{ fontSize:12,color:m.startsWith("✅")?"#27AE60":m.startsWith("❌")?"#E74C3C":m.startsWith("⚠️")?"#F39C12":"var(--text-dim)" }}>{m}</div>
+                ))}
+              </div>
+            )}
             {restoreLog.some(m=>m.includes("complete"))&&(
-              <button onClick={()=>window.location.reload()} style={{marginTop:10,width:"100%",padding:10,borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:"linear-gradient(135deg,#1A7A3A,#27AE60)",color:"#fff"}}>🔄 Reload Page Now</button>
+              <button onClick={()=>window.location.reload()} style={{ marginTop:10,width:"100%",padding:10,borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:"linear-gradient(135deg,#1A7A3A,#27AE60)",color:"#fff" }}>
+                🔄 Reload Page Now
+              </button>
             )}
           </div>
         )}
       </div>
 
       {/* Notes */}
-      <div style={{padding:14,background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:12,fontSize:12,color:"var(--text-dim)",lineHeight:1.9}}>
-        <div style={{fontWeight:700,color:"var(--accent)",marginBottom:6}}>📖 ការណែនាំ</div>
-        <div>• Backup ជា <b style={{color:"var(--text-main)"}}>.json</b> — រក្សាទុកក្នុង Google Drive / Disk</div>
-        <div>• រួមបញ្ចូល: orders, ingredients, recipes, expenses, categories, products, users</div>
-        <div>• Password <b style={{color:"var(--text-main)"}}>មិន</b> backup ទេ (security) — users នៅ DB ដដែល</div>
-        <div>• Restore: ជ្រើស .json → confirm → data overwrite → reload page</div>
-        <div>• ណែនាំ backup ចន្លោះ ១ ថ្ងៃ ម្តង</div>
+      <div style={{ padding:14,background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:12,fontSize:12,color:"var(--text-dim)",lineHeight:1.9 }}>
+        <div style={{ fontWeight:700,color:"var(--accent)",marginBottom:6 }}>📖 ការណែនាំ</div>
+        <div>• <b style={{color:"#5BA3E0"}}>pg_dump (.sql)</b> — backup ទាំងអស់ PostgreSQL: users, branches, orders, passwords</div>
+        <div>• <b style={{color:"#27AE60"}}>JSON (.json)</b> — data only (ទាំងអស់លើកលែង passwords) — legacy format</div>
+        <div>• ណែនាំប្រើ <b>pg_dump</b> ព្រោះ complete + include passwords</div>
+        <div>• Restore .sql → psql ដំណើរការ server-side → safe</div>
+        <div>• ណែនាំ backup ចន្លោះ ១ ថ្ងៃ ម្តង ហើយ upload Google Drive</div>
       </div>
     </div>
   );
 }
+
 
 // ═══════════════════════════════════════════════════════════════════
 //  SHARED UI ATOMS
