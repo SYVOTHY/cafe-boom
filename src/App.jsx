@@ -129,15 +129,29 @@ async function sendShiftSummary(shiftId) {
 
 // Auto-scheduler — calls backend at shift end times
 const _shiftSent = {};
+// Cambodia timezone helper — always use Asia/Phnom_Penh (UTC+7)
+const KH_TZ = "Asia/Phnom_Penh";
+function nowKH() {
+  // Returns a Date object whose .getHours()/.getMinutes() reflect KH local time
+  return new Date(new Date().toLocaleString("en-US", { timeZone: KH_TZ }));
+}
+function todayKH() {
+  const d = nowKH();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function startShiftScheduler() {
   return setInterval(() => {
-    const now = new Date();
+    const now = nowKH();                           // Cambodia local time
     const hm  = now.getHours() * 60 + now.getMinutes();
     const triggers = [
       { hm: 13 * 60, shiftId: "morning"   },
       { hm: 19 * 60, shiftId: "afternoon" },
     ];
-    const today = now.toISOString().slice(0, 10);
+    const today = todayKH();                       // YYYY-MM-DD in KH time
     for (const t of triggers) {
       const key = today + "_" + t.shiftId;
       if (Math.abs(hm - t.hm) <= 1 && !_shiftSent[key]) {
@@ -587,7 +601,8 @@ function CafeBloom() {
     return pickedBranch || DEFAULT_BRANCH;
   })();
 
-  const { db, loading, socketOnline, saveTable, reload, onlineUsers } = useRealtimeDB(CLOUD_URL, activeBranchId, currentUser);
+  const { db, loading, socketOnline, saveTable, reload, onlineUsers,
+          isOffline: dbOffline, syncPending, flushQueue } = useRealtimeDB(CLOUD_URL, activeBranchId, currentUser);
 
   // Sync DB → state when data arrives/updates
   // Skip if table has a pending local write (within 3s) to prevent socket overwrite
@@ -923,7 +938,7 @@ function CafeBloom() {
     logs: logsRaw, setLogs,
     users: usersRaw, setUsers,
     expenses: expensesRaw, setExpenses,
-    setTheme, offline, socketOnline, reload,
+    setTheme, offline: offline || dbOffline, socketOnline, reload,
     branchId: activeBranchId, branchName: BRANCH_NAME,
     branchList, pickedBranch, setPickedBranch, isGlobalAdmin,
     doLogout, canAccess,
@@ -933,6 +948,7 @@ function CafeBloom() {
     isBranchAdmin: currentUser?.role === "admin" && currentUser?.branch_id && currentUser?.branch_id !== "all",
     lowStock: (ingsRaw||[]).filter(i => (i.current_stock||0) <= (i.threshold||0)),
     onlineUsers,
+    syncPending, flushQueue,
   };
 
   const _bid  = currentUser?.branch_id;
@@ -976,7 +992,40 @@ function CafeBloom() {
     <div style={{ display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }} className={"app-root" + (themeRaw.bgMain && themeRaw.bgMain > "#888" ? " light-mode" : "")}>
       <style>{CSS}</style>
 
-      {/* ── Low Stock Alert Modal ── */}
+      {/* ── Offline / Sync Banner ── */}
+      {(dbOffline || syncPending > 0) && (
+        <div style={{
+          position:"sticky", top:0, zIndex:300,
+          background: syncPending > 0 && !dbOffline ? "#1A2A0A" : "#1A0A00",
+          borderBottom: `1px solid ${syncPending > 0 && !dbOffline ? "#27AE6055" : "#E8A84B55"}`,
+          padding:"6px 16px",
+          display:"flex", alignItems:"center", justifyContent:"space-between", gap:8,
+          fontSize:12,
+        }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+            <span style={{ fontSize:16 }}>{dbOffline ? "📡" : "🔄"}</span>
+            <span style={{ color: dbOffline ? "#E8A84B" : "#27AE60", fontWeight:600 }}>
+              {dbOffline
+                ? "Offline Mode — ទិន្នន័យពី Cache"
+                : `Syncing… (${syncPending} pending)`}
+            </span>
+            {syncPending > 0 && (
+              <span style={{ color:"#888", fontSize:11 }}>
+                · ការផ្លាស់ប្ដូររបស់អ្នកនឹង sync ពេលអ៊ីនធឺណិតត្រឡប់មក
+              </span>
+            )}
+          </div>
+          {syncPending > 0 && !dbOffline && (
+            <button onClick={flushQueue} style={{
+              background:"#27AE6022", border:"1px solid #27AE6055",
+              color:"#27AE60", borderRadius:6, padding:"3px 10px",
+              cursor:"pointer", fontFamily:"inherit", fontSize:11, fontWeight:600,
+            }}>
+              ↑ Sync ឥឡូវ
+            </button>
+          )}
+        </div>
+      )}
       {stockAlert && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.75)", zIndex:600,
           display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
@@ -1243,7 +1292,8 @@ function CafeBloom() {
         shopNameProp={themeRaw?.shopName || ""}
         shopLogoProp={themeRaw?.shopLogo ?? ""}
         lowStockCount={(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0).length}
-        onStockAlert={() => setStockAlert(prev => prev || { items:(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0), key:"manual" })} />
+        onStockAlert={() => setStockAlert(prev => prev || { items:(ingsRaw||[]).filter(i => Number(i.current_stock||0) <= Number(i.threshold||0) && Number(i.threshold||0) > 0), key:"manual" })}
+        syncPending={syncPending} flushQueue={flushQueue} />
 
       {/* ── Desktop Nav tabs ── */}
       <div className="nav-tab-bar desktop-nav" style={{ display:"flex", gap:0, overflowX:"auto", background:"var(--bg-header)", borderBottom:"2px solid var(--border-col)", padding:"0 8px" }}>
@@ -1335,7 +1385,7 @@ function LoginPage({ theme, loading, error, onLogin }) {
 // ═══════════════════════════════════════════════════════════════════
 //  TOPBAR COMPONENT
 // ═══════════════════════════════════════════════════════════════════
-function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin, lowStockCount, onStockAlert, currentBranchName, shopNameProp, shopLogoProp }) {
+function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, menuOpen, onSelfReset, onClearData, isAdmin, activeBranchId, branchList, onSwitchBranch, isGlobalAdmin, lowStockCount, onStockAlert, currentBranchName, shopNameProp, shopLogoProp, syncPending = 0, flushQueue }) {
   // shopName/shopLogo: prefer props from themeRaw (real-time DB), fallback localStorage
   const [shopNameLocal, setShopNameState] = useState(() => localStorage.getItem("cb_shop_name") || "Café Boom");
   const [shopLogoLocal, setShopLogoState] = useState(() => localStorage.getItem("cb_shop_logo") || "");
@@ -1393,10 +1443,16 @@ function TopBar({ socketOnline, offline, currentUser, doLogout, onHamburger, men
         </div>
       </div>
       <div style={{ flex:1 }} />
-      {/* Status dot */}
+      {/* Status dot — shows offline/sync-pending state */}
       <div className="topbar-status" style={{ display:"flex", alignItems:"center", gap:5, background:"rgba(255,255,255,.05)", borderRadius:20, padding:"4px 10px" }}>
         <div style={{ width:7, height:7, borderRadius:"50%", background:statusColor, boxShadow:`0 0 6px ${statusColor}` }} />
         <span style={{ fontSize:11, fontWeight:700, color:statusColor }}>{statusLabel}</span>
+        {syncPending > 0 && (
+          <span style={{ fontSize:10, background:"#E8A84B22", color:"#E8A84B",
+            border:"1px solid #E8A84B44", borderRadius:10, padding:"1px 5px", fontWeight:700 }}>
+            {syncPending}⏳
+          </span>
+        )}
       </div>
       {/* Stock Alert Bell */}
       {lowStockCount > 0 && (
