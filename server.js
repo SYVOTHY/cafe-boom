@@ -224,6 +224,218 @@ const pool = new Pool({
 
 pool.on("error", (err) => logger.error("PG Pool Error", { error: err.message }));
 
+// ═══════════════════════════════════════════════════════════════════
+//  RESTORE HELPERS  (zero extra deps)
+// ═══════════════════════════════════════════════════════════════════
+
+// ── bufferIndexOf: scan buf for search starting at fromIndex ───────
+function bufferIndexOf(buf, search, fromIndex = 0) {
+  for (let i = fromIndex; i <= buf.length - search.length; i++) {
+    let found = true;
+    for (let j = 0; j < search.length; j++) {
+      if (buf[i + j] !== search[j]) { found = false; break; }
+    }
+    if (found) return i;
+  }
+  return -1;
+}
+
+// ── extractMultipartFile: pull named field bytes from multipart body ─
+function extractMultipartFile(body, contentType, fieldName) {
+  const bMatch = contentType.match(/boundary=([^\s;,"]+)/i);
+  if (!bMatch) return null;
+  const boundary = bMatch[1].replace(/^"|"$/g, "");
+  const sep      = Buffer.from("\r\n--" + boundary);
+  const endSep   = Buffer.from("--" + boundary + "--");
+  const firstSep = body.indexOf("--" + boundary + "\r\n");
+  if (firstSep < 0) return null;
+  let pos = firstSep + boundary.length + 4;
+  while (pos < body.length) {
+    const hdrEnd = bufferIndexOf(body, Buffer.from("\r\n\r\n"), pos);
+    if (hdrEnd < 0) break;
+    const hdrStr  = body.slice(pos, hdrEnd).toString("latin1");
+    const dispMatch = hdrStr.match(/Content-Disposition:[^\r\n]*name="([^"]+)"/i);
+    const partName  = dispMatch ? dispMatch[1] : null;
+    const contentStart = hdrEnd + 4;
+    const nextSep  = bufferIndexOf(body, sep,    contentStart);
+    const finalSep = bufferIndexOf(body, endSep, contentStart);
+    let contentEnd;
+    if (nextSep >= 0 && (finalSep < 0 || nextSep < finalSep)) {
+      contentEnd = nextSep;
+    } else if (finalSep >= 0) {
+      contentEnd = finalSep;
+      if (body[contentEnd - 2] === 0x0d && body[contentEnd - 1] === 0x0a) contentEnd -= 2;
+    } else { break; }
+    if (partName === fieldName) return body.slice(contentStart, contentEnd);
+    if (nextSep >= 0 && (finalSep < 0 || nextSep < finalSep)) {
+      pos = nextSep + sep.length + 2;
+    } else { break; }
+  }
+  return null;
+}
+
+// ── buildSignedBackupBuffer: add HMAC header to backup SQL ─────────
+function buildSignedBackupBuffer(lines, filename, branchCount, sharedCount, branchDataCount) {
+  const payload = `${filename}|${branchCount}|${sharedCount}|${branchDataCount}`;
+  const sig     = crypto.createHmac("sha256", JWT_SECRET).update(payload).digest("hex").slice(0, 24);
+  const header  = [
+    `-- =====================================================`,
+    `-- Cafe Bloom POS — Authenticated Backup`,
+    `-- CB-Signature: ${sig}`,
+    `-- CB-Payload  : ${payload}`,
+    `-- =====================================================`,
+    ``,
+  ];
+  const sql    = [...header, ...lines].join("\n");
+  const buffer = Buffer.from(sql, "utf8");
+  return { sql, buffer, sig };
+}
+
+// ── Allowed tables + statement patterns for restore ────────────────
+const RESTORE_ALLOWED_TABLES  = new Set(["branches", "shared_data", "branch_data"]);
+const RESTORE_BLOCK_PATTERNS  = [
+  { re: /^\s*DROP\s/i,                                                   msg: "DROP not permitted" },
+  { re: /^\s*TRUNCATE\s/i,                                               msg: "TRUNCATE not permitted" },
+  { re: /^\s*DELETE\s/i,                                                 msg: "DELETE not permitted" },
+  { re: /^\s*UPDATE\s/i,                                                 msg: "UPDATE not permitted" },
+  { re: /^\s*ALTER\s/i,                                                  msg: "ALTER not permitted" },
+  { re: /^\s*GRANT\s/i,                                                  msg: "GRANT not permitted" },
+  { re: /^\s*REVOKE\s/i,                                                 msg: "REVOKE not permitted" },
+  { re: /^\s*COPY\s/i,                                                   msg: "COPY not permitted" },
+  { re: /^\s*CREATE\s+(?!TABLE\s+IF\s+NOT\s+EXISTS)/i,                  msg: "Only CREATE TABLE IF NOT EXISTS is permitted" },
+  { re: /^\s*EXECUTE\s/i,                                                msg: "EXECUTE not permitted" },
+  { re: /pg_read_file|pg_exec|pg_ls_dir|pg_sleep|pg_reload_conf/i,      msg: "Dangerous pg_ function" },
+  { re: /\$\$[\s\S]*?\$\$/,                                              msg: "Dollar-quoted blocks not permitted" },
+  { re: /;\s*(?:DROP|DELETE|TRUNCATE|UPDATE|ALTER|GRANT|REVOKE|COPY|EXECUTE)\s/i, msg: "Stacked dangerous statement" },
+];
+
+// ── handleDbRestore: multipart upload + strict SQL validation ───────
+async function handleDbRestore(req, res, session) {
+  const MAX_RESTORE_BYTES = 100 * 1024 * 1024; // 100 MB
+  try {
+    // Step 1: Read body with hard size limit
+    const rawBody = await new Promise((resolve, reject) => {
+      const chunks = []; let total = 0;
+      req.on("data", chunk => {
+        total += chunk.length;
+        if (total > MAX_RESTORE_BYTES) { reject(new Error(`Upload too large — max 100 MB`)); req.destroy(); return; }
+        chunks.push(chunk);
+      });
+      req.on("end",   () => resolve(Buffer.concat(chunks)));
+      req.on("error", reject);
+    });
+
+    // Step 2: Extract SQL buffer (multipart or raw)
+    const ct = (req.headers["content-type"] || "").toLowerCase();
+    let sqlBuffer;
+    if (ct.includes("multipart/form-data")) {
+      sqlBuffer = extractMultipartFile(rawBody, req.headers["content-type"], "sqlfile");
+      if (!sqlBuffer || sqlBuffer.length === 0) {
+        send(res, 400, { error: "Multipart field 'sqlfile' is missing or empty" }); return;
+      }
+    } else if (ct.includes("application/sql") || ct.includes("text/plain") || ct.includes("application/octet-stream")) {
+      sqlBuffer = rawBody; // backward-compatible raw upload
+    } else {
+      send(res, 400, { error: "Use multipart/form-data with field 'sqlfile'" }); return;
+    }
+
+    if (sqlBuffer.length < 50) { send(res, 400, { error: "SQL file is empty or too small" }); return; }
+    const sqlText = sqlBuffer.toString("utf8");
+
+    // Step 3: Verify HMAC signature (when present — logs warning if absent)
+    const sigLine = sqlText.match(/--\s*CB-Signature:\s*([0-9a-f]+)/i);
+    const payLine = sqlText.match(/--\s*CB-Payload\s*:\s*([^\n]+)/i);
+    let signatureVerified = false;
+    if (sigLine && payLine) {
+      const expected = crypto.createHmac("sha256", JWT_SECRET).update(payLine[1].trim()).digest("hex").slice(0, 24);
+      signatureVerified = expected === sigLine[1].trim();
+      if (!signatureVerified) logger.warn("Restore: HMAC mismatch — possible tampering", { by: session.username });
+    } else {
+      logger.warn("Restore: no CB-Signature — unverified backup file", { by: session.username });
+    }
+
+    // Step 4: Quick sanity check
+    if (!sqlText.includes("CREATE TABLE") && !sqlText.includes("INSERT INTO")) {
+      send(res, 400, { error: "File does not appear to be a valid SQL backup" }); return;
+    }
+
+    logger.info("SQL restore started", { bytes: sqlBuffer.length, verified: signatureVerified, by: session.username });
+
+    // Step 5: Parse + validate every statement (all-or-nothing)
+    const rawStmts  = sqlText.split(/;[ \t]*\n/).map(s => s.trim()).filter(s => s.length > 0);
+    const violations = [];
+    const toExecute  = [];
+
+    for (const stmt of rawStmts) {
+      const clean = stmt.replace(/--[^\n]*/g, "").trim();
+      if (!clean) continue;
+
+      // 5a. Block dangerous patterns
+      const blocked = RESTORE_BLOCK_PATTERNS.find(p => p.re.test(clean));
+      if (blocked) { violations.push(`${blocked.msg} → ${clean.slice(0, 100)}`); continue; }
+
+      // 5b. Statement type allowlist
+      const isInsert = /^\s*INSERT\s+INTO\s+\w+/i.test(clean);
+      const isCreate = /^\s*CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+\w+/i.test(clean);
+      const isSet    = /^\s*SET\s+/i.test(clean);
+
+      if (isSet) {
+        if (!/^\s*SET\s+(client_encoding|standard_conforming_strings)\s*=/i.test(clean)) {
+          violations.push(`SET variable not allowed → ${clean.slice(0, 100)}`); continue;
+        }
+        toExecute.push(stmt); continue;
+      }
+
+      if (!isInsert && !isCreate) { violations.push(`Statement type not allowed → ${clean.slice(0, 100)}`); continue; }
+
+      // 5c. Table name allowlist
+      const tblMatch = clean.match(/(?:INSERT\s+INTO|CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS)\s+(\w+)/i);
+      if (tblMatch && !RESTORE_ALLOWED_TABLES.has(tblMatch[1].toLowerCase())) {
+        violations.push(`Table not in allowlist: '${tblMatch[1]}' → ${clean.slice(0, 80)}`); continue;
+      }
+      toExecute.push(stmt);
+    }
+
+    // Step 6: Hard stop on ANY violation
+    if (violations.length > 0) {
+      logger.error("Restore BLOCKED — validation failed", { violations: violations.length, by: session.username, first: violations[0] });
+      send(res, 400, { error: `Restore blocked — ${violations.length} invalid statement(s)`, violations: violations.slice(0, 15), hint: "Only INSERT INTO and CREATE TABLE IF NOT EXISTS for allowed tables are permitted." });
+      return;
+    }
+    if (toExecute.length === 0) { send(res, 400, { error: "No executable statements found" }); return; }
+
+    // Step 7: Execute in one transaction
+    const client = await pool.connect();
+    let ok = 0, skipped = 0, errors = [];
+    try {
+      await client.query("BEGIN");
+      for (const stmt of toExecute) {
+        const clean = stmt.replace(/--[^\n]*/g, "").trim();
+        if (!clean) { skipped++; continue; }
+        try { await client.query(stmt); ok++; }
+        catch (e) {
+          if (e.code === "23505") { skipped++; continue; }
+          errors.push({ stmt: stmt.slice(0, 80), error: e.message });
+          if (errors.length > 10) break;
+        }
+      }
+      if (errors.length > 3) {
+        await client.query("ROLLBACK");
+        logger.error("Restore ROLLBACK — too many errors", { errors: errors.length, by: session.username });
+        send(res, 500, { error: `Restore aborted — ${errors.length} errors (rolled back)`, detail: errors.slice(0, 3).map(e => `${e.stmt}: ${e.error}`).join(" | ") });
+        return;
+      }
+      await client.query("COMMIT");
+      logger.info("SQL restore complete", { ok, skipped, errors: errors.length, verified: signatureVerified, by: session.username });
+      io.emit("shared_update", { table: "reload", data: {} });
+      send(res, 200, { ok: true, verified: signatureVerified, message: `Restore complete — ${ok} statements OK, ${skipped} skipped, ${errors.length} soft errors`, errors: errors.slice(0, 5) });
+    } finally { client.release(); }
+  } catch (e) {
+    logger.error("Restore error", { error: e.message });
+    send(res, 500, { error: "Restore failed: " + e.message });
+  }
+}
+
 // ── DB Init — Create tables if not exist ─────────────────────────
 async function initDB() {
   const client = await pool.connect();
@@ -1740,17 +1952,20 @@ CREATE TABLE IF NOT EXISTS branch_data (
       lines.push(`--   branch_data : ${branchDataRows[0].c} rows`);
       lines.push(`-- =====================================================`);
 
-      const sql    = lines.join("\n");
-      const buffer = Buffer.from(sql, "utf8");
+      const { buffer, sig } = buildSignedBackupBuffer(
+        lines, filename,
+        branchRows[0].c, sharedRows[0].c, branchDataRows[0].c
+      );
 
       logger.info("Backup complete", {
-        file: filename, kb: (buffer.length / 1024).toFixed(1), by: session.username
+        file: filename, kb: (buffer.length / 1024).toFixed(1), by: session.username, sig
       });
 
       res.writeHead(200, {
         "Content-Type":        "application/octet-stream",
         "Content-Disposition": `attachment; filename="${filename}"`,
         "Content-Length":      String(buffer.length),
+        "X-CB-Signature":      sig,
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type,Authorization,ngrok-skip-browser-warning",
         "Cache-Control": "no-cache",
@@ -1764,81 +1979,13 @@ CREATE TABLE IF NOT EXISTS branch_data (
     }
   }
 
-  // ── DB RESTORE — pure Node.js SQL restore via pg Pool ────────────
-  // POST /api/db-restore  → parses .sql and executes via pool (Super Admin only)
+  // ── DB RESTORE — multipart upload + strict SQL validation ──────────
+  // POST /api/db-restore  (Super Admin only)
   if (req.method === "POST" && url === "/api/db-restore") {
     const session = requireSuperAdmin(req, res);
     if (!session) return;
-
-    try {
-      // Read full SQL body
-      const sqlText = await new Promise((resolve, reject) => {
-        const chunks = [];
-        req.on("data", d => chunks.push(d));
-        req.on("end",  () => resolve(Buffer.concat(chunks).toString("utf8")));
-        req.on("error", reject);
-      });
-
-      if (!sqlText || sqlText.trim().length < 50) {
-        send(res, 400, { error: "SQL file is empty or too small" }); return;
-      }
-
-      logger.info("SQL restore started", { bytes: sqlText.length, by: session.username });
-
-      // Split SQL into individual statements (split on ";" at end of line)
-      // Skip comment lines and blank lines
-      const statements = sqlText
-        .split(/;[ \t]*\n/)
-        .map(s => s.trim())
-        .filter(s => s.length > 0 && !s.startsWith("--") && !s.startsWith("SET ") && s !== "");
-
-      const client = await pool.connect();
-      let ok = 0, skipped = 0, errors = [];
-
-      try {
-        await client.query("BEGIN");
-        for (const stmt of statements) {
-          // Skip pure comment blocks
-          if (stmt.replace(/--[^\n]*/g, "").trim().length === 0) { skipped++; continue; }
-          try {
-            await client.query(stmt);
-            ok++;
-          } catch (e) {
-            // ON CONFLICT DO NOTHING errors are fine to skip
-            if (e.code === "23505") { skipped++; continue; } // duplicate key
-            errors.push({ stmt: stmt.slice(0, 80), error: e.message });
-            if (errors.length > 10) break; // stop on too many errors
-          }
-        }
-
-        if (errors.length > 5) {
-          await client.query("ROLLBACK");
-          logger.error("Restore rollback — too many errors", { errors: errors.length });
-          send(res, 500, {
-            error: `Restore aborted — ${errors.length} errors`,
-            detail: errors.slice(0, 3).map(e => e.stmt + ": " + e.error).join(" | "),
-          }); return;
-        }
-
-        await client.query("COMMIT");
-        logger.info("SQL restore complete", { ok, skipped, errors: errors.length, by: session.username });
-
-        // Broadcast reload to all connected clients
-        io.emit("shared_update", { table: "reload", data: {} });
-
-        send(res, 200, {
-          ok: true,
-          message: `Restore complete — ${ok} statements, ${skipped} skipped, ${errors.length} errors`,
-          errors: errors.slice(0, 5),
-        });
-      } finally {
-        client.release();
-      }
-      return;
-    } catch (e) {
-      logger.error("Restore error", { error: e.message });
-      send(res, 500, { error: "Restore failed: " + e.message }); return;
-    }
+    await handleDbRestore(req, res, session);
+    return;
   }
 
   send(res, 404, { error:"Not found" });
