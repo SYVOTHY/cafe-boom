@@ -38,7 +38,21 @@ const DATABASE_URL   = process.env.DATABASE_URL;   // set by Railway PostgreSQL 
 // JWT secret — stable across restarts (use env var or derive from DB URL)
 const JWT_SECRET = process.env.JWT_SECRET || DATABASE_URL.slice(-32) || "cafe_bloom_secret_2025";
 
-// ── Telegram config (MUST be set in Railway environment variables) ─
+// ── Cambodia timezone ─────────────────────────────────────────────
+// Railway servers run UTC — always format dates in Asia/Phnom_Penh
+const KH_TZ = "Asia/Phnom_Penh";
+function fmtKH(date = new Date()) {
+  return date.toLocaleString("km-KH", { timeZone: KH_TZ });
+}
+function todayKH(date = new Date()) {
+  return new Date(date.toLocaleString("en-US", { timeZone: KH_TZ }))
+    .toISOString().slice(0, 10);
+}
+function hoursKH(date = new Date()) {
+  return new Date(date.toLocaleString("en-US", { timeZone: KH_TZ })).getHours();
+}
+
+// ── Telegram config ────────────────────────────────────────────────
 const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN || "";    // set in Railway env
 const TG_CHAT_ID   = process.env.TG_CHAT_ID   || "";    // set in Railway env
 const TG_ENABLED   = TG_BOT_TOKEN.length > 10 && TG_CHAT_ID.length > 3;
@@ -1027,26 +1041,76 @@ function send(res, status, data) {
 //  AUTH MIDDLEWARE
 // ═══════════════════════════════════════════════════════════════════
 
-// ── Rate limiting — simple in-memory per IP ──────────────────────
-const _rateLimits = new Map(); // ip → { count, resetAt }
-const RATE_WINDOW_MS  = 60 * 1000;  // 1 minute window
-const RATE_MAX_LOGIN  = 10;          // max login attempts per window
-const RATE_MAX_API    = 300;         // max general API calls per window
+// ═══════════════════════════════════════════════════════════════════
+//  RATE LIMITING  —  per-IP + per-user, multi-bucket
+//  Buckets:
+//    login     — 5 attempts / 15 min  (brute force protection)
+//    checkout  — 60 / min             (prevent order flood)
+//    write     — 120 / min            (POST /api/db/*)
+//    read      — 300 / min            (GET /api/db, /api/*)
+//    backup    — 3 / hour             (heavy operation)
+//    global    — 500 / min per IP     (DDoS catch-all)
+// ═══════════════════════════════════════════════════════════════════
+const _rateLimits = new Map();
 
-function rateCheck(ip, bucket, max) {
-  const key = `${ip}:${bucket}`;
+const RATE_BUCKETS = {
+  login:    { max: 5,   windowMs: 15 * 60 * 1000 }, // 5 / 15 min
+  checkout: { max: 60,  windowMs:       60 * 1000 }, // 60 / min
+  write:    { max: 120, windowMs:       60 * 1000 }, // 120 / min
+  read:     { max: 300, windowMs:       60 * 1000 }, // 300 / min
+  backup:   { max: 3,   windowMs:   60 * 60 * 1000 }, // 3 / hour
+  global:   { max: 500, windowMs:       60 * 1000 }, // 500 / min (catch-all)
+};
+
+// Returns { ok, remaining, resetAt } — never throws
+function rateCheck(key, bucket) {
+  const cfg = RATE_BUCKETS[bucket] || RATE_BUCKETS.global;
+  const mapKey = `${key}:${bucket}`;
   const now = Date.now();
-  let r = _rateLimits.get(key);
+  let r = _rateLimits.get(mapKey);
   if (!r || now > r.resetAt) {
-    r = { count: 0, resetAt: now + RATE_WINDOW_MS };
-    _rateLimits.set(key, r);
+    r = { count: 0, resetAt: now + cfg.windowMs };
+    _rateLimits.set(mapKey, r);
   }
   r.count++;
-  if (r.count > max) return false; // blocked
+  const remaining = Math.max(0, cfg.max - r.count);
+  const ok = r.count <= cfg.max;
+  if (!ok) logger.warn("Rate limit hit", { key, bucket, count: r.count, max: cfg.max });
+  return { ok, remaining, resetAt: r.resetAt };
+}
+
+// Convenience: check + auto-send 429 on failure
+// Returns true if allowed, false (and sends 429) if blocked
+function checkRate(req, res, bucket) {
+  const ip      = getIP(req);
+  const session = getSession(req);
+  // Key = ip alone for anon, ip:userId for authenticated (user gets own quota)
+  const key = session ? `${ip}:${session.user_id}` : ip;
+  const { ok, remaining, resetAt } = rateCheck(key, bucket);
+  if (!ok) {
+    const retryAfter = Math.ceil((resetAt - Date.now()) / 1000);
+    res.setHeader("Retry-After",       String(retryAfter));
+    res.setHeader("X-RateLimit-Limit", String(RATE_BUCKETS[bucket]?.max || 500));
+    res.setHeader("X-RateLimit-Remaining", "0");
+    res.setHeader("X-RateLimit-Reset", String(Math.ceil(resetAt / 1000)));
+    send(res, 429, {
+      error:    `ការស្នើសុំញឹកពេក — សូមរង់ចាំ ${retryAfter} វិនាទី`,
+      retryAfterSeconds: retryAfter,
+      bucket,
+    });
+    return false;
+  }
+  // Set rate limit headers on successful responses too (nice UX)
+  res.setHeader("X-RateLimit-Remaining", String(remaining));
+  res.setHeader("X-RateLimit-Reset",     String(Math.ceil(resetAt / 1000)));
   return true;
 }
 
-// Clean rate limit entries every 5 minutes
+// Legacy alias — kept for old rateCheck(ip, "login", max) calls
+const RATE_MAX_LOGIN = RATE_BUCKETS.login.max;
+const RATE_MAX_API   = RATE_BUCKETS.global.max;
+
+// Clean expired entries every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of _rateLimits) { if (now > v.resetAt) _rateLimits.delete(k); }
@@ -1230,11 +1294,16 @@ async function tgNotifyShift(shiftId, orders, branchMap) {
   const shifts = { morning: { label: "\u{1F305} \u1796\u17D2\u179A\u17B9\u1780", start:5, end:13 },
                    afternoon: { label: "\u2600\uFE0F \u179A\u179F\u17B9\u1799", start:12, end:19 } };
   const shift = shifts[shiftId] || shifts.morning;
-  const today = new Date().toISOString().slice(0,10);
+
+  // Cambodia timezone helper (UTC+7)
+  const today   = todayKH();
+
   const shiftOrders = (orders||[]).filter(o => {
     try {
-      const d = new Date(o.order_id);
-      return d.toISOString().slice(0,10) === today && d.getHours() >= shift.start && d.getHours() < shift.end;
+      const d      = new Date(o.order_id);
+      const dateOK = todayKH(d) === today;
+      const hourOK = hoursKH(d) >= shift.start && hoursKH(d) < shift.end;
+      return dateOK && hourOK;
     } catch { return false; }
   });
   const totalRev   = shiftOrders.reduce((s,o)=>s+Number(o.total||0)+Number(o.tax||0),0);
@@ -1271,11 +1340,8 @@ async function handler(req, res) {
   // ── Request logging ────────────────────────────────────────────
   logger.request(req);
 
-  // ── Global rate limit ──────────────────────────────────────────
-  if (!rateCheck(ip, "api", RATE_MAX_API)) {
-    logger.warn("Rate limit exceeded", { ip, url });
-    send(res, 429, { error:"Too many requests — please slow down" }); return;
-  }
+  // ── Global rate limit (catch-all DDoS guard) ───────────────────
+  if (!checkRate(req, res, "global")) return;
 
   // ── Health ──────────────────────────────────────────────────────
   if (req.method === "GET" && url === "/api/ping") {
@@ -1288,6 +1354,8 @@ async function handler(req, res) {
   if (req.method === "GET" && url === "/api/db") {
     const session = requireAuth(req, res);
     if (!session) return;
+    // Read: 300 per minute
+    if (!checkRate(req, res, "read")) return;
     const bid     = sanitizeBranchId(resolveBranch(req)) || "branch_1";
     const isSuper = session.role === "admin" && session.branch_id === "all";
     if (!isSuper && session.branch_id !== bid) { send(res, 403, { error:"Branch access denied" }); return; }
@@ -1382,11 +1450,8 @@ async function handler(req, res) {
 
   // ── LOGIN ───────────────────────────────────────────────────────
   if (req.method === "POST" && url === "/api/login") {
-    // Strict rate limit on login (brute force protection)
-    if (!rateCheck(ip, "login", RATE_MAX_LOGIN)) {
-      logger.warn("Login rate limit exceeded", { ip });
-      send(res, 429, { error:"Too many login attempts — wait 1 minute" }); return;
-    }
+    // Strict rate limit: 5 attempts per 15 min (brute force protection)
+    if (!checkRate(req, res, "login")) return;
     const body = await readBody(req);
     const v = parseBody(res, Schemas.login, body);
     if (!v.ok) return;
@@ -1493,6 +1558,8 @@ async function handler(req, res) {
   if (req.method === "POST" && url.startsWith("/api/db/")) {
     const session = requireAuth(req, res);
     if (!session) return;
+    // Write: 120 per minute (prevent data flood)
+    if (!checkRate(req, res, "write")) return;
 
     const table = url.replace("/api/db/", "").split("?")[0];
     const bid   = sanitizeBranchId(resolveBranch(req)) || "branch_1";
@@ -1564,6 +1631,8 @@ async function handler(req, res) {
   if (req.method === "POST" && url === "/api/checkout") {
     const session = requireAuth(req, res);
     if (!session) return;
+    // Checkout: 60 per minute per user (prevent order flood)
+    if (!checkRate(req, res, "checkout")) return;
 
     const body = await readBody(req);
     const v = parseBody(res, Schemas.checkout, body);
@@ -1584,7 +1653,7 @@ async function handler(req, res) {
 
     // ── Validate + deduct stock atomically ───────────────────────
     const logEntries  = [];
-    const ts          = new Date().toLocaleString("km-KH");
+    const ts = fmtKH();
 
     for (const item of items) {
       const pid       = Number(item.product_id);
@@ -1804,7 +1873,7 @@ async function handler(req, res) {
       line("Cafe Bloom"); normalSz(); boldOff();
       line(""); centerOff(); centerOn();
       line("Tel: 012 XXX XXX");
-      line(r.ts||new Date().toLocaleString());
+      line(r.ts || fmtKH());
       if(r.table) line(`Table: ${r.table}`);
       centerOff(); dashes();
 
@@ -1853,6 +1922,8 @@ async function handler(req, res) {
   if (req.method === "GET" && url === "/api/db-backup") {
     const session = requireSuperAdmin(req, res);
     if (!session) return;
+    // Backup: 3 per hour (heavy operation)
+    if (!checkRate(req, res, "backup")) return;
 
     if (!DATABASE_URL) {
       send(res, 503, { error: "DATABASE_URL not configured" }); return;
