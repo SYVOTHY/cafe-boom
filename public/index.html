@@ -33,12 +33,26 @@
   <!-- PWA Manifest -->
   <link rel="manifest" href="/manifest.json" />
 
-  <!-- Apple touch icons (fallback for iOS — no manifest icon support) -->
-  <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
-  <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png" />
+  <!--
+    ⚠️ CRITICAL FOR iOS:
+    iOS ignores manifest icons entirely.
+    It ONLY reads <link rel="apple-touch-icon"> tags below.
+    File must physically exist on the server.
+    Use icon-generator.html to create these files.
+  -->
 
-  <!-- Favicon -->
+  <!-- iPhone (standard) -->
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <!-- iPhone Retina / iPhone X+ (180×180 is the gold standard) -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <!-- iPad Retina -->
+  <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
+  <!-- iPad Pro -->
+  <link rel="apple-touch-icon" sizes="167x167" href="/icons/apple-touch-icon.png" />
+
+  <!-- Favicon (browser tab) -->
   <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-96.png" />
+  <link rel="icon" type="image/png" sizes="96x96" href="/icons/icon-96.png" />
 
   <!-- ═══════════════════════════════════════════════════════════
        FIX 2 — Body overscroll (backup in HTML as well as CSS)
