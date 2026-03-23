@@ -347,7 +347,18 @@ const BRANCH_ADMIN_DEFAULT_PERMS = {
 };
 
 const SUGAR = ["0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "100%"];
-const MILK = ["គ្មានទឹកដោះ", "ទឹកដោះគោ", "ទឹកសណ្ដែក", "Oat", "មិនថែមអ្វីទេ"];
+const MILK  = ["គ្មានទឹកដោះ", "ទឹកដោះគោ", "ទឹកសណ្ដែក", "Oat", "មិនថែមអ្វីទេ"];
+
+// Categories that do NOT need Size / Sugar / Milk options
+// Match by emoji OR partial name — future-proof if user renames categories
+const NO_DRINK_OPTS = new Set(["🍵", "🍰", "🥪", "🍩", "🎂"]);
+const isNoDrinkCategory = (cat) => {
+  if (!cat) return false;
+  if (NO_DRINK_OPTS.has(cat.emoji)) return true;
+  // Also match by name pattern (food / tea keywords)
+  const n = (cat.category_name || "").toLowerCase();
+  return n.includes("អាហារ") || n.includes("នំ") || n.includes("តែ") || n.includes("ភេសជ្ជៈ");
+};
 
 // ── EXPORT UTILITIES ────────────────────────────────────────────────
 // Download CSV from array of objects
@@ -1455,9 +1466,16 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
 
   const openCustomize = (prod) => {
     setCustomize(prod);
-    const opts = options.filter(o => o.product_id === prod.product_id);
+    const opts  = options.filter(o => o.product_id === prod.product_id);
     const sizes = opts.filter(o => o.option_name === "ទំហំ").map(o => o.option_value);
-    setCustOpts({ sugar: "50%", milk: "ទឹកដោះគោ", size: sizes[0] || "M" });
+    const cat   = getCat(prod.category_id);
+    const noDrink = isNoDrinkCategory(cat);
+    // For food/tea: no sugar/milk defaults; size still allowed if defined in menu
+    setCustOpts({
+      sugar: noDrink ? "" : "50%",
+      milk:  noDrink ? "" : "ទឹកដោះគោ",
+      size:  sizes[0] || (noDrink ? "" : "M"),
+    });
   };
 
   const addToCart = () => {
@@ -1575,16 +1593,41 @@ function POSPage({ cats, prods, ings, recipes, options, tables, setTables, order
               );
             })()}
           </div>
-          {/* Size options — always show, default S/M/L/XL if none defined in menu */}
-          <OptRow label="ទំហំ"
-            items={options.filter(o => o.product_id === customize.product_id && o.option_name === "ទំហំ").length > 0
-              ? options.filter(o => o.product_id === customize.product_id && o.option_name === "ទំហំ").map(o => o.option_value)
-              : ["S", "M", "L", "XL"]}
-            value={custOpts.size} onChange={v => setCustOpts(p => ({ ...p, size: v }))} color="#E8A84B" />
-          <OptRow label="ស្ករ" items={SUGAR} value={custOpts.sugar}
-            onChange={v => setCustOpts(p => ({ ...p, sugar: v }))} color="#F39C12" slider={true} />
-          <OptRow label="ទឹកដោះ" items={MILK} value={custOpts.milk}
-            onChange={v => setCustOpts(p => ({ ...p, milk: v }))} color="#5BA3E0" />
+          {/* Size / Sugar / Milk — hidden for food & tea categories */}
+          {(() => {
+            const cat      = getCat(customize.category_id);
+            const noDrink  = isNoDrinkCategory(cat);
+            const hasSizes = options.filter(o => o.product_id === customize.product_id && o.option_name === "ទំហំ").length > 0;
+            return (
+              <>
+                {/* ទំហំ — show only if: coffee category OR menu has explicit size options */}
+                {(!noDrink || hasSizes) && (
+                  <OptRow label="ទំហំ"
+                    items={hasSizes
+                      ? options.filter(o => o.product_id === customize.product_id && o.option_name === "ទំហំ").map(o => o.option_value)
+                      : ["S", "M", "L", "XL"]}
+                    value={custOpts.size} onChange={v => setCustOpts(p => ({ ...p, size: v }))} color="#E8A84B" />
+                )}
+                {/* ស្ករ — hide for food & tea */}
+                {!noDrink && (
+                  <OptRow label="ស្ករ" items={SUGAR} value={custOpts.sugar}
+                    onChange={v => setCustOpts(p => ({ ...p, sugar: v }))} color="#F39C12" slider={true} />
+                )}
+                {/* ទឹកដោះ — hide for food & tea */}
+                {!noDrink && (
+                  <OptRow label="ទឹកដោះ" items={MILK} value={custOpts.milk}
+                    onChange={v => setCustOpts(p => ({ ...p, milk: v }))} color="#5BA3E0" />
+                )}
+                {/* Badge when options are hidden */}
+                {noDrink && !hasSizes && (
+                  <div style={{ textAlign:"center", fontSize:12, color:"var(--text-dim)",
+                    background:"var(--bg-main)", borderRadius:8, padding:"8px 12px", marginBottom:4 }}>
+                    {cat?.emoji || "🍽"} {cat?.category_name} — មិនតម្រូវការ ទំហំ / ស្ករ / ទឹកដោះ
+                  </div>
+                )}
+              </>
+            );
+          })()}
           <button onClick={addToCart} style={{ ...btnGold, width: "100%", marginTop: 18, padding: 14, fontSize: 15 }}>
             ➕ បន្ថែមទៅកម្ម៉ង់
           </button>
