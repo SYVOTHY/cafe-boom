@@ -473,6 +473,45 @@ function safeMonth(v) { return safeDate(v).slice(0,7); }
 // ═══════════════════════════════════════════════════════════════════
 //  MAIN APP
 // ═══════════════════════════════════════════════════════════════════
+// ── FIX 3: Ripple effect helper ─────────────────────────────────────
+function addRipple(e) {
+  const el = e.currentTarget;
+  if (!el) return;
+  const dot = document.createElement("span");
+  dot.className = "ripple-dot";
+  const rect = el.getBoundingClientRect();
+  dot.style.left = (e.clientX - rect.left) + "px";
+  dot.style.top  = (e.clientY - rect.top)  + "px";
+  el.appendChild(dot);
+  dot.addEventListener("animationend", () => dot.remove());
+}
+
+// ── FIX 5: Bottom Navigation Bar (mobile) ────────────────────────────
+function BottomNav({ page, goPage, NAV }) {
+  // Show 4 most-used pages + "More" implied by hamburger
+  // Pick from available NAV items
+  const BOTTOM_SHORTCUTS = ["pos", "tables", "orders", "inventory"];
+  const items = BOTTOM_SHORTCUTS
+    .map(id => NAV.find(n => n.id === id))
+    .filter(Boolean)
+    .slice(0, 4);
+
+  return (
+    <nav className="bottom-nav">
+      {items.map(n => (
+        <button
+          key={n.id}
+          className={"bottom-nav-btn" + (page === n.id ? " active" : "")}
+          onClick={() => goPage(n.id)}
+        >
+          <span className="bottom-nav-icon">{n.emoji}</span>
+          <span>{n.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 export default function CafeBloomApp() {
   return <ErrorBoundary><CafeBloom /></ErrorBoundary>;
 }
@@ -1233,6 +1272,9 @@ function CafeBloom() {
         {page === "theme"     && <ThemePage     {...shared} />}
         {page === "backup"    && <BackupPage    {...shared} />}
       </div>
+
+      {/* ── FIX 5: Bottom Navigation — mobile only ── */}
+      <BottomNav page={page} goPage={goPage} NAV={NAV} />
     </div>
   );
 }
@@ -8128,6 +8170,20 @@ const CSS = `
   img  { max-width: 100%; display: block; }
 
   /* ═══════════════════════════════════════════════════════════════
+   FIX 2 — PULL-TO-REFRESH / OVERSCROLL  (Native App feel)
+   Prevents browser pull-to-refresh & bounce on body.
+   Individual scroll containers keep their own overscroll.
+  ═══════════════════════════════════════════════════════════════ */
+  html, body {
+    overscroll-behavior: none;           /* block pull-to-refresh + rubber-band */
+    -webkit-overflow-scrolling: touch;   /* iOS momentum on children */
+    touch-action: pan-x pan-y;          /* allow panning, block pinch-zoom on root */
+    /* FIX 4 — dvh fallback chain */
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
      TYPOGRAPHY / INPUTS
   ═══════════════════════════════════════════════════════════════ */
   .inp {
@@ -8140,39 +8196,42 @@ const CSS = `
   .inp:focus { border-color: var(--accent); }
 
   /* ═══════════════════════════════════════════════════════════════
-   FIX 4 — TOUCH TARGETS (min 44×44 px, Apple HIG / WCAG 2.5.5)
-   All interactive elements guaranteed ≥44px tap area.
+   FIX 3+4 — TOUCH LATENCY, RIPPLE, TOUCH TARGETS (≥44px)
   ═══════════════════════════════════════════════════════════════ */
+  @keyframes ripple { to { transform: scale(4); opacity: 0; } }
+  .ripple-wrap { position: relative; overflow: hidden; -webkit-tap-highlight-color: transparent; }
+  .ripple-wrap .ripple-dot {
+    position: absolute; border-radius: 50%;
+    background: rgba(255,255,255,.22);
+    width: 10px; height: 10px; margin: -5px 0 0 -5px;
+    transform: scale(0); animation: ripple .5s linear;
+    pointer-events: none;
+  }
+
   .btn-primary {
     background: var(--accent); color: #000; border: none;
     border-radius: 8px; padding: 10px 18px; font-weight: 700;
-    cursor: pointer; font-size: 14px; width: 100%;
+    cursor: pointer; font-size: 14px; width: 100%; min-height: 44px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
-    transition: opacity .2s;
-    /* Touch target */
-    min-height: 44px;
-    -webkit-tap-highlight-color: transparent;
+    transition: filter .1s; -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
   }
-  .btn-primary:hover   { opacity: .85; }
-  .btn-primary:disabled{ opacity: .5; cursor: default; }
+  .btn-primary:active  { filter: brightness(.85); transition: none; }
+  .btn-primary:hover   { filter: brightness(.92); }
+  .btn-primary:disabled{ opacity: .5; cursor: default; filter: none; }
 
   .btn-sm {
     background: var(--bg-main); color: var(--text-main);
     border: 1px solid var(--border-col); border-radius: 6px;
     padding: 4px 10px; cursor: pointer; font-size: 12px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
-    white-space: nowrap;
-    /* Touch target — use padding to reach 44px without changing visual size */
-    min-height: 32px;
-    position: relative;
+    white-space: nowrap; min-height: 32px; position: relative;
     -webkit-tap-highlight-color: transparent;
+    transition: border-color .12s, color .12s, background .08s;
   }
-  /* Invisible tap-area extension (pseudo-element trick) */
-  .btn-sm::after {
-    content: ''; position: absolute;
-    inset: -6px;           /* expands clickable area by 6px each side */
-  }
-  .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm::after { content:''; position:absolute; inset:-6px; }
+  .btn-sm:active { background: rgba(232,168,75,.14); border-color: var(--accent); transition: none; }
+  .btn-sm:hover  { border-color: var(--accent); color: var(--accent); }
 
   .nav-btn {
     background: var(--bg-main); color: var(--text-dim);
@@ -8181,81 +8240,82 @@ const CSS = `
     white-space: nowrap; min-height: 44px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
     -webkit-tap-highlight-color: transparent;
+    transition: background .08s, color .08s;
   }
+  .nav-btn:active       { background: var(--accent-dk); color: #fff; transition: none; }
   .nav-btn.active, .nav-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
 
   .cat-btn {
     background: var(--bg-card); color: var(--text-dim);
     border: 1px solid var(--border-col); border-radius: 20px;
     padding: 5px 14px; cursor: pointer; font-size: 13px;
-    white-space: nowrap; flex-shrink: 0;
-    min-height: 36px;    /* category pills — slightly smaller but still comfortable */
+    white-space: nowrap; flex-shrink: 0; min-height: 36px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
     -webkit-tap-highlight-color: transparent;
+    transition: background .08s, color .08s;
   }
+  .cat-btn:active { background: var(--accent-dk); color: #fff; transition: none; }
   .cat-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
   .pay-btn {
     flex: 1; background: var(--bg-main); color: var(--text-dim);
     border: 1px solid var(--border-col); border-radius: 8px;
-    padding: 6px 4px; cursor: pointer; font-size: 11px;
-    min-height: 44px;
+    padding: 6px 4px; cursor: pointer; font-size: 11px; min-height: 44px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
-    transition: background .15s, color .15s;
     -webkit-tap-highlight-color: transparent;
+    transition: background .08s, color .08s;
   }
+  .pay-btn:active { background: rgba(232,168,75,.22); transition: none; }
   .pay-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
   .opt-btn {
     background: var(--bg-main); color: var(--text-dim);
     border: 1px solid var(--border-col); border-radius: 6px;
-    padding: 5px 10px; cursor: pointer; font-size: 12px;
-    min-height: 36px;
+    padding: 5px 10px; cursor: pointer; font-size: 12px; min-height: 36px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
     -webkit-tap-highlight-color: transparent;
+    transition: background .08s;
   }
+  .opt-btn:active { background: rgba(232,168,75,.18); transition: none; }
   .opt-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
+  .prod-card:active  { transform: scale(.95) !important; border-color: var(--accent); transition: transform .07s !important; }
+  .table-card:active { transform: scale(.95) !important; transition: transform .07s !important; }
+  .mobile-fab:active { transform: scale(.90) !important; transition: transform .07s !important; }
+
   /* ═══════════════════════════════════════════════════════════════
-     NAV TABS  (touch target + smooth scroll)
+     NAV TABS
   ═══════════════════════════════════════════════════════════════ */
   .nav-tab {
     display: flex; align-items: center; gap: 6px;
     background: transparent; color: var(--text-dim);
     border: none; border-bottom: 3px solid transparent;
     padding: 10px 16px; cursor: pointer; font-size: 13px;
-    white-space: nowrap; transition: color .18s, border-color .18s;
+    white-space: nowrap; transition: color .15s, border-color .15s, background .08s;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
-    flex-shrink: 0;
-    /* Touch target */
-    min-height: 44px;
+    flex-shrink: 0; min-height: 44px;
     -webkit-tap-highlight-color: transparent;
   }
+  .nav-tab:active { background: rgba(232,168,75,.1); transition: none; }
   .nav-tab:hover  { color: var(--text-main); border-bottom-color: rgba(232,168,75,.4); }
   .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
 
-  /* FIX 3 — SMOOTH SCROLL on nav tab bar */
   .nav-tab-bar {
-    display: flex;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;   /* iOS momentum scroll */
-    scroll-behavior: smooth;
-    scrollbar-width: none;
+    display: flex; overflow-x: auto; -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth; scrollbar-width: none;
     border-bottom: 1px solid var(--border-col);
-    overscroll-behavior-x: contain;     /* prevent scroll chain to parent */
+    overscroll-behavior-x: contain;
   }
   .nav-tab-bar::-webkit-scrollbar { display: none; }
 
   /* ═══════════════════════════════════════════════════════════════
-     CARDS  (touch targets — prod-card & table-card)
+     CARDS
   ═══════════════════════════════════════════════════════════════ */
   .prod-card {
     background: var(--bg-card); border: 1px solid var(--border-col);
     border-radius: 12px; padding: 12px 8px;
     display: flex; flex-direction: column; align-items: center; gap: 6px;
-    cursor: pointer; transition: border-color .2s, transform .15s;
-    /* Touch target: min height so small cards stay tappable */
-    min-height: 80px;
+    cursor: pointer; transition: border-color .2s, transform .15s; min-height: 80px;
     -webkit-tap-highlight-color: transparent;
     user-select: none; -webkit-user-select: none;
   }
@@ -8272,15 +8332,45 @@ const CSS = `
     background: var(--bg-card); border: 2px solid var(--border-col);
     border-radius: 12px; padding: 14px 10px;
     display: flex; flex-direction: column; align-items: center; gap: 6px;
-    cursor: pointer; transition: border-color .2s, transform .15s;
-    min-height: 80px;
+    cursor: pointer; transition: border-color .2s, transform .15s; min-height: 80px;
     -webkit-tap-highlight-color: transparent;
     user-select: none; -webkit-user-select: none;
   }
   .table-card:hover { transform: scale(1.04); }
 
   /* ═══════════════════════════════════════════════════════════════
-   FIX 2 — PRODUCT GRID with minmax (fluid columns, no fixed col count)
+   FIX 1 — APP SHELL  (Header fixed, only main content scrolls)
+   FIX 4 — 100dvh  (Dynamic Viewport Height)
+  ═══════════════════════════════════════════════════════════════ */
+  .app-root {
+    display: flex; flex-direction: column;
+    height: 100vh;                        /* fallback */
+    min-height: -webkit-fill-available;   /* Safari iOS fill */
+    height: 100dvh;                       /* modern: excludes browser chrome */
+    overflow: hidden;                     /* shell never scrolls */
+  }
+  .topbar-fixed {
+    position: sticky; top: 0; z-index: 200; flex-shrink: 0;
+  }
+  .desktop-nav.nav-tab-bar {
+    position: sticky; top: var(--topbar-h, 52px);
+    z-index: 190; flex-shrink: 0; background: var(--bg-header);
+  }
+  /* Main scrolling region */
+  .page-pad {
+    flex: 1; min-height: 0;
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth; overscroll-behavior-y: contain;
+  }
+  .page-pad.page-pos-active { overflow: hidden !important; padding: 0 !important; }
+
+  /* ═══════════════════════════════════════════════════════════════
+   FIX 5 — BOTTOM NAVIGATION BAR  (mobile ≤768px)
+   Shows POS / Orders / Inventory / More shortcuts.
+  ═══════════════════════════════════════════════════════════════ */
+  .bottom-nav {
+    display: none; /* hidden on desktop */
+  }
    Cards never smaller than 100px, max fills available space evenly.
   ═══════════════════════════════════════════════════════════════ */
   .prod-grid {
@@ -8529,8 +8619,37 @@ const CSS = `
       -webkit-tap-highlight-color: transparent;
     }
 
-    /* Pages: bottom padding so FAB / cart doesn't cover content */
-    main > div { padding-bottom: 80px !important; }
+    /* FIX 5 — Bottom Navigation (replaces hamburger for quick nav) */
+    .bottom-nav {
+      display: flex;
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 210;
+      height: 58px;
+      background: var(--bg-header);
+      border-top: 1px solid var(--border-col);
+      align-items: stretch;
+      /* safe area for notch phones */
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    .bottom-nav-btn {
+      flex: 1; border: none; background: transparent;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 2px; cursor: pointer;
+      color: var(--text-dim); font-family: inherit; font-size: 10px;
+      padding: 6px 4px; min-height: 48px;
+      -webkit-tap-highlight-color: transparent;
+      transition: color .1s, background .08s;
+    }
+    .bottom-nav-btn:active      { background: rgba(232,168,75,.1); transition: none; }
+    .bottom-nav-btn.active      { color: var(--accent); }
+    .bottom-nav-btn.active span:first-child {
+      background: rgba(232,168,75,.15); border-radius: 12px;
+      padding: 3px 14px;
+    }
+    .bottom-nav-icon { font-size: 20px; line-height: 1; }
+
+    /* Push page content above bottom-nav */
+    .page-pad { padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)) !important; }
+    .page-pad.page-pos-active { padding-bottom: 0 !important; }
 
     .page-backup { max-width: 100%; }
     .modal-box   { padding: 18px; }
