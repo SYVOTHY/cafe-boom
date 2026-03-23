@@ -923,7 +923,7 @@ function CafeBloom() {
   const goPage = (id) => { setPage(id); setMenuOpen(false); };
 
   return (
-    <div style={{ height:"100vh", display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }} className={"app-root" + (themeRaw.bgMain && themeRaw.bgMain > "#888" ? " light-mode" : "")}>
+    <div style={{ display:"flex", flexDirection:"column", background:"var(--bg-main)", color:"var(--text-main)", fontFamily:"'Hanuman', 'Noto Sans Khmer', sans-serif", overflow:"hidden" }} className={"app-root" + (themeRaw.bgMain && themeRaw.bgMain > "#888" ? " light-mode" : "")}>
       <style>{CSS}</style>
 
       {/* ── Low Stock Alert Modal ── */}
@@ -7295,7 +7295,7 @@ function ConfirmRestoreModal({ file, onCancel, onConfirm }) {
   );
 }
 
-function BackupPage({ branchList, notify, setTheme }) {
+function BackupPage({ branchList, notify, setTheme, orders, ings, prods, cats, isGlobalAdmin, branchId, currentUser }) {
   const [loading,    setLoading]    = useState(false);
   const [restoring,  setRestoring]  = useState(false);
   const [lastBackup, setLastBackup] = useState(() => localStorage.getItem("cb_last_backup") || null);
@@ -7306,7 +7306,169 @@ function BackupPage({ branchList, notify, setTheme }) {
   const [backupMode, setBackupMode] = useState("pgdump"); // "pgdump" | "json"
   const fileRef = useRef(null);
 
-  // ── pg_dump backup (full PostgreSQL) ─────────────────────────────
+  // ── Export states ─────────────────────────────────────────────────
+  const [exportingSales, setExportingSales]   = useState(false);
+  const [exportingInv,   setExportingInv]     = useState(false);
+  const [exportLog,      setExportLog]        = useState([]);
+
+  // ── getBranchName helper ──────────────────────────────────────────
+  const getBName = (bid) => (branchList||[]).find(b=>b.branch_id===bid)?.branch_name || bid;
+
+  // ── Export Sales CSV ──────────────────────────────────────────────
+  // Global admin: fetches all branches via /api/all-orders
+  // Branch user : uses local orders prop
+  const doExportSales = async () => {
+    setExportingSales(true); setExportLog(["⏳ កំពុងទាញ orders..."]);
+    try {
+      let allOrders = [];
+
+      if (isGlobalAdmin) {
+        // Fetch all orders from all branches
+        const token = localStorage.getItem("pos_token");
+        const r = await fetch(`${CLOUD_URL}/api/all-orders`, {
+          headers: { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) }
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        allOrders = await r.json();
+      } else {
+        // Branch user — use local orders
+        allOrders = (orders||[]).map(o => ({ ...o, branch_id: o.branch_id||branchId }));
+      }
+
+      if (!allOrders.length) {
+        setExportLog(["⚠️ មិនមាន orders ទេ"]); setExportingSales(false); return;
+      }
+
+      // Build rows matching the spec columns
+      const rows = allOrders.map(o => {
+        // Items Summary: "Latte x2, Mocha x1"
+        const itemsSummary = (o.items||[])
+          .map(i => `${i.product_name||"?"} x${i.qty||1}`)
+          .join(", ");
+
+        // Subtotal (before tax)
+        const subtotal = Number(o.total||0);
+        // Discount (if field exists — default 0)
+        const discount = Number(o.discount||0);
+        // Total = subtotal + tax - discount
+        const totalAmt = subtotal + Number(o.tax||0) - discount;
+
+        // Date: parse from order_id (timestamp) or created_at
+        let dateStr = "";
+        try {
+          const d = new Date(o.order_id || o.created_at);
+          dateStr = isNaN(d) ? (o.ts||"") : d.toLocaleString("km-KH");
+        } catch { dateStr = o.ts || ""; }
+
+        return {
+          "Date & Time":      dateStr,
+          "Order ID":         String(o.order_id||""),
+          "Branch":           getBName(o.branch_id),
+          "Items Summary":    itemsSummary,
+          "Subtotal ($)":     subtotal.toFixed(2),
+          "Discount ($)":     discount.toFixed(2),
+          "Total Amount ($)": totalAmt.toFixed(2),
+          "Payment Method":   o.method||"",
+          "Cashier":          o.cashier||"",
+          "Status":           o.status||"Completed",
+        };
+      });
+
+      // Sort by date descending
+      rows.sort((a,b) => (b["Date & Time"] > a["Date & Time"] ? 1 : -1));
+
+      const ts  = new Date().toISOString().slice(0,10);
+      const fname = isGlobalAdmin
+        ? `cafe-bloom-sales-all-${ts}.csv`
+        : `cafe-bloom-sales-${branchId}-${ts}.csv`;
+
+      exportCSV(rows, fname);
+
+      setExportLog([
+        `✅ Export Sales រួចហើយ!`,
+        `📊 ${rows.length} orders | ${isGlobalAdmin?(branchList||[]).length+" branches":"branch "+getBName(branchId)}`,
+        `💾 File: ${fname}`,
+        `💡 បើក Excel → Data → From Text/CSV → UTF-8`,
+      ]);
+    } catch(e) {
+      setExportLog([`❌ ${e.message}`]);
+    }
+    setExportingSales(false);
+  };
+
+  // ── Export Inventory CSV ──────────────────────────────────────────
+  // Global admin: fetches all branches via /api/all-stock
+  // Branch user : uses local ings prop
+  const doExportInventory = async () => {
+    setExportingInv(true); setExportLog(["⏳ កំពុងទាញ stock data..."]);
+    try {
+      let rows = [];
+
+      if (isGlobalAdmin) {
+        const token = localStorage.getItem("pos_token");
+        const r = await fetch(`${CLOUD_URL}/api/all-stock`, {
+          headers: { "Content-Type":"application/json","ngrok-skip-browser-warning":"true",...(token?{Authorization:"Bearer "+token}:{}) }
+        });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const allStock = await r.json(); // { branch_id: { branch_name, ingredients: [...] } }
+        for (const [bid, bd] of Object.entries(allStock)) {
+          for (const ing of (bd.ingredients||[])) {
+            const stock   = Number(ing.current_stock||0);
+            const thresh  = Number(ing.threshold||0);
+            const status  = stock <= 0 ? "❌ អស់" : thresh > 0 && stock <= thresh ? "⚠️ ជិតអស់" : "✅ ធម្មតា";
+            rows.push({
+              "Branch":              bd.branch_name || bid,
+              "Ingredient ID":       ing.ingredient_id,
+              "Ingredient Name":     ing.ingredient_name||"",
+              "Current Stock":       stock.toFixed(1),
+              "Unit":                ing.unit||"",
+              "Threshold":           thresh.toFixed(1),
+              "Status":              status,
+              "Last Updated":        ing._ts ? new Date(ing._ts).toLocaleString("km-KH") : "",
+            });
+          }
+        }
+      } else {
+        for (const ing of (ings||[])) {
+          const stock  = Number(ing.current_stock||0);
+          const thresh = Number(ing.threshold||0);
+          const status = stock <= 0 ? "❌ អស់" : thresh > 0 && stock <= thresh ? "⚠️ ជិតអស់" : "✅ ធម្មតា";
+          rows.push({
+            "Branch":          getBName(branchId),
+            "Ingredient ID":   ing.ingredient_id,
+            "Ingredient Name": ing.ingredient_name||"",
+            "Current Stock":   stock.toFixed(1),
+            "Unit":            ing.unit||"",
+            "Threshold":       thresh.toFixed(1),
+            "Status":          status,
+            "Last Updated":    ing._ts ? new Date(ing._ts).toLocaleString("km-KH") : "",
+          });
+        }
+      }
+
+      if (!rows.length) {
+        setExportLog(["⚠️ មិនមាន stock data ទេ"]); setExportingInv(false); return;
+      }
+
+      const ts    = new Date().toISOString().slice(0,10);
+      const fname = isGlobalAdmin
+        ? `cafe-bloom-inventory-all-${ts}.csv`
+        : `cafe-bloom-inventory-${branchId}-${ts}.csv`;
+
+      exportCSV(rows, fname);
+
+      const lowCount = rows.filter(r => r["Status"].includes("⚠️") || r["Status"].includes("❌")).length;
+      setExportLog([
+        `✅ Export Inventory រួចហើយ!`,
+        `📦 ${rows.length} items | ${lowCount > 0 ? `⚠️ ${lowCount} ជិតអស់/អស់` : "✅ stock ធម្មតាទាំងអស់"}`,
+        `💾 File: ${fname}`,
+        `💡 បើក Excel → Data → From Text/CSV → UTF-8`,
+      ]);
+    } catch(e) {
+      setExportLog([`❌ ${e.message}`]);
+    }
+    setExportingInv(false);
+  };
   const doPgDumpBackup = async () => {
     setLoading(true); setProgress(["⏳ កំពុងស្នើ pg_dump ពី server..."]);
     try {
@@ -7647,6 +7809,88 @@ function BackupPage({ branchList, notify, setTheme }) {
         )}
       </div>
 
+      {/* ── Export CSV Section ── */}
+      <div style={{ background:"var(--bg-card)",border:"1px solid #27AE6033",borderRadius:14,padding:16,marginBottom:14 }}>
+        <div style={{ fontWeight:700,fontSize:14,color:"#27AE60",marginBottom:4 }}>📊 Export to CSV / Excel</div>
+        <div style={{ fontSize:12,color:"var(--text-dim)",marginBottom:14 }}>
+          ទាញ data ចេញជា CSV — បើក Excel បាន (Human Readable)
+          {isGlobalAdmin && <span style={{ marginLeft:6,fontSize:11,background:"#1A0A3A",color:"#C084FC",padding:"2px 8px",borderRadius:6 }}>⭐ All Branches</span>}
+        </div>
+
+        {/* Two export buttons */}
+        <div className="export-btn-row" style={{ marginBottom: exportLog.length ? 12 : 0 }}>
+
+          {/* Export Sales */}
+          <button onClick={doExportSales} disabled={exportingSales||exportingInv} style={{
+            flex:1,padding:"13px 8px",borderRadius:12,border:"1px solid #27AE6044",
+            background:exportingSales?"var(--bg-main)":"#27AE6011",
+            cursor:(exportingSales||exportingInv)?"not-allowed":"pointer",
+            fontFamily:"inherit",opacity:(exportingSales||exportingInv)?0.6:1,
+            textAlign:"left",
+          }}>
+            <div style={{ fontSize:20,marginBottom:4 }}>🧾</div>
+            <div style={{ fontWeight:700,fontSize:13,color:"#27AE60" }}>
+              {exportingSales ? "⏳ Exporting..." : "Export Sales"}
+            </div>
+            <div style={{ fontSize:11,color:"var(--text-dim)",marginTop:2,lineHeight:1.5 }}>
+              Orders ទាំងអស់<br/>Date, Branch, Items, Total, Payment…
+            </div>
+          </button>
+
+          {/* Export Inventory */}
+          <button onClick={doExportInventory} disabled={exportingSales||exportingInv} style={{
+            flex:1,padding:"13px 8px",borderRadius:12,border:"1px solid #5BA3E044",
+            background:exportingInv?"var(--bg-main)":"#5BA3E011",
+            cursor:(exportingSales||exportingInv)?"not-allowed":"pointer",
+            fontFamily:"inherit",opacity:(exportingSales||exportingInv)?0.6:1,
+            textAlign:"left",
+          }}>
+            <div style={{ fontSize:20,marginBottom:4 }}>📦</div>
+            <div style={{ fontWeight:700,fontSize:13,color:"#5BA3E0" }}>
+              {exportingInv ? "⏳ Exporting..." : "Export Inventory"}
+            </div>
+            <div style={{ fontSize:11,color:"var(--text-dim)",marginTop:2,lineHeight:1.5 }}>
+              ស្តុក​ទំនិញ​នៅ​សល់<br/>Name, Stock, Unit, Threshold, Status…
+            </div>
+          </button>
+        </div>
+
+        {/* Export log */}
+        {exportLog.length > 0 && (
+          <div style={{ display:"flex",flexDirection:"column",gap:3 }}>
+            {exportLog.map((m,i) => (
+              <div key={i} style={{
+                fontSize:12,
+                color: m.startsWith("✅") ? "#27AE60"
+                     : m.startsWith("❌") ? "#E74C3C"
+                     : m.startsWith("⚠️") ? "#F39C12"
+                     : m.startsWith("💡") ? "#5BA3E0"
+                     : "var(--text-dim)"
+              }}>{m}</div>
+            ))}
+            <button onClick={()=>setExportLog([])} style={{ alignSelf:"flex-start",marginTop:4,padding:"3px 10px",borderRadius:6,border:"1px solid var(--border-col)",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:11,color:"var(--text-dim)" }}>
+              ✕ Clear
+            </button>
+          </div>
+        )}
+
+        {/* Column guide */}
+        <div style={{ marginTop:14,borderTop:"1px solid var(--border-col)",paddingTop:10 }}>
+          <div style={{ fontSize:11,color:"var(--text-dim)",marginBottom:6,fontWeight:600 }}>📋 Columns ក្នុង Sales CSV:</div>
+          <div style={{ display:"flex",flexWrap:"wrap",gap:"4px 10px" }}>
+            {["Date & Time","Order ID","Branch","Items Summary","Subtotal ($)","Discount ($)","Total Amount ($)","Payment Method","Cashier","Status"].map(col => (
+              <span key={col} style={{ fontSize:10,background:"var(--bg-main)",color:"#E8A84B",padding:"2px 7px",borderRadius:5,border:"1px solid #E8A84B22" }}>{col}</span>
+            ))}
+          </div>
+          <div style={{ fontSize:11,color:"var(--text-dim)",marginTop:8,marginBottom:4,fontWeight:600 }}>📋 Columns ក្នុង Inventory CSV:</div>
+          <div style={{ display:"flex",flexWrap:"wrap",gap:"4px 10px" }}>
+            {["Branch","Ingredient ID","Ingredient Name","Current Stock","Unit","Threshold","Status","Last Updated"].map(col => (
+              <span key={col} style={{ fontSize:10,background:"var(--bg-main)",color:"#5BA3E0",padding:"2px 7px",borderRadius:5,border:"1px solid #5BA3E022" }}>{col}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Notes */}
       <div style={{ padding:14,background:"var(--bg-card)",border:"1px solid var(--border-col)",borderRadius:12,fontSize:12,color:"var(--text-dim)",lineHeight:1.9 }}>
         <div style={{ fontWeight:700,color:"var(--accent)",marginBottom:6 }}>📖 ការណែនាំ</div>
@@ -7714,7 +7958,7 @@ function SubTabs({ tabs, val, set }) {
 
 function TableWrap({ headers, children }) {
   return (
-    <div style={{ overflowX: "auto" }}>
+    <div className="tbl-wrap">
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
         <thead>
           <tr style={{ background: "var(--bg-header)" }}>
@@ -7803,15 +8047,46 @@ function Td({ children, mono, dim, bold, gold, style = {} }) {
 }
 
 const CSS = `
+  /* ═══════════════════════════════════════════════════════════════
+     CSS VARIABLES
+  ═══════════════════════════════════════════════════════════════ */
   :root {
     --bg-main: #09080A; --bg-card: #120F13; --bg-header: #0E0C0F;
     --accent: #E8A84B; --accent-dk: #B8732A;
     --text-main: #EDE8E1; --text-dim: #666666; --border-col: #1E1B1F;
     --border: #1E1B1F;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg-main); color: var(--text-main); }
 
+    /* Spacing scale */
+    --sp-xs:  4px;
+    --sp-sm:  8px;
+    --sp-md: 14px;
+    --sp-lg: 20px;
+    --sp-xl: 32px;
+
+    /* Page padding — shrinks on smaller screens */
+    --page-px: 20px;
+    --page-py: 20px;
+
+    /* TopBar height — used for sticky offset */
+    --topbar-h: 52px;
+
+    /* Product grid columns */
+    --prod-cols: 4;
+
+    /* Table/card grid */
+    --table-cols: 5;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     RESET
+  ═══════════════════════════════════════════════════════════════ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg-main); color: var(--text-main); }
+  img  { max-width: 100%; display: block; }
+
+  /* ═══════════════════════════════════════════════════════════════
+     TYPOGRAPHY / INPUTS
+  ═══════════════════════════════════════════════════════════════ */
   .inp {
     background: var(--bg-main); color: var(--text-main);
     border: 1px solid var(--border-col); border-radius: 8px;
@@ -7821,15 +8096,22 @@ const CSS = `
   }
   .inp:focus { border-color: var(--accent); }
 
+  /* ═══════════════════════════════════════════════════════════════
+   FIX 4 — TOUCH TARGETS (min 44×44 px, Apple HIG / WCAG 2.5.5)
+   All interactive elements guaranteed ≥44px tap area.
+  ═══════════════════════════════════════════════════════════════ */
   .btn-primary {
     background: var(--accent); color: #000; border: none;
     border-radius: 8px; padding: 10px 18px; font-weight: 700;
     cursor: pointer; font-size: 14px; width: 100%;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
     transition: opacity .2s;
+    /* Touch target */
+    min-height: 44px;
+    -webkit-tap-highlight-color: transparent;
   }
-  .btn-primary:hover { opacity: .85; }
-  .btn-primary:disabled { opacity: .5; cursor: default; }
+  .btn-primary:hover   { opacity: .85; }
+  .btn-primary:disabled{ opacity: .5; cursor: default; }
 
   .btn-sm {
     background: var(--bg-main); color: var(--text-main);
@@ -7837,6 +8119,15 @@ const CSS = `
     padding: 4px 10px; cursor: pointer; font-size: 12px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
     white-space: nowrap;
+    /* Touch target — use padding to reach 44px without changing visual size */
+    min-height: 32px;
+    position: relative;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Invisible tap-area extension (pseudo-element trick) */
+  .btn-sm::after {
+    content: ''; position: absolute;
+    inset: -6px;           /* expands clickable area by 6px each side */
   }
   .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -7844,8 +8135,9 @@ const CSS = `
     background: var(--bg-main); color: var(--text-dim);
     border: 1px solid var(--border-col); border-radius: 8px;
     padding: 6px 14px; cursor: pointer; font-size: 13px;
-    white-space: nowrap;
+    white-space: nowrap; min-height: 44px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
+    -webkit-tap-highlight-color: transparent;
   }
   .nav-btn.active, .nav-btn:hover { background: var(--accent); color: #000; border-color: var(--accent); }
 
@@ -7853,32 +8145,21 @@ const CSS = `
     background: var(--bg-card); color: var(--text-dim);
     border: 1px solid var(--border-col); border-radius: 20px;
     padding: 5px 14px; cursor: pointer; font-size: 13px;
-    white-space: nowrap;
+    white-space: nowrap; flex-shrink: 0;
+    min-height: 36px;    /* category pills — slightly smaller but still comfortable */
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
+    -webkit-tap-highlight-color: transparent;
   }
   .cat-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
-
-  .prod-card {
-    background: var(--bg-card); border: 1px solid var(--border-col);
-    border-radius: 12px; padding: 14px 10px;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    cursor: pointer; transition: border-color .2s, transform .15s;
-  }
-  .prod-card:hover { border-color: var(--accent); transform: scale(1.03); }
-
-  .table-card {
-    background: var(--bg-card); border: 2px solid var(--border-col);
-    border-radius: 12px; padding: 14px 10px;
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    cursor: pointer; transition: border-color .2s;
-  }
-  .table-card:hover { transform: scale(1.04); }
 
   .pay-btn {
     flex: 1; background: var(--bg-main); color: var(--text-dim);
     border: 1px solid var(--border-col); border-radius: 8px;
     padding: 6px 4px; cursor: pointer; font-size: 11px;
+    min-height: 44px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
+    transition: background .15s, color .15s;
+    -webkit-tap-highlight-color: transparent;
   }
   .pay-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
@@ -7886,32 +8167,57 @@ const CSS = `
     background: var(--bg-main); color: var(--text-dim);
     border: 1px solid var(--border-col); border-radius: 6px;
     padding: 5px 10px; cursor: pointer; font-size: 12px;
+    min-height: 36px;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
+    -webkit-tap-highlight-color: transparent;
   }
   .opt-btn.active { background: var(--accent); color: #000; border-color: var(--accent); }
 
-  .spinner {
-    width: 32px; height: 32px; border: 3px solid var(--border-col);
-    border-top-color: var(--accent); border-radius: 50%;
-    animation: spin .8s linear infinite;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  select.inp { cursor: pointer; }
-
-  /* ── Nav tabs (new style) ── */
+  /* ═══════════════════════════════════════════════════════════════
+     NAV TABS  (touch target + smooth scroll)
+  ═══════════════════════════════════════════════════════════════ */
   .nav-tab {
     display: flex; align-items: center; gap: 6px;
     background: transparent; color: var(--text-dim);
     border: none; border-bottom: 3px solid transparent;
     padding: 10px 16px; cursor: pointer; font-size: 13px;
-    white-space: nowrap; transition: all .18s;
+    white-space: nowrap; transition: color .18s, border-color .18s;
     font-family: 'Hanuman', 'Noto Sans Khmer', sans-serif;
+    flex-shrink: 0;
+    /* Touch target */
+    min-height: 44px;
+    -webkit-tap-highlight-color: transparent;
   }
-  .nav-tab:hover { color: var(--text-main); border-bottom-color: rgba(232,168,75,.4); }
+  .nav-tab:hover  { color: var(--text-main); border-bottom-color: rgba(232,168,75,.4); }
   .nav-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 700; }
 
-  /* ── Product image wrapper ── */
+  /* FIX 3 — SMOOTH SCROLL on nav tab bar */
+  .nav-tab-bar {
+    display: flex;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;   /* iOS momentum scroll */
+    scroll-behavior: smooth;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--border-col);
+    overscroll-behavior-x: contain;     /* prevent scroll chain to parent */
+  }
+  .nav-tab-bar::-webkit-scrollbar { display: none; }
+
+  /* ═══════════════════════════════════════════════════════════════
+     CARDS  (touch targets — prod-card & table-card)
+  ═══════════════════════════════════════════════════════════════ */
+  .prod-card {
+    background: var(--bg-card); border: 1px solid var(--border-col);
+    border-radius: 12px; padding: 12px 8px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    cursor: pointer; transition: border-color .2s, transform .15s;
+    /* Touch target: min height so small cards stay tappable */
+    min-height: 80px;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
+  }
+  .prod-card:hover { border-color: var(--accent); transform: scale(1.03); }
+
   .prod-img-wrap {
     width: 100%; aspect-ratio: 1 / 1;
     display: flex; align-items: center; justify-content: center;
@@ -7919,23 +8225,159 @@ const CSS = `
     overflow: hidden; margin-bottom: 2px;
   }
 
-  /* ── Responsive ── */
+  .table-card {
+    background: var(--bg-card); border: 2px solid var(--border-col);
+    border-radius: 12px; padding: 14px 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    cursor: pointer; transition: border-color .2s, transform .15s;
+    min-height: 80px;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none; -webkit-user-select: none;
+  }
+  .table-card:hover { transform: scale(1.04); }
+
+  /* ═══════════════════════════════════════════════════════════════
+   FIX 2 — PRODUCT GRID with minmax (fluid columns, no fixed col count)
+   Cards never smaller than 100px, max fills available space evenly.
+  ═══════════════════════════════════════════════════════════════ */
+  .prod-grid {
+    display: grid;
+    /* auto-fill: as many cols as fit; min 100px, max 1fr */
+    grid-template-columns: repeat(auto-fill, minmax(var(--prod-min, 110px), 1fr));
+    gap: 10px;
+    align-content: start;
+  }
+
+  /* Table/seats grid — same fluid approach */
+  .table-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--table-min, 130px), 1fr));
+    gap: 12px;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+   FIX 3 — SMOOTH SCROLL on all scrollable containers
+  ═══════════════════════════════════════════════════════════════ */
+  .tbl-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    overscroll-behavior-x: contain;
+  }
+  .tbl-wrap table { min-width: 560px; width: 100%; border-collapse: collapse; font-size: 13px; }
+  .tbl-wrap th, .tbl-wrap td { padding: 8px 10px; }
+
+  /* Scrollable list containers (orders list, ingredient list etc.) */
+  .scroll-y {
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    overscroll-behavior-y: contain;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     EXPORT BUTTONS (BackupPage)
+  ═══════════════════════════════════════════════════════════════ */
+  .export-btn-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     BACKUP / FORM CARDS
+  ═══════════════════════════════════════════════════════════════ */
+  .page-backup { padding: 20px 16px 40px; max-width: 600px; margin: 0 auto; }
+
+  /* ═══════════════════════════════════════════════════════════════
+     MODALS — full-width on mobile + smooth inner scroll
+  ═══════════════════════════════════════════════════════════════ */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.75);
+    z-index: 600; display: flex; align-items: center;
+    justify-content: center; padding: 16px;
+  }
+  .modal-box {
+    background: var(--bg-card); border-radius: 16px; padding: 24px;
+    width: 100%; max-width: 480px;
+    max-height: 90dvh;            /* FIX 5: dvh so modal doesn't hide behind mobile browser chrome */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+   FIX 5 — VIEWPORT HEIGHT  (100dvh > 100vh on mobile browsers)
+   dvh = Dynamic Viewport Height — accounts for browser chrome
+   (address bar, bottom nav bar).  Fallback chain for older browsers.
+  ═══════════════════════════════════════════════════════════════ */
+
+  /* App root: fills true visible screen height */
+  .app-root {
+    /* Step 1: legacy fallback */
+    height: 100vh;
+    /* Step 2: Safari iOS fill-available */
+    min-height: -webkit-fill-available;
+    /* Step 3: modern browsers — dvh wins */
+    height: 100dvh;
+  }
+
+  /* POS layout: same fallback chain */
+  .pos-layout {
+    display: flex; flex-direction: row;
+    flex: 1; overflow: hidden; min-height: 0;
+    /* Height fills remaining space after TopBar */
+    height: calc(100vh - var(--topbar-h, 52px));
+    height: calc(100dvh - var(--topbar-h, 52px));
+  }
+  .pos-menu {
+    flex: 1; display: flex; flex-direction: column;
+    overflow: hidden; min-height: 0;
+  }
+  .pos-cart {
+    width: 300px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden; min-height: 0;
+  }
+  .mobile-bottom-nav { display: none; }
+  .mobile-fab        { display: none; }
+
+  /* ═══════════════════════════════════════════════════════════════
+     TOPBAR
+  ═══════════════════════════════════════════════════════════════ */
+  .hamburger-btn  { display: none !important; }
+  .topbar-role    { display: inline; }
+  .topbar-name    { display: inline; }
+
+  /* FIX 4: Hamburger & topbar icon buttons — 44×44 touch target */
+  .hamburger-btn, .topbar-icon-btn {
+    min-width: 44px; min-height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     MISC
+  ═══════════════════════════════════════════════════════════════ */
+  .spinner {
+    width: 32px; height: 32px; border: 3px solid var(--border-col);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .8s linear infinite;
+  }
+  select.inp { cursor: pointer; }
   .page-pos-active { padding: 0 !important; }
 
-  /* Hide number input arrows */
+  /* Hide number input spinners */
   input[type=number]::-webkit-inner-spin-button,
   input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; }
 
-  /* Slide in animation for sidebar */
-  @keyframes slideInLeft {
-    from { transform: translateX(-100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-  }
-  @keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50%       { transform: scale(1.15); }
-  }
+  /* ═══════════════════════════════════════════════════════════════
+     KEYFRAMES
+  ═══════════════════════════════════════════════════════════════ */
+  @keyframes spin        { to { transform: rotate(360deg); } }
+  @keyframes slideInLeft { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  @keyframes pulse       { 0%,100% { transform: scale(1); } 50% { transform: scale(1.15); } }
   @keyframes shake {
     0%,100% { transform: translateX(0); }
     20%     { transform: translateX(-4px); }
@@ -7945,148 +8387,161 @@ const CSS = `
   }
   .stock-bell { animation: shake 0.6s ease 0s 3; }
 
-  /* Hamburger — hidden on desktop */
-  .hamburger-btn { display: none !important; }
-  .topbar-role { display: inline; }
-  .topbar-name { display: inline; }
+  /* ═══════════════════════════════════════════════════════════════
+     LIGHT MODE
+  ═══════════════════════════════════════════════════════════════ */
+  .light-mode .inp          { background:#fff !important; border-color:#DDD8D0 !important; color:#1A1510 !important; }
+  .light-mode .btn-sm       { background:#fff !important; border-color:#DDD8D0 !important; color:#555 !important; }
+  .light-mode [style*="#120F13"], .light-mode [style*="120F13"] { background:#fff !important; }
+  .light-mode .nav-tab-bar  { border-bottom-color:#DDD8D0 !important; }
+  .light-mode .pos-cart     { background:#FFFFFF !important; border-left-color:#DDD8D0 !important; }
+  .light-mode .prod-card    { color:#1A1510 !important; }
 
-  @media (max-width: 768px) {
-    /* Show hamburger, hide desktop nav */
-    .hamburger-btn { display: flex !important; }
-    .desktop-nav { display: none !important; }
-    .topbar-role { display: none !important; }
-    /* Keep TopBar truly sticky on mobile */
-    .app-root { overflow: hidden; }
-    .topbar-fixed {
-      position: sticky !important;
-      top: 0 !important;
-      z-index: 200 !important;
-      -webkit-position: sticky !important;
-    }
-    /* Hide name text inside user pill — keep only avatar */
-    .topbar-username { display: none !important; }
-    /* Show mobile stock bell */
-    #mobile-stock-bell { display: flex !important; }
-    /* Hide password, clear, logout buttons — use hamburger instead */
-    .topbar-hide-mobile { display: none !important; }
-    /* User pill: compact — avatar only */
-    .topbar-user-pill {
-      padding: 4px !important;
-      gap: 0 !important;
-      background: transparent !important;
-    }
-  }
-  @media (max-width: 640px) {
-    .nav-tab { padding: 8px 10px !important; font-size: 12px !important; }
-    .nav-label { display: none; }
-    /* Keep clock + status visible on mobile — show compact */
-    .topbar-clock { font-size: 11px !important; min-width: 50px !important; }
-    .topbar-status { padding: 3px 7px !important; }
-    .topbar-status span { display: none !important; } /* hide text, keep dot */
-  }
-  @media (max-width: 480px) {
-    .prod-card { padding: 8px !important; }
-  }
+  /* ═══════════════════════════════════════════════════════════════
+     PRINT
+  ═══════════════════════════════════════════════════════════════ */
   @media print {
     .no-print { display: none !important; }
     body { background: #fff !important; color: #000 !important; }
   }
 
-  /* ── Light Mode Global Overrides ── */
-  /* When bg-main is light, override hardcoded dark element colors */
-  .light-mode .inp {
-    background: #fff !important;
-    border-color: #DDD8D0 !important;
-    color: #1A1510 !important;
-  }
-  .light-mode .btn-sm {
-    background: #fff !important;
-    border-color: #DDD8D0 !important;
-    color: #555 !important;
-  }
-  /* Cards with hardcoded dark backgrounds */
-  .light-mode [style*="#120F13"],
-  .light-mode [style*="120F13"] {
-    background: #fff !important;
-  }
-  /* Nav tab bar */
-  .light-mode .nav-tab-bar {
-    border-bottom-color: #DDD8D0 !important;
-  }
-  /* POS cart */
-  .light-mode .pos-cart {
-    background: #FFFFFF !important;
-    border-left-color: #DDD8D0 !important;
-  }
-  /* Product cards text */
-  .light-mode .prod-card {
-    color: #1A1510 !important;
+  /* ═══════════════════════════════════════════════════════════════
+   FIX 1 — BREAKPOINTS with Media Queries
+   Strategy: Desktop-first, scaling DOWN gracefully.
+   Each breakpoint tightens spacing + adjusts grid minmax floor.
+  ═══════════════════════════════════════════════════════════════ */
+
+  /* ── ≤1024px  Laptop small / iPad landscape ─────────────────── */
+  @media (max-width: 1024px) {
+    :root {
+      --prod-min:  105px;   /* product card min width */
+      --table-min: 120px;
+      --page-px:    16px;
+    }
+    .pos-cart { width: 260px; }
   }
 
-  /* ── POS Layout (from old version) ── */
-  .pos-layout{display:flex;flex-direction:row;flex:1;overflow:hidden;height:100%;min-height:0}
-        .pos-menu{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0}
-        .pos-cart{width:300px;flex-shrink:0;display:flex;flex-direction:column;overflow:hidden;min-height:0}
-        .mobile-bottom-nav{display:none}
-        .mobile-fab{display:none}
+  /* ── ≤768px  iPad portrait / large phone landscape ──────────── */
+  @media (max-width: 768px) {
+    :root {
+      --prod-min:  100px;
+      --table-min: 110px;
+      --page-px:    12px;
+      --page-py:    14px;
+    }
 
-        /* Mobile ≤768px */
-        @media(max-width:768px){
-          .desktop-nav{display:none!important}
-          .mobile-spacer{display:block}
-          .hamburger-btn{display:flex!important}
-          .header-logo-text{display:block}
+    /* TopBar */
+    .hamburger-btn  { display: flex !important; }
+    .desktop-nav    { display: none !important; }
+    .topbar-role    { display: none !important; }
+    .topbar-username{ display: none !important; }
+    .topbar-hide-mobile { display: none !important; }
+    .topbar-user-pill { padding: 4px !important; gap: 0 !important; background: transparent !important; }
+    .topbar-fixed   { position: sticky !important; top: 0 !important; z-index: 200 !important; }
+    #mobile-stock-bell { display: flex !important; }
 
-          /* POS layout: menu full screen */
-          .pos-layout{flex-direction:column;position:relative;height:100%}
-          .pos-menu{flex:1;min-height:0}
-          .pos-cart{
-            position:fixed;bottom:0;left:0;right:0;
-            width:100%!important;max-height:72vh;
-            background:var(--bg-card);
-            border-top:2px solid var(--accent-dk)!important;
-            border-left:none!important;
-            z-index:100;
-            transform:translateY(105%);
-            transition:transform .28s cubic-bezier(.4,0,.2,1);
-            display:flex!important;flex-direction:column;overflow:hidden;
-          }
-          .pos-cart.cart-open{transform:translateY(0)}
+    /* Nav tabs */
+    .nav-tab   { padding: 9px 12px !important; min-height: 44px !important; }
+    .nav-label { display: none !important; }
 
-          /* Bottom nav */
-          .mobile-bottom-nav{
-            display:none;
-            position:fixed;bottom:0;left:0;right:0;
-            height:56px;
-            background:var(--bg-header);
-            border-top:1px solid var(--border);
-            z-index:200;
-          }
-          .mobile-bottom-nav button{
-            flex:1;border:none;background:transparent;
-            display:flex;flex-direction:column;align-items:center;
-            justify-content:center;gap:1px;
-            cursor:pointer;color:#444;
-            transition:color .15s;padding:0;
-          }
-          .mobile-bottom-nav button.active{color:#E8A84B}
-          .mobile-bottom-nav button.active span:first-child{
-            background:#B8732A22;border-radius:12px;padding:2px 12px;
-          }
+    /* POS — cart slides up from bottom */
+    .pos-layout {
+      flex-direction: column; position: relative;
+      /* FIX 5: dvh fallback for mobile browser chrome */
+      height: 100vh; height: 100dvh;
+    }
+    .pos-menu { flex: 1; min-height: 0; }
+    .pos-cart {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      width: 100% !important;
+      /* FIX 5: max 72% of DYNAMIC viewport (excludes browser chrome) */
+      max-height: 72vh; max-height: 72dvh;
+      background: var(--bg-card);
+      border-top: 2px solid var(--accent-dk) !important;
+      border-left: none !important;
+      z-index: 100;
+      transform: translateY(105%);
+      transition: transform .28s cubic-bezier(.4,0,.2,1);
+      display: flex !important; flex-direction: column; overflow: hidden;
+    }
+    .pos-cart.cart-open { transform: translateY(0); }
 
-          /* FAB cart button */
-          .mobile-fab{
-            display:flex!important;
-            align-items:center;justify-content:center;
-            position:fixed;bottom:14px;right:14px;
-            width:52px;height:52px;border-radius:50%;
-            border:none;cursor:pointer;
-            background:linear-gradient(135deg,#B8732A,#E8A84B);
-            box-shadow:0 4px 16px rgba(184,115,42,.55);
-            font-size:22px;z-index:150;
-          }
+    /* FIX 3: smooth scroll inside cart item list */
+    .pos-cart-items {
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      scroll-behavior: smooth;
+      overscroll-behavior-y: contain;
+    }
 
-          /* All pages padding for bottom nav */
-          main > div{padding-bottom:80px!important}
-        }
+    /* FAB — 52×52 already ≥44px ✓ */
+    .mobile-fab {
+      display: flex !important; align-items: center; justify-content: center;
+      position: fixed; bottom: 14px; right: 14px;
+      width: 52px; height: 52px; border-radius: 50%;
+      border: none; cursor: pointer;
+      background: linear-gradient(135deg,#B8732A,#E8A84B);
+      box-shadow: 0 4px 16px rgba(184,115,42,.55);
+      font-size: 22px; z-index: 150;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* Pages: bottom padding so FAB / cart doesn't cover content */
+    main > div { padding-bottom: 80px !important; }
+
+    .page-backup { max-width: 100%; }
+    .modal-box   { padding: 18px; }
+  }
+
+  /* ── ≤640px  Most phones landscape ──────────────────────────── */
+  @media (max-width: 640px) {
+    :root {
+      --prod-min:  95px;
+      --table-min: 100px;
+      --page-px:   10px;
+    }
+    .topbar-clock  { font-size: 11px !important; min-width: 50px !important; }
+    .topbar-status { padding: 3px 7px !important; }
+    .topbar-status span { display: none !important; }
+    .nav-tab   { padding: 8px 10px !important; }
+    .nav-label { display: none !important; }
+    .prod-card { padding: 10px 6px !important; border-radius: 10px; }
+  }
+
+  /* ── ≤480px  iPhone SE / Galaxy S portrait ───────────────────── */
+  @media (max-width: 480px) {
+    :root {
+      --prod-min:  90px;   /* 2–3 cards fit naturally */
+      --table-min: 90px;
+      --page-px:   10px;
+      --page-py:   10px;
+    }
+
+    .prod-card  { padding: 8px 4px !important; border-radius: 9px; }
+    .table-card { padding: 10px 6px !important; border-radius: 10px; }
+
+    /* Export buttons: 2-col → 1-col */
+    .export-btn-row { grid-template-columns: 1fr !important; }
+
+    /* Nav tab: tight but still 44px tall */
+    .nav-tab { padding: 7px 8px !important; font-size: 11px !important; gap: 2px !important; min-height: 44px !important; }
+
+    /* Modal: near edge-to-edge */
+    .modal-overlay { padding: 8px; }
+    .modal-box     { padding: 14px; border-radius: 12px; }
+
+    .inp       { font-size: 13px !important; padding: 7px 10px !important; }
+    .col-badge { font-size: 9px !important; padding: 1px 5px !important; }
+  }
+
+  /* ── ≤360px  Very small phones ───────────────────────────────── */
+  @media (max-width: 360px) {
+    :root {
+      --prod-min:  80px;
+      --table-min: 80px;
+    }
+    .nav-tab { padding: 6px 7px !important; }
+    .cat-btn { padding: 4px 10px !important; font-size: 12px !important; }
+    .prod-card { padding: 6px 3px !important; }
+  }
 `
