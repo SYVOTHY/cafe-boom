@@ -7203,6 +7203,98 @@ function RecForm({ data, prods, ings, onSave, onCancel }) {
 // ═══════════════════════════════════════════════════════════════════
 //  BACKUP PAGE
 // ═══════════════════════════════════════════════════════════════════
+
+// SHA-256 fingerprint for UI display (Web Crypto — no deps)
+async function sha256Hex(buffer) {
+  try {
+    const hashBuf = await crypto.subtle.digest("SHA-256", buffer);
+    return Array.from(new Uint8Array(hashBuf))
+      .map(b => b.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 16);
+  } catch { return null; }
+}
+
+// ── ConfirmRestoreModal: shows file info + signature badge ──────────
+function ConfirmRestoreModal({ file, onCancel, onConfirm }) {
+  const [fingerprint, setFingerprint] = useState(null);
+  const [hasCBSig,    setHasCBSig]    = useState(null);
+
+  const isPgFile = file?.name?.toLowerCase().endsWith(".sql");
+  const sizeLabel = file
+    ? file.size > 1024 * 1024
+      ? (file.size / 1024 / 1024).toFixed(2) + " MB"
+      : (file.size / 1024).toFixed(1) + " KB"
+    : "?";
+
+  useEffect(() => {
+    if (!file) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const buf  = await file.arrayBuffer();
+        if (cancelled) return;
+        const fp   = await sha256Hex(buf);
+        if (!cancelled) setFingerprint(fp);
+        const text = new TextDecoder().decode(new Uint8Array(buf, 0, Math.min(buf.byteLength, 1024)));
+        if (!cancelled) setHasCBSig(text.includes("CB-Signature:"));
+      } catch { if (!cancelled) { setFingerprint(null); setHasCBSig(false); } }
+    })();
+    return () => { cancelled = true; };
+  }, [file?.name, file?.size]);
+
+  if (!file) return null;
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,.80)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
+      <div style={{ background:"var(--bg-card)",border:"2px solid #E74C3C55",borderRadius:18,padding:24,maxWidth:420,width:"100%",boxShadow:"0 0 48px #E74C3C18" }}>
+        <div style={{ textAlign:"center",marginBottom:14 }}>
+          <div style={{ fontSize:40 }}>{isPgFile?"🗄️":"📦"}</div>
+          <div style={{ fontWeight:700,fontSize:17,color:"#E74C3C",marginTop:6 }}>បញ្ជាក់ Restore</div>
+          <div style={{ fontSize:11,color:"#888",marginTop:2 }}>សកម្មភាពនេះ overwrite ទិន្នន័យក្នុង Database</div>
+        </div>
+        {/* File info */}
+        <div style={{ background:"var(--bg-main)",borderRadius:12,padding:12,marginBottom:12,fontSize:12 }}>
+          <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+            <span style={{ color:"#888" }}>File</span>
+            <span style={{ fontWeight:700,color:"var(--text-main)",maxWidth:240,textAlign:"right",wordBreak:"break-all" }}>{file.name}</span>
+          </div>
+          <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+            <span style={{ color:"#888" }}>ទំហំ</span>
+            <span style={{ color:"var(--text-main)" }}>{sizeLabel}</span>
+          </div>
+          <div style={{ display:"flex",justifyContent:"space-between",marginBottom:6 }}>
+            <span style={{ color:"#888" }}>Format</span>
+            <span style={{ fontSize:11,background:isPgFile?"#0A1E3A":"#0A2A1A",color:isPgFile?"#5BA3E0":"#27AE60",padding:"2px 10px",borderRadius:8,fontWeight:700 }}>
+              {isPgFile?"pg_dump SQL":"JSON"}
+            </span>
+          </div>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+            <span style={{ color:"#888" }}>SHA-256</span>
+            <span style={{ fontFamily:"monospace",fontSize:11,color:fingerprint?"#E8A84B":"#555" }}>
+              {fingerprint?fingerprint+"…":"⏳ computing…"}
+            </span>
+          </div>
+        </div>
+        {/* CB-Signature badge */}
+        {hasCBSig !== null && (
+          <div style={{ fontSize:12,padding:"8px 12px",borderRadius:10,marginBottom:12,background:hasCBSig?"#0A2A1A":"#1A1A0A",border:`1px solid ${hasCBSig?"#27AE6033":"#E8A84B33"}`,color:hasCBSig?"#27AE60":"#E8A84B" }}>
+            {hasCBSig?"🔐 Cafe Bloom signature found — server will verify":"⚠️ គ្មាន signature — server validate statement-by-statement"}
+          </div>
+        )}
+        {/* Warning */}
+        <div style={{ fontSize:12,color:"#E74C3C",padding:"8px 12px",background:"#E74C3C11",borderRadius:8,marginBottom:18,lineHeight:1.7 }}>
+          ⚠️ ទិន្នន័យ <b>branches, shared_data, branch_data</b> នឹងត្រូវ overwrite<br/>
+          🛡️ Server validate SQL ជាមុន — statements ខុស reject ទាំងអស់
+        </div>
+        <div style={{ display:"flex",gap:10 }}>
+          <button onClick={onCancel} style={{ flex:1,padding:12,borderRadius:10,border:"1px solid var(--border-col)",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,color:"var(--text-dim)" }}>❌ បោះបង់</button>
+          <button onClick={onConfirm} style={{ flex:1,padding:12,borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:"linear-gradient(135deg,#7A1A1A,#E74C3C)",color:"#fff" }}>✅ យល់ព្រម Restore</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BackupPage({ branchList, notify, setTheme }) {
   const [loading,    setLoading]    = useState(false);
   const [restoring,  setRestoring]  = useState(false);
@@ -7317,32 +7409,74 @@ function BackupPage({ branchList, notify, setTheme }) {
 
   const doBackup = () => backupMode === "pgdump" ? doPgDumpBackup() : doJsonBackup();
 
-  // ── pg_dump restore ───────────────────────────────────────────────
+  // ── pg_dump restore (FormData upload + strict server validation) ─
   const doPgRestore = async (file) => {
     setConfirmFile(null); setRestoring(true); setRestoreLog([]);
-    setRestoreLog(p => [...p, `📂 ${file.name}  (${(file.size/1024).toFixed(1)} KB)`]);
-    setRestoreLog(p => [...p, `⏳ Uploading to server for psql restore...`]);
+
+    // 1. Client-side pre-validation
+    if (file.size > 100 * 1024 * 1024) {
+      setRestoreLog([`❌ File ធំពេក — ${(file.size/1024/1024).toFixed(1)} MB (max 100 MB)`]);
+      setRestoring(false); return;
+    }
+    if (!file.name.toLowerCase().endsWith(".sql")) {
+      setRestoreLog([`❌ ត្រូវការ file .sql ប៉ុណ្ណោះ (pg_dump format)`]);
+      setRestoring(false); return;
+    }
+
+    setRestoreLog([`📂 ${file.name}  (${(file.size/1024).toFixed(1)} KB)`]);
+
+    // 2. Magic-byte / header check (first 512 bytes)
+    try {
+      const peek = await file.slice(0, 512).text();
+      const first = peek.trimStart().slice(0, 6).toLowerCase();
+      const looksSQL = first.startsWith("--") || first.startsWith("set ") || first.startsWith("create") || first.startsWith("insert");
+      if (!looksSQL) {
+        setRestoreLog(p => [...p, `❌ File header មិនត្រូវគ្នានឹង SQL format — ប្រហែលជា binary ឬ file ខុស`]);
+        setRestoring(false); return;
+      }
+      const hasCBSig = peek.includes("CB-Signature:");
+      setRestoreLog(p => [...p, hasCBSig
+        ? `🔑 Cafe Bloom signature detected — server will verify`
+        : `⚠️ No CB-Signature — server will validate all statements`]);
+    } catch {}
+
+    // 3. Upload via FormData (browser sets Content-Type + boundary automatically)
+    setRestoreLog(p => [...p, `⏳ Uploading to server for validation & restore...`]);
     try {
       const token = localStorage.getItem("pos_token");
+      const formData = new FormData();
+      formData.append("sqlfile", file, file.name);
       const r = await fetch(`${CLOUD_URL}/api/db-restore`, {
         method: "POST",
         headers: {
-          "Content-Type":              "application/sql",
-          "ngrok-skip-browser-warning":"true",
+          "ngrok-skip-browser-warning": "true",
           ...(token ? { Authorization: "Bearer " + token } : {}),
+          // ⚠️ Do NOT set Content-Type here — browser sets it with boundary
         },
-        body: file,
+        body: formData,
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
-        setRestoreLog(p => [...p, `❌ ${d.error || "Restore failed"}`, d.detail ? `   ${d.detail}` : ""].filter(Boolean));
-        notify("❌ Restore failed", "error");
+        setRestoreLog(p => [
+          ...p,
+          `❌ ${d.error || "Restore failed (HTTP " + r.status + ")"}`,
+          ...(Array.isArray(d.violations) ? d.violations.map((v,i) => `   ${i+1}. ${v}`) : []),
+          ...(d.detail ? [`   Detail: ${d.detail}`] : []),
+          ...(d.hint   ? [`   💡 ${d.hint}`] : []),
+        ]);
+        notify("❌ Restore rejected by server", "error");
       } else {
-        setRestoreLog(p => [...p, `✅ ${d.message || "Restore complete!"}`]);
+        setRestoreLog(p => [
+          ...p,
+          d.verified ? `🔐 Signature verified — genuine Cafe Bloom backup` : `⚠️ Signature unverified — but all statements passed allowlist`,
+          `✅ ${d.message || "Restore complete!"}`,
+          ...(Array.isArray(d.errors) && d.errors.length > 0 ? d.errors.map(e=>`  ⚠️ ${e.stmt}: ${e.error}`) : []),
+          `🔄 Reload page to see updated data`,
+        ]);
         notify("✅ Restore រួចហើយ! Reload page");
       }
     } catch(e) {
-      setRestoreLog(p => [...p, `❌ ${e.message}`]);
+      setRestoreLog(p => [...p, `❌ Network error: ${e.message}`]);
       notify("❌ Restore failed: " + e.message, "error");
     }
     setRestoring(false);
@@ -7405,25 +7539,11 @@ function BackupPage({ branchList, notify, setTheme }) {
 
       {/* ── Confirm Modal ── */}
       {confirmFile && (
-        <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:16 }}>
-          <div style={{ background:"var(--bg-card)",border:"2px solid #E74C3C55",borderRadius:16,padding:24,maxWidth:400,width:"100%" }}>
-            <div style={{ fontSize:36,textAlign:"center",marginBottom:12 }}>{isPgFile?"🗄️":"📦"}</div>
-            <div style={{ fontWeight:700,fontSize:16,color:"#E74C3C",textAlign:"center",marginBottom:8 }}>បញ្ជាក់ Restore</div>
-            <div style={{ fontSize:13,color:"var(--text-dim)",textAlign:"center",marginBottom:6 }}>
-              File: <b style={{color:"var(--text-main)"}}>{confirmFile.name}</b>
-              <span style={{marginLeft:8,fontSize:11,background:isPgFile?"#1A2A3A":"#1A2A1A",color:isPgFile?"#5BA3E0":"#27AE60",padding:"2px 8px",borderRadius:8}}>
-                {isPgFile?"pg_dump SQL":"JSON"}
-              </span>
-            </div>
-            <div style={{ fontSize:12,color:"#E74C3C",textAlign:"center",marginBottom:20,padding:"8px 12px",background:"#E74C3C11",borderRadius:8 }}>
-              ⚠️ ទិន្នន័យបច្ចុប្បន្ន{isPgFile?" (Database ទាំងអស់)":""} នឹង <b>overwrite</b> — backup ជាមុន!
-            </div>
-            <div style={{ display:"flex",gap:10 }}>
-              <button onClick={()=>setConfirmFile(null)} style={{ flex:1,padding:12,borderRadius:10,border:"1px solid var(--border-col)",background:"transparent",cursor:"pointer",fontFamily:"inherit",fontSize:13,color:"var(--text-dim)" }}>❌ បោះបង់</button>
-              <button onClick={()=>doRestore(confirmFile)} style={{ flex:1,padding:12,borderRadius:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:700,background:"linear-gradient(135deg,#7A1A1A,#E74C3C)",color:"#fff" }}>✅ យល់ព្រម Restore</button>
-            </div>
-          </div>
-        </div>
+        <ConfirmRestoreModal
+          file={confirmFile}
+          onCancel={() => setConfirmFile(null)}
+          onConfirm={() => doRestore(confirmFile)}
+        />
       )}
 
       <div style={{ fontWeight:700,fontSize:20,color:"var(--accent)",marginBottom:6 }}>💾 Backup & Restore</div>
