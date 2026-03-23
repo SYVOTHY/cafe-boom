@@ -1195,26 +1195,33 @@ async function tgSend(text) {
 }
 
 async function tgNotifyOrder(rec, branchName) {
-  const method = rec.method === "cash" ? "\u{1F4B5} \u179F\u17B6\u1785\u17CB\u1794\u17D2\u179A\u17B6\u1780"
-    : rec.method === "qr" ? "\u{1F4F1} QR Code" : "\u{1F3E6} \u178A\u1793\u17B6\u1782\u17B6\u179A";
+  const method = rec.method === "cash" ? "💵 សាច់ប្រាក់"
+    : rec.method === "qr"   ? "📱 QR Code"
+    : "🏦 ធនាគារ";
+
   const itemLines = (rec.items || [])
-    .map(i => `  \u2022 ${i.emoji || "\u2615"} ${i.product_name} \xd7${i.qty}  =  $${(i.price * i.qty).toFixed(2)}`)
+    .map(i => `  • ${i.emoji || "☕"} ${i.product_name} ×${i.qty}  =  $${(i.price * i.qty).toFixed(2)}`)
     .join("\n");
+
+  const cashier  = rec.cashier || "—";
+  const location = rec.table ? `🪑 <b>តុ:</b> ${rec.table}` : `🥡 Take Away`;
+
   const text = [
-    `\u2615 <b>Cafe Bloom \u2014 \u1780\u17B6\u179A\u178F\u16B9\u178F\u17B6\u178F\u17CE\u1790\u17D2\u1798\u17B8!</b>`,
-    `\u{1FA96} <b>\u179F\u17B6\u1781\u17B6:</b> ${branchName}`,
+    `☕ <b>Cafe Bloom — ការទូទាត់ថ្មី!</b>`,
+    `🪖 <b>សាខា:</b> ${branchName}`,
+    `👤 <b>បុគ្គលិកលក់:</b> ${cashier}`,
     ``,
-    `\u{1F550} <b>\u1798\u17D2\u17A2\u1784:</b> ${rec.ts}`,
-    rec.table ? `\u{1FA91} <b>\u178F\u17BB:</b> ${rec.table}` : `\u{1F961} Take Away`,
+    `🕐 <b>ម៉ោង:</b> ${rec.ts}`,
+    location,
     ``,
-    `\u{1F4CB} <b>\u1798\u17BB\u1781\u1798\u17D2\u17A0\u16B4\u1794:</b>`,
+    `📋 <b>មុខម្ហូប:</b>`,
     itemLines,
     ``,
-    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-    `\u{1F4B0} <b>\u179F\u179A\u17BB\u1794:</b>  $${Number(rec.total).toFixed(2)}`,
-    `\u{1F3DB} <b>VAT 10%:</b>  $${Number(rec.tax).toFixed(2)}`,
-    `\u2705 <b>\u179F\u179A\u17BB\u1794\u179A\u17BD\u1798:</b>  <b>$${(Number(rec.total) + Number(rec.tax)).toFixed(2)}</b>`,
-    `\u{1F4B3} <b>\u179C\u17B7\u1792\u17B9\u178F\u16B9\u178F\u17B6\u178F\u17CB:</b> ${method}`,
+    `─────────────────`,
+    `💰 <b>សរុប:</b>  $${Number(rec.total).toFixed(2)}`,
+    `🏛 <b>VAT 10%:</b>  $${Number(rec.tax).toFixed(2)}`,
+    `✅ <b>សរុបរួម:</b>  <b>$${(Number(rec.total) + Number(rec.tax)).toFixed(2)}</b>`,
+    `💳 <b>វិធីទូទាត់:</b> ${method}`,
   ].join("\n");
   await tgSend(text);
 }
