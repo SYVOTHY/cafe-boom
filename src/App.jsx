@@ -339,8 +339,8 @@ const PERM_LABELS = {
   report:    { icon: "📊", label: "របាយការណ៍" },
   finance:   { icon: "💼", label: "ហិរញ្ញវត្ថុ" },
   inventory: { icon: "📦", label: "ស្តុក" },
-  users:     { icon: "👥", label: "អ្នកប្រើ" },
   branches:  { icon: "🏪", label: "សាខា" },
+  users:     { icon: "👥", label: "អ្នកប្រើ" },
   theme:     { icon: "🎨", label: "រចនាប័ទ្ម" },
   backup:    { icon: "💾", label: "Backup" },
 };
